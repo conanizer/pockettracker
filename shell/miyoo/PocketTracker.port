@@ -1,31 +1,18 @@
 #!/bin/sh
 # Standalone Ports Script Template
 #
-# PocketTracker's entry in Onion's ports list. Onion executes this file and it hands the work to
-# Onion's own standalone launcher, which resolves Games/PocketTracker/ and runs launch.sh inside it.
+# PocketTracker's entry in Onion's ports list: Onion's standalone launcher runs
+# Games/PocketTracker/launch.sh.
 #
-# ⚠️⚠️ THE WHOLE REASON THIS IS A PORT AND NOT AN APP-SHELF ENTRY: Onion records play time, launch
-# count and the Game Switcher's recent list only for what `check_is_game` in .tmp_update/runtime.sh
-# accepts, and that test is "the launch command names /mnt/SDCARD/Roms/". Anything started from
-# /mnt/SDCARD/App/ is recorded nowhere. It is the install path that decides, not a setting.
+# ⚠️ A port, not an App entry: Onion records play time and the recent list only for launch commands
+# under /mnt/SDCARD/Roms/. ⚠️ The file name is the name it stores; Onion renames the file `.notfound`
+# while the payload named below is missing.
 #
-# ⚠️ THE FILE NAME IS THE NAME THE TRACKER STORES, and `.port` is the extension Onion's ports system
-# lists (Emu/PORTS/config.json carries `"extlist": "port|miyoocmd"`). Onion's import script renames
-# this file to `.notfound` when it cannot find the payload named below, and back again when it can —
-# so a package that really carries its files stays visible without the user importing anything.
+# ⚠️ KillAudioserver stays 0 though the sound service must stop: Onion's launcher does not wait for the
+# chip to be released, and the app then closes straight back to the menu. launch.sh stops it and waits,
+# which it can only do if it is the one that stops it. PerformanceMode stays 0: never measured here.
 #
-# ⚠️⚠️ THE AUDIO HANDOVER FLAG BELOW STAYS 0 EVEN THOUGH THE SOUND SERVICE MUST BE STOPPED. Onion's
-# launcher stops it and continues in the same breath; the hardware releases the audio device a
-# fraction of a second later, and starting into that gap is exactly the "app closes straight back to
-# the menu" failure this port already had once. launch.sh stops it AND waits for the release — and
-# it can only do that if it is the one that stopped it, since its wait is skipped when it finds
-# nothing running to stop.
-#
-# ⚠️ The performance-governor flag stays 0 as well. Nothing has measured what it does to this app on
-# this hardware, and a packaging change is the wrong place to ship an unmeasured one.
-#
-# ⚠️ Every `Name=` line here is READ BY Onion's import script with a plain grep, first match wins.
-# A commented-out or example assignment anywhere in this file is picked up as the real one.
+# ⚠️ Onion's import script greps each `Name=` line, first match wins: no example assignment in a comment.
 
 # main configuration :
 GameName="PocketTracker"

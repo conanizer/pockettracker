@@ -7,30 +7,20 @@
 #     docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
 #     docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 #
-# ⚠️ Do NOT run this on the host toolchain just because the host HAS an aarch64 cross compiler.
-# It will build, link and produce a perfectly good ELF that no handheld can load. The container is
-# the glibc floor; see shell/Dockerfile.portmaster.
-#
-# ⚠️ Nothing here is filtered down to the word "error". Every command prints its own output. Four
-# separate sessions of this project have been burned by a build step that failed quietly and left a
-# stale artifact behind for the next step to "verify".
+# ⚠️ Never on the host's own cross compiler: it builds an ELF no handheld can load. The container is
+# the glibc floor (Dockerfile.portmaster).
+# ⚠️ Nothing is filtered: a step that fails quietly leaves a stale artifact for the next to "verify".
 set -euo pipefail
 
 SRC=${SRC:-/src}
 
-# ⚠️ THE SDL2 WE BUILD IS A LINK-TIME SDK AND IS NEVER SHIPPED. The port runs against the DEVICE's
-# libSDL2 — the copy its CFW patched for that hardware's display (KMSDRM) and audio (ALSA). Shipping
-# our own would shadow the one that actually knows the screen.
-#
-# So the version here is not "the newest that works", it is THE COMPATIBILITY FLOOR, and pinning it
-# low turns a claim into a guarantee: you cannot link a symbol that does not exist in the .so you
-# linked against, so if the shell ever reaches for a newer SDL API this build FAILS HERE, loudly, on
-# a dev box — instead of on a stranger's handheld as `undefined symbol`. 2.0.18 is the floor because
-# the shell calls SDL_GetTicks64(), which landed in exactly that release; everything else it needs is
-# 2.0.0-era. Raise this ONLY together with the requirement in shell/portmaster/README.md.
+# ⚠️ This SDL2 is only linked against, never shipped: the port runs on the device's own, patched by its
+# CFW for the display and audio. Its version is the floor the app supports — 2.0.18, the first with
+# SDL_GetTicks64() — so a newer API fails the link here, not on a handheld. Raise it only together with
+# shell/portmaster/README.md and SDL2_TAG in Dockerfile.linux.
 SDL2_TAG=${SDL2_TAG:-release-2.0.18}
 
-# Every Tier-1 CFW is at or above Ubuntu 20.04's glibc. This is asserted on the artifact below.
+# Every Tier-1 CFW has at least Ubuntu 20.04's glibc. Checked on the artifact below.
 GLIBC_MAX_ALLOWED=${GLIBC_MAX_ALLOWED:-2.31}
 
 SYSROOT=/usr/aarch64-linux-gnu
@@ -74,12 +64,9 @@ cmake --build "$BUILD"
 
 echo
 echo "############ 3/5  stage the package ############"
-# TWO layouts come out of this build, and they are not the same tree.
-#
-# $STAGE is the CATALOG REPO layout: exactly what gets copied into PortMaster-New's
-# `ports/pockettracker/`. Its five root files are the ones `tools/build_release.py` requires there
-# (port.json, README.md, screenshot.{png|jpg}, gameinfo.xml, the launch script) — a screenshot one
-# level down reads to that checker as a port with no screenshot at all.
+# Two layouts. $STAGE is the catalog's: what is copied into PortMaster-New's `ports/pockettracker/`,
+# with the five root files its `tools/build_release.py` wants there (a screenshot one level down reads
+# to it as none).
 #
 #   $STAGE/
 #   |- PocketTracker.sh
@@ -91,15 +78,9 @@ echo "############ 3/5  stage the package ############"
 #      |- pockettracker.aarch64
 #      `- licenses/
 #
-# The ZIP is a different shape, and which shape is not ours to pick: upstream's `build_port_zip()`
-# moves those four metadata files INTO the port directory, renames README.md to `<portname>.md`, and
-# leaves only the launch script at the root. Step 5 reproduces that transform, so the zip a tester
-# installs is the zip the catalog will later hand a user — and so `gameinfo.xml`'s
-# `./pockettracker/screenshot.png` resolves on the device, which is the same file the checker wanted
-# at the root. One file, two correct places, one transform between them.
-#
-# ⚠️ The two names must agree: the port directory and the binary's stem are both `pockettracker`
-# (lowercase, the catalog's rule), while the launch script is capitalised.
+# The zip is upstream's shape (step 5), so a tester installs what the catalog will hand a user.
+# ⚠️ The port directory and the binary's stem are both `pockettracker` (lowercase, the catalog's rule);
+# the launch script is capitalised.
 rm -rf "$OUT"
 mkdir -p "$STAGE/pockettracker/licenses"
 
@@ -109,30 +90,18 @@ cp "$SRC/shell/portmaster/gameinfo.xml"     "$STAGE/"
 cp "$SRC/shell/portmaster/README.md"        "$STAGE/"
 chmod +x "$STAGE/PocketTracker.sh"
 
-# The art. It is staged at the ROOT here because that is where the catalog checker looks; step 5 puts
-# it where `gameinfo.xml` points the CFW's game list (`<image>./pockettracker/screenshot.png`).
-# `port.json` names no image at all — the catalog picks up this file by name, the way the shipped
-# LittleGPTracker port does.
-#
-# ⚠️ It is the ANDROID capture, and that is deliberate rather than lazy: both frontends render the
-# same 640x480 design through the same 5x5 font, so it shows what the handheld actually draws. It is
-# 1280x960 — a 2x capture, so exactly 4:3 and comfortably over PortMaster's 640x480 floor — and it
-# shows the SONG screen mid-edit rather than a title card, which the porting guide asks for.
+# At the root for the catalog's checker; step 5 moves it where gameinfo.xml points the CFW's game list.
+# port.json names no image — the catalog finds it by name. Any platform's capture shows what the
+# handheld draws; it must be 4:3 and at least 640x480.
 cp "$SRC/docs/images/screenshot.png" "$STAGE/screenshot.png"
 
 cp "$BUILD/pockettracker-sdl" "$BIN"
 chmod +x "$BIN"
 aarch64-linux-gnu-strip "$BIN"
 
-# PocketTracker is GPL-3.0, and it statically links its decoders — so their notices ship with the
-# binary that contains them, not just with the source tree that built it. A missing one is a licence
-# breach in the artifact, which is the only thing a user ever receives.
-#
-# ⚠️ A vendored component can arrive with its own notice already missing — KissFFT's copyright banner
-# was stripped from the source it was copied from, and opusfile carries no COPYING at all despite
-# every one of its headers pointing at one. So `docs/licenses/THIRD-PARTY-NOTICES.md` is the single
-# source of truth, and reproduces the text inline where upstream gave us no file to ship. Add a
-# component there in the same commit that vendors it; the check further down enforces it.
+# The statically linked components' notices ship with the binary that contains them.
+# ⚠️ THIRD-PARTY-NOTICES.md is the one source: it carries the text inline where upstream ships no file
+# (KissFFT, opusfile). Add a component there with the commit that vendors it; step 4 checks.
 cp "$SRC/LICENSE"                                       "$STAGE/pockettracker/licenses/LICENSE"
 cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"          "$STAGE/pockettracker/licenses/"
 cp "$SRC/CREDITS.md"                                    "$STAGE/pockettracker/licenses/CREDITS.md"
@@ -140,10 +109,8 @@ cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/li
 cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
 
-# The OFL texts ship even though this package bundles no font file. THIRD-PARTY-NOTICES.md, which
-# does ship, cites them by path — a notices file pointing at a file that is not in the artifact
-# is the breach it exists to prevent. QuinqueFive's is owed regardless: the 5×5 UI font compiled
-# into the binary is adapted from it.
+# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
+# UI font compiled into the binary is adapted from QuinqueFive.
 cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"      "$STAGE/pockettracker/licenses/OFL-1.1-LiberationSans.txt"
 cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"         "$STAGE/pockettracker/licenses/OFL-1.1-QuinqueFive.txt"
 ls -1 "$STAGE/pockettracker/licenses/"
@@ -176,16 +143,9 @@ if [ -d "$STAGE/pockettracker/libs.aarch64" ]; then
     exit 1
 fi
 
-# --- the bug this port was rebuilt for --------------------------------------------------------
-# gptokeyb injects keyboard presses for the same physical buttons the shell already reads off the
-# pad, and its defaults disagree with the shell's keyboard map about what they mean (start=enter,
-# and Enter is the A button). It made START insert a chain and stopped playback from stopping.
-# The reasoning is in PocketTracker.sh; this is the guard that keeps it out of the artifact.
-#
-# ⚠️ Comments are STRIPPED before the match, and the first cut of this check forgot to: it grepped
-# the raw file, matched the very comment block that explains why gptokeyb must never run here, and
-# failed a build whose launch script was correct. A guard that cannot tell documentation from code
-# fires on the fix as readily as on the bug.
+# --- no gptokeyb ------------------------------------------------------------------------------
+# It would press keys for the buttons the app already reads off the pad (PocketTracker.sh says why).
+# ⚠️ Comments stripped first: the launch script's own comment names it.
 if sed 's/#.*//' "$STAGE/PocketTracker.sh" | grep -qi 'gptokeyb'; then
     echo "FAIL: PocketTracker.sh runs gptokeyb. Read the comment at the top of that file."
     exit 1
@@ -201,29 +161,19 @@ echo "debug instr.       : none"
 echo "SDL2 link floor    : $SDL2_TAG"
 
 # --- every statically linked component must have a notice -------------------------------------
-# ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE. The failure this
-# guards against already happened once: libraries were vendored and their notices were never added,
-# and no list-based check could have caught it, because the same commit that forgets the notice
-# forgets the list entry. So the vendor directory IS the list — add `native/vendor/foo/` and this
-# build fails until THIRD-PARTY-NOTICES.md names `foo`.
+# ⚠️ The vendor directory is the list: add `native/vendor/foo/` and this fails until
+# THIRD-PARTY-NOTICES.md names `foo`. A hand-kept list would be forgotten by the same commit.
 NOTICES="$STAGE/pockettracker/licenses/THIRD-PARTY-NOTICES.md"
 echo
 echo "licence notices:"
 MISSING=""
-# ⚠️ `basename`, not `ls -1`: some shells list directories with a trailing slash, and `dr_flac/`
-# then matches the PATH `native/vendor/dr_flac/` in this file's prose rather than the component
-# name — the check would pass without ever proving a notice exists. It did exactly that when first
-# written. Look at WHERE a check fires, not just whether it went green.
+# ⚠️ `basename`, not `ls -1`: a trailing slash makes `dr_flac/` match a path in the notices' prose
+# instead of the component's name, and the check passes on nothing.
 VENDORED=""
 for D in "$SRC"/native/vendor/*/; do VENDORED="$VENDORED $(basename "$D")"; done
-# The vendored tree, plus the three third-party components that live outside it.
-#
-# ⚠️ Since convergence C1 this list also contains SDL2, which THIS artifact does not ship: the
-# PortMaster zip links the device's own libSDL2 (see the SDL2_TAG floor above), and native/vendor/SDL2
-# exists for the Android build, which has to carry SDL in-tree because F-Droid compiles offline from
-# source. Over-inclusive on purpose — the question this loop asks is "is every vendored component
-# documented?", and the answer must be yes regardless of which artifact links which. THIRD-PARTY-NOTICES.md
-# is the file that then answers per artifact; it has a table for exactly this.
+# The vendored tree and the three components outside it — SDL2 included though this zip does not
+# ship it: the question is whether every vendored component is documented. The notices' table says
+# which artifact carries what.
 for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
     if grep -qi -- "$COMPONENT" "$NOTICES"; then
         echo "  ok      $COMPONENT"
@@ -240,11 +190,8 @@ fi
 
 echo
 echo "############ 5/5  zip (upstream's transform, not one of ours) ############"
-# `build_port_zip()` in PortMaster-New/tools/build_release.py: the port directory is copied verbatim,
-# the four root metadata files are moved INTO it, README.md becomes `<portname>.md`, and only the
-# launch script stays at the zip root. Mirrored here so the zip posted to a tester and the zip the
-# catalog builds from the same tree are the same artifact — otherwise the beta tests a layout no
-# user will ever install.
+# `build_port_zip()` in PortMaster-New/tools/build_release.py: the four root metadata files move INTO
+# the port directory, README.md becomes `<portname>.md`, only the launch script stays at the root.
 rm -rf "$ZIPROOT"
 mkdir -p "$ZIPROOT"
 cp -a "$STAGE/pockettracker"  "$ZIPROOT/"
@@ -257,14 +204,9 @@ ls -lh "$OUT/pockettracker.zip"
 unzip -l "$OUT/pockettracker.zip"
 
 # --- the transform, read back out of the zip --------------------------------------------------
-# Two ways it can go wrong, each failing for a reason the other cannot: harbourmaster runs the launch
-# script from the ZIP ROOT (it is an `items` entry), and the CFW's game list reads the screenshot at
-# the path gameinfo.xml names — one level down, which is where the checker did NOT want it. So the
-# same file being in the right place for one consumer says nothing about the other.
-#
-# ⚠️ Both `got`s are derived from the artifact, and both need `|| ...=0`: grep exits 1 on no match
-# and unzip exits 11 on a missing member, either of which kills the script under `set -euo pipefail`
-# before the FAIL line that would have named the problem.
+# harbourmaster runs the launch script from the zip root; the CFW reads the screenshot where
+# gameinfo.xml points. ⚠️ `|| …=0`: grep and unzip exit non-zero on a miss, and pipefail would end the
+# script before the FAIL line names it.
 echo
 SCRIPT_AT_ROOT=$(unzip -l "$OUT/pockettracker.zip" | grep -c ' PocketTracker\.sh$') || SCRIPT_AT_ROOT=0
 echo "launch script at zip root : $SCRIPT_AT_ROOT   (want 1)"
@@ -281,17 +223,12 @@ if [ "$IMG_BYTES" -lt 100 ]; then
     exit 1
 fi
 
-# ⚠️ READ THE LICENCES BACK OUT OF THE ZIP, not out of the staging dir. Everything above this line
-# inspected files that a broken `zip` step could still have failed to include — and the zip is what
-# ships. Same discipline as verifying the launch script's CR bytes out of the archive.
+# ⚠️ Out of the zip, not the staging folder: the zip is what ships.
 echo
 echo "licences, read back out of the zip:"
 for L in LICENSE THIRD-PARTY-NOTICES.md CREDITS.md libogg-COPYING libopus-COPYING \
          libopus-LICENSE_PLEASE_READ.txt OFL-1.1-LiberationSans.txt OFL-1.1-QuinqueFive.txt; do
-    # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
-    # unzip exit 11, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
-    # line below, so the package is rejected without ever naming the file that is missing. Absent and
-    # empty are the same verdict here, so they take the same path.
+    # ⚠️ `|| BYTES=0`, for the same reason: the FAIL line must name the file.
     BYTES=$(unzip -p "$OUT/pockettracker.zip" "pockettracker/licenses/$L" | wc -c) || BYTES=0
     echo "  $BYTES bytes   $L"
     if [ "$BYTES" -lt 100 ]; then

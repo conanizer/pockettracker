@@ -2,36 +2,12 @@
 #
 # PocketTracker - PortMaster launch script.
 #
-# =============================================================================================
-#  DO NOT ADD gptokeyb TO THIS FILE.
-# =============================================================================================
+# ⚠️ DO NOT ADD gptokeyb. The app reads the pad itself (and the keyboard), so gptokeyb's fake key
+# presses arrive beside the real ones and mean other buttons: START also becomes A (inserts a chain,
+# and playback will not stop), Y walks the cursor left, R1 holds SELECT, the stick moves the cursor.
+# It has no mode that injects nothing.
 #
-# It looks like an omission. Every other port has it. It is deliberate, and adding it back
-# reintroduces a bug that took a device session to find.
-#
-# gptokeyb exists to fake KEYBOARD presses for games that cannot read a gamepad. PocketTracker
-# reads the pad itself, through SDL's GameController API (shell/sdl/sdl-input.cpp), and it ALSO reads
-# the keyboard, because the same source builds the desktop dev binary. So with gptokeyb running,
-# every physical press arrives TWICE by two different paths - and gptokeyb's built-in defaults do
-# not agree with the app's keyboard map about what the buttons mean:
-#
-#     gptokeyb default   ->  sdl-input.cpp key_to_button  ->  what the user gets
-#     start = enter          SDLK_RETURN  -> Button::A        START also inserts a chain, AND
-#                                                             (A now counting as held) the !m.a
-#                                                             guard in main.cpp swallows START,
-#                                                             so playback will not stop
-#     y = a                  SDLK_a       -> DPAD_LEFT        Y also walks the cursor left
-#     r1 = leftshift         SDLK_LSHIFT  -> SELECT           R1 also holds SELECT, and R+DPAD is
-#                                                             the nav-grid gesture
-#     left_analog = wasd     w/a/s/d      -> the D-pad        a drifting stick moves the cursor
-#
-# The D-pad collision is invisible (SdlInput::press ignores a button already held, so the pad's
-# own DPAD_UP absorbs the injected Up), which is why only the START symptom was ever reported.
-# There is no gptokeyb mode that injects nothing - PortMaster's own docs confirm it - so the only
-# fix is not to run it.
-#
-# Quitting is the app's own job and always was: PROJECT -> EXIT (it asks first if the song is
-# dirty), and a SIGTERM from the launcher is caught and autosaved either way (Phase 3 S10).
+# Quitting is the app's own: PROJECT -> EXIT, and a SIGTERM from the launcher autosaves.
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
@@ -57,41 +33,18 @@ cd "$GAMEDIR"
 
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
-# The app's folders (Projects/ Samples/ Soundfonts/ Presets/ Renders/ Themes/) are created
-# under this root at boot rather than lazily, so a user can pull the SD card, put samples in, and
-# put it back. Keeping it under $GAMEDIR is what makes that reachable from a PC.
+# The app's folders, created at boot under $GAMEDIR so the card can be filled from a PC.
 export POCKETTRACKER_HOME="$GAMEDIR/data"
 
-# The shell opens SDL GameControllers, so the pad needs a mapping or SDL_IsGameController() is false
-# and nothing responds. There are TWO channels for that, and measuring on a Miyoo Flip (spruce) showed
-# which one is load-bearing:
-#
-#   - SDL_GAMECONTROLLERCONFIG_FILE, which PortMaster's control.txt exports (a path to its bundled
-#     gamecontrollerdb.txt). THIS is what maps the pad here, together with SDL's own built-in db.
-#   - SDL_GAMECONTROLLERCONFIG (a single inline mapping string), exported below from get_controls'
-#     $sdl_controllerconfig.
-#
-# ⚠️ On spruce that variable is EMPTY: get_controls() has its assignment commented out, so this export
-# is a no-op. It is kept anyway because it is harmless (an empty value adds no mapping) and other CFWs
-# DO populate it, and PortMaster's porting guide has ports export it. What it is NOT is "the thing that
-# makes the pad work" — the file channel is. Confirmed by the app's own boot log: a bare run reports
-# `controller: X360 Controller` (SDL's built-in name), while under the launcher it reports
-# `Xbox 360 Controller` (the name in PortMaster's db) — two names, so the file mapping is in force.
+# The pad's mapping comes from SDL_GAMECONTROLLERCONFIG_FILE, which control.txt exports. This inline
+# one is empty on some CFWs (spruce) and harmless there; others fill it, and the porting guide asks for it.
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 
-# No LD_LIBRARY_PATH and no libs.aarch64: this port deliberately links the DEVICE's libSDL2, which
-# is the copy patched for its display (KMSDRM) and audio (ALSA). Shipping our own would override
-# the one that knows the hardware. The binary needs SDL >= 2.0.18 (it calls SDL_GetTicks64); every
-# current Tier-1 CFW is well past that.
+# No LD_LIBRARY_PATH and no libs.aarch64: the port runs on the device's own SDL2 (2.0.18 or newer),
+# patched for its display and audio.
 
-# The zip ships the binary mode 0755, and harbourmaster preserves that when it installs from
-# autoinstall/. A hand-unzip is what loses it: Windows Explorer and the default 7-Zip extraction drop
-# the Unix mode word entirely, and the port then dies with "Permission denied" on a file that looks
-# perfectly present. Repaired here rather than documented, because by the time this script runs the
-# user has already done the copy. It cannot repair its own bit — that is what autoinstall is for.
-#
-# A no-op on the common case, and a failure on a vfat/exFAT card is expected and harmless: those
-# mounts have no permission bits and hand out +x by mount option.
+# An unzip on Windows drops the binary's +x, and the port then dies with "Permission denied".
+# Fails harmlessly on a vfat/exFAT card, which has no permission bits.
 chmod +x "$GAMEDIR/pockettracker.${DEVICE_ARCH}" 2>/dev/null || true
 
 pm_platform_helper "$GAMEDIR/pockettracker.${DEVICE_ARCH}"

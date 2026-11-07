@@ -9,15 +9,10 @@
 # ⚠️ A package for other people comes out of shell/Dockerfile.linux (the release workflow does);
 # a host build runs only on distros at least as new as the host.
 #
-# This is the DESKTOP x86-64 package. The handheld aarch64 one is shell/build-portmaster.sh, and the
-# two are deliberately different builds rather than one script with a flag — they disagree about the
-# thing that matters most, which is SDL2. The PortMaster package links against the DEVICE's libSDL2
-# (its CFW patched that copy for the hardware's display and audio); a desktop links whatever the
-# distro ships. Neither can stand in for the other.
+# The handheld package is shell/build-portmaster.sh: it links the device's patched SDL2, this one the
+# distribution's.
 #
-# ⚠️ Nothing here is filtered. Every command prints its own output — a build step that fails quietly
-# and leaves a stale artifact behind for the next step to "verify" is the failure this project has
-# been bitten by repeatedly.
+# ⚠️ Nothing is filtered: a step that fails quietly leaves a stale artifact for the next to "verify".
 set -euo pipefail
 
 SRC=${SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
@@ -26,8 +21,7 @@ OUT=$SRC/build/linux
 
 cd "$SRC"
 
-# The version is the APK's, read from the one place that holds it. A package whose name and a
-# CHANGELOG disagree is a support question nobody can answer, so it is read rather than passed in.
+# The APK's version, read from the one place that holds it.
 VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\(\.[0-9]*\)\{0,1\}\)".*/\1/p' app/build.gradle.kts | head -1)
 if [ -z "$VERSION" ]; then
     echo "FAIL: could not read versionName from app/build.gradle.kts"
@@ -41,11 +35,8 @@ mkdir -p "$STAGE"
 
 echo
 echo "############ 1/4  build ############"
-# CMAKE_BUILD_TYPE explicitly: shell/CMakeLists.txt warns that a Debug engine may not keep up with a
-# real-time audio callback, and an empty build type is not the same as Release.
-#
-# `tee` rather than a redirect, so the configure output still appears here in full — the log is read
-# below for the version line and nothing about the build is hidden to get it.
+# Release stated: an empty build type is not Release. `tee`, so the output shows in full and the log
+# is still there for the version check below.
 CONFIGURE_LOG=$BUILD/configure.log
 mkdir -p "$BUILD"
 cmake -S shell -B "$BUILD" -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$CONFIGURE_LOG"
@@ -59,14 +50,12 @@ fi
 
 echo
 echo "############ 2/4  check the ARTIFACT ############"
-# ⚠️ THE BINARY IS THE DISCRIMINATOR, NOT THE EXIT CODE. A green build over a stale executable is the
-# recurring failure here, so the checks below read the file that is about to be shipped.
+# ⚠️ The binary is the discriminator, not the exit code: a green build can sit over a stale executable.
 
 # (a) Newer than every source file, or the package ships code that is not this tree's.
 #
-# ⚠️ `-printf` and `sort`, not `xargs ls -t | head`: `head` closes the pipe, `ls` dies of SIGPIPE, and
-# under `set -e` the whole script exits at this line having printed nothing. A staleness check that
-# aborts the run is not a staleness check.
+# ⚠️ `-printf` and `sort`, not `ls -t | head`: `head` closing the pipe kills `ls`, and `set -e` then
+# ends the script here in silence.
 NEWEST_SRC=$(find "$SRC/native" "$SRC/shell" \
                   \( -name '*.cpp' -o -name '*.h' -o -name '*.c' \) \
                   -not -path '*/vendor/*' -not -path '*/build*/*' \
@@ -81,8 +70,7 @@ if [ "$NEWEST_SRC" -nt "$BIN" ]; then
 fi
 echo "binary is newer than the newest source file ($NEWEST_SRC)"
 
-# (b) It is a 64-bit x86 ELF and it is dynamically linked against SDL2 — which is what the README's
-#     dependency line promises, so it is asserted rather than assumed.
+# (b) A 64-bit x86 ELF, linked against SDL2 as the README promises.
 file "$BIN"
 if ! file "$BIN" | grep -q 'ELF 64-bit.*x86-64'; then
     echo "FAIL: $BIN is not an x86-64 ELF"
@@ -96,13 +84,7 @@ if ! ldd "$BIN" | grep -q 'libSDL2'; then
     exit 1
 fi
 
-# (c) CMake and this script must have read the SAME version out of app/build.gradle.kts.
-#
-# ⚠️ THIS IS NOT "ASK THE BINARY WHAT VERSION IT IS", AND THE DIFFERENCE MATTERS. The desktop ELF
-# carries no version string — only the Windows build compiles PT_VERSION into a resource — so a
-# `--version` check here would find nothing, report nothing and pass, which is a check that cannot
-# fail. What CAN be verified is the coupling that exists: shell/CMakeLists.txt parses the version out
-# of app/build.gradle.kts itself and announces it, so the two parsers are compared against each other.
+# (c) CMake and this script read the same version: CMake's own parse announces it at configure.
 CMAKE_VERSION_LINE=$(grep -F 'PocketTracker' "$CONFIGURE_LOG" | grep -F 'from app/build.gradle.kts' | head -1)
 if [ -z "$CMAKE_VERSION_LINE" ]; then
     echo "FAIL: shell/CMakeLists.txt did not announce a version — its parser or its message changed,"
@@ -117,8 +99,7 @@ fi
 
 echo
 echo "############ 3/4  stage ############"
-# ONE top-level folder: a tarball that unpacks a dozen loose files into someone's home directory is a
-# tarball they will lose. The binary is renamed on the way in — the build target is a developer name.
+# One top-level folder, so the tarball does not scatter files into a home directory.
 install -m 755 "$BIN" "$STAGE/PocketTracker"
 # The application-menu entry: the script writes a .desktop file pointing at wherever this folder is.
 install -m 755 "$SRC/shell/linux/install-desktop.sh" "$STAGE/install-desktop.sh"
@@ -129,19 +110,14 @@ cp "$SRC/LICENSE"                                  "$STAGE/licenses/LICENSE"
 cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"     "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
 cp "$SRC/CREDITS.md"                               "$STAGE/licenses/CREDITS.md"
 
-# libogg and libopus are BSD-3-Clause, whose binary-redistribution clause requires their conditions
-# and disclaimer to travel with the binary — and this tarball contains both. They come from the
-# VENDORED SOURCE THAT WAS COMPILED, not from a copy kept elsewhere in the repo, so the licence that
-# ships is the licence of the code that shipped, by construction. build-windows.ps1 and
-# build-portmaster.sh take them from the same place.
+# libogg and libopus are BSD-3-Clause: their notices travel with the binary. Taken from the vendored
+# source that was compiled, as build-windows.ps1 and build-portmaster.sh do.
 cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/licenses/libogg-COPYING"
 cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/licenses/libopus-LICENSE_PLEASE_READ.txt"
 
-# The OFL texts ship even though this package bundles no font file. THIRD-PARTY-NOTICES.md, which
-# does ship, cites them by path — a notices file pointing at a file that is not in the artifact
-# is the breach it exists to prevent. QuinqueFive's is owed regardless: the 5×5 UI font compiled
-# into the binary is adapted from it.
+# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
+# UI font compiled into the binary is adapted from QuinqueFive.
 cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"       "$STAGE/licenses/OFL-1.1-LiberationSans.txt"
 cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"          "$STAGE/licenses/OFL-1.1-QuinqueFive.txt"
 
@@ -183,19 +159,16 @@ TARBALL=$OUT/PocketTracker-$VERSION-linux-x64.tar.gz
 ls -lh "$TARBALL"
 tar tzf "$TARBALL"
 
-# ⚠️ EVERYTHING ABOVE INSPECTED THE STAGING DIRECTORY, AND THE TARBALL IS WHAT SHIPS. A broken
-# archive step would leave every check above green and the artifact empty, so the contents are read
-# back out of the finished file — sizes included, because a zero-byte member also extracts cleanly.
+# ⚠️ The checks above read the staging folder; the tarball is what ships. Read back out of it, sizes
+# included — an empty member extracts cleanly too.
 echo
 echo "read back out of the tarball:"
 for NEEDED in "PocketTracker" "README.txt" "install-desktop.sh" "pockettracker.png" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
               "licenses/CREDITS.md" "licenses/OFL-1.1-LiberationSans.txt" "licenses/OFL-1.1-QuinqueFive.txt" \
               "licenses/libogg-COPYING" "licenses/libopus-COPYING" \
               "licenses/libopus-LICENSE_PLEASE_READ.txt"; do
-    # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
-    # tar exit 2, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
-    # line below, with tar's own reason already swallowed by 2>/dev/null. The operator would get a
-    # bare exit 2 and no name. Absent and empty are the same verdict here, so they take the same path.
+    # ⚠️ `|| BYTES=0`: a missing member makes tar exit 2, and pipefail would end the script before the
+    # FAIL line names it.
     BYTES=$(tar xzOf "$TARBALL" "PocketTracker-$VERSION/$NEEDED" 2>/dev/null | wc -c) || BYTES=0
     echo "  $NEEDED: $BYTES bytes"
     if [ "$BYTES" -lt 100 ]; then

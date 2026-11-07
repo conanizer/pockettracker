@@ -2,49 +2,27 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("pockettracker")
 
-# The engine is C++17 (std::clamp, std::optional, structured bindings). Nothing declared that until
-# now: the Android build simply inherited C++17 from the NDK clang's default, so a host compiler with
-# an older default (MSVC → C++14) failed on <algorithm>'s std::clamp. State it, and require it.
+# Stated, not inherited: MSVC defaults to C++14.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Oboe is the ANDROID audio backend only (via Prefab). A desktop build provides its own
-# shell (SDL/ALSA/JACK) against processLiveBlock() and never sees this.
-#
-# (Until convergence C2 this read `if(PT_ANDROID_SHELL)` — a variable that existed so the A5 canary
-# could be an Android build WITHOUT the parts that need Gradle. C2 retired the canary, so the
-# distinction collapsed back to plain ANDROID and the indirection went with it.)
+# Android's audio backend. The desktop shells drive processLiveBlock() themselves.
 if(ANDROID)
     find_package(oboe REQUIRED CONFIG)
 endif()
 
 # ─── Vendored Opus decode stack (libogg + libopus + opusfile) ──────────────────────────────────
-# Native Opus decoding so .opus / Opus-in-Ogg samples don't depend on the device's MediaCodec, which
-# is broken or absent for Opus on several target ROMs (LineageOS + GammaOS both failed). Decode-only
-# in practice, and free: nothing references a symbol `opus_encoder.o` defines, so the linker never
-# pulls that member out of the archive at all. ⚠️ This is archive member SELECTION, not --gc-sections
-# — it needs no flags and happens on every toolchain, which is why the encoder is absent from the
-# desktop binary too (`opus_encode`: 0 symbols there). --gc-sections is a separate and much larger
-# win over the objects that WERE linked; shell/CMakeLists.txt measures it.
-# libogg/libopus build through
-# their own CMake (static, no programs/tests, float). opusfile has no CMake of its own, so it's built
-# here from just its file-decode sources: no http.c (no OpenSSL) and no config.h (HTTP compiles out).
+# Decoded natively: MediaCodec lacks Opus on several target ROMs. Decode only — nothing references the
+# encoder's objects, so the linker never takes them out of the archive. opusfile has no CMake of its
+# own: its file-decode sources only, no http.c (no OpenSSL), no config.h.
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
 
-# CMake 4 REMOVED compatibility with cmake_minimum_required(VERSION < 3.5) — it is a hard configure
-# error, not a warning — and the vendored codecs ask for less than that: libogg declares 2.8.12 and
-# libopus 3.1. CMAKE_POLICY_VERSION_MINIMUM raises the floor for exactly those projects that ask for
-# less, and touches nothing of ours (we declare 3.22.1), so it is scoped to the two lines below and
-# unset immediately after. CMake < 3.31 has never heard of the variable and ignores it.
-#
-# Why this hid for so long: the Android build uses the NDK's bundled CMake 3.22.1, which has no such
-# restriction, and neither does ubuntu-latest. It surfaced the moment tools/ started building the
-# engine — the windows-latest and macos-latest runners both ship CMake 4 today, and both went red.
-# Patching vendor/ would work equally well and be silently undone by the next vendor update.
+# ⚠️ CMake 4 refuses cmake_minimum_required(VERSION < 3.5), which libogg and libopus ask for. Raised for
+# those two only; an older CMake ignores the variable. A patch to vendor/ would be lost at the next update.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(vendor/ogg)
 add_subdirectory(vendor/opus)
@@ -62,78 +40,37 @@ target_include_directories(opusfile
 target_link_libraries(opusfile PUBLIC opus ogg)
 
 # ─── Vendored FAAD2 (AAC decode) ───────────────────────────────────────────────────────────────
-# minimp4 demuxes the ISO-BMFF container (.m4a/.mp4/.m4b/.mov/.3gp); FAAD2 decodes the AAC inside.
-# Together they replace Android's MediaCodec for container samples (audio-decoders.cpp decodeMp4File),
-# so the media layer is one C++ implementation with no platform branch. FAAD2 is built as an explicit
-# static-lib target — exactly as opusfile is — NOT through its own CMakeLists, so there is no
-# autotools/config.h generation step (F-Droid builds from source, and a generated build step is what
-# stalls that review). common.h guards its config.h include behind HAVE_CONFIG_H, which we never
-# define; the library uses its built-in defaults (floating-point, not FIXED_POINT — which is why
-# FAAD_FMT_FLOAT output is normalized [-1,1]). See native/vendor/faad2/PT-VENDORING.md.
-#
-# CONFIGURE_DEPENDS re-globs each build, so a revendor that adds/removes a .c is picked up without a
-# manual edit here — the file set is otherwise stable because the tree is version-pinned.
+# minimp4 demuxes .m4a/.mp4/.mov…, FAAD2 decodes the AAC inside. Built from its sources here, not through
+# its own CMake, so there is no generated config.h (F-Droid builds from source). Floating-point defaults:
+# FAAD_FMT_FLOAT output is [-1,1]. See vendor/faad2/PT-VENDORING.md. CONFIGURE_DEPENDS picks up the files
+# a revendor adds or removes.
 file(GLOB FAAD2_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/libfaad/*.c)
 add_library(faad2 STATIC ${FAAD2_SOURCES})
 target_include_directories(faad2
         PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/include
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/libfaad
 )
-# decoder.c #errors without it (used as the libfaad name string). FAAD2's own CMake injects it from
-# properties.json; we pin it to the vendored version — keep in sync with vendor/faad2/PT-VENDORING.md.
-#
-# ⚠️ HAVE_STDINT_H is load-bearing, not cosmetic. Without it common.h skips <stdint.h> and defines its
-# OWN `typedef unsigned long uint32_t` — which the NDK's sysroot (where <stdint.h> is pulled in anyway)
-# rejects as a redefinition of `unsigned int uint32_t`. MSVC happened not to include <stdint.h> in that
-# TU and so compiled without it, which is exactly why the NDK build is the one that catches this: the
-# platform nobody test-built is the one that is already broken. <stdint.h> is standard C99 and correct
-# on every toolchain we target, so define it unconditionally.
+# decoder.c #errors without PACKAGE_VERSION; keep it the vendored version (PT-VENDORING.md).
+# ⚠️ Without HAVE_STDINT_H common.h typedefs its own uint32_t, which the NDK rejects as a redefinition.
 target_compile_definitions(faad2 PRIVATE "PACKAGE_VERSION=\"2.11.2\"" HAVE_STDINT_H=1)
-# Vendored third-party C — silence its warnings (not ours to fix). As a separate target it does not
-# inherit the engine's -ffast-math; FAAD2 does its own float scaling and wants precise rounding.
+# Vendored: warnings off. Its own target, so it does not get the engine's -ffast-math either.
 if(MSVC)
     target_compile_options(faad2 PRIVATE /w)
 else()
     target_compile_options(faad2 PRIVATE -w)
 endif()
 
-# ─── Vendored SDL2 — the ANDROID build only (convergence plan C1) ──────────────────────────────
-#
-# Android is the one target that has to carry SDL in-tree, and it is F-Droid that decides that: their
-# builder compiles offline, from source, and rejects prebuilt binaries. So neither of the two ways
-# the shell gets SDL is available here — shell/CMakeLists.txt takes the SYSTEM libSDL2 when there is
-# one (mandatory on the PortMaster CFWs, whose SDL carries that hardware's display and audio patches)
-# and FetchContent's it otherwise, and FetchContent needs a network at configure time.
-#
-# ⚠️ Two SDL versions in one repo, deliberately, and it is not an inconsistency: the handhelds link
-# the DEVICE's SDL against a 2.0.18 compatibility floor, while Android BUNDLES its own and should
-# carry a current 2.x. Different linkage models, different version policies. native/vendor/SDL2 is
-# 2.30.9 and is documented in native/vendor/SDL2/PT-VENDORING.md; it is regenerated only by
-# native/vendor/revendor-sdl2.sh and must never be hand-edited.
-#
+# ─── Vendored SDL2 — Android only ──────────────────────────────────────────────────────────────
+# F-Droid builds offline and from source, so Android carries SDL in-tree; the desktop shells take the
+# system's or fetch it (shell/CMakeLists.txt). ⚠️ Two versions on purpose: the handhelds link the
+# device's SDL against a 2.0.18 floor, Android bundles a current 2.x. vendor/SDL2 is regenerated only
+# by vendor/revendor-sdl2.sh, never edited by hand.
 if(ANDROID)
-    # ─── The C/Java version lock, asserted at configure time ───────────────────────────────────
-    #
-    # SDL's Android support is half C and half Java, and the two halves are version-locked:
-    # SDLActivity.java hardcodes the version triple and, in its static initialiser, compares it
-    # against the C library's nativeGetVersion(), refusing to start on a mismatch with
-    # "SDL C/Java version mismatch". Upstream added that check because mixing the halves is a
-    # classic SDL-on-Android failure, and it presents as an inscrutable crash at init.
-    #
-    # ⚠️ But upstream's check fires on a DEVICE, at runtime, in front of a user. This one fires here,
-    # at configure time, on the two files themselves — and it is derived from the DATA rather than
-    # resting on whoever next bumps SDL remembering to copy both halves. (revendor-sdl2.sh copies
-    # them out of ONE clone, so the drift this catches is a hand-edit, which is exactly the case a
-    # habit would not catch.) The names differ across the seam on purpose — upstream calls the third
-    # component PATCHLEVEL in C and MICRO_VERSION in Java — so this cannot be a naive text compare.
+    # ⚠️ SDL's C and Java halves must be one version — SDLActivity refuses to start otherwise. Checked
+    # here, at configure time, instead of on a phone. C calls the third number PATCHLEVEL, Java MICRO_VERSION.
     set(SDL_VERSION_LOCK_H    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL2/include/SDL_version.h")
     set(SDL_VERSION_LOCK_JAVA "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL2/android/java/org/libsdl/app/SDLActivity.java")
-    # ⚠️ Without this the guard is checked only when something ELSE happens to force a reconfigure.
-    # CMake has no reason to depend on a .java file, and SDL_version.h is not in any target's source
-    # list either — so editing the exact two files this check exists to police would leave a cached
-    # configure in place and the check would simply not run. A guard that does not fire on the change
-    # it guards against is not a guard. (Found by trying to drive this red and noticing it stayed
-    # green: the negative control caught the control.)
+    # ⚠️ Neither file is a target's source: without this, editing one would not re-run the check.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
             "${SDL_VERSION_LOCK_H}" "${SDL_VERSION_LOCK_JAVA}")
     file(READ "${SDL_VERSION_LOCK_H}"    SDL_VERSION_H_TEXT)
@@ -152,8 +89,7 @@ if(ANDROID)
     set(SDL_J_PATCH "${CMAKE_MATCH_1}")
     set(SDL_C_VERSION    "${SDL_C_MAJOR}.${SDL_C_MINOR}.${SDL_C_PATCH}")
     set(SDL_JAVA_VERSION "${SDL_J_MAJOR}.${SDL_J_MINOR}.${SDL_J_PATCH}")
-    # An empty capture would make two blank strings compare EQUAL and the guard pass vacuously —
-    # the shape this project keeps paying for — so assert the parse landed before comparing it.
+    # Two failed parses would compare equal: check both landed first.
     if(NOT SDL_C_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
        NOT SDL_JAVA_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
         message(FATAL_ERROR
@@ -171,41 +107,30 @@ if(ANDROID)
     endif()
     message(STATUS "SDL2 ${SDL_C_VERSION} (vendored; C and Java halves agree)")
 
-    # Shared, not static: SDLActivity.java does System.loadLibrary("SDL2") and then calls JNI
-    # entry points that live inside it, so libSDL2.so has to exist as its own object in the APK.
+    # Shared: SDLActivity.java loads libSDL2.so by name and calls JNI entry points inside it.
     set(SDL_SHARED ON  CACHE BOOL "" FORCE)
     set(SDL_STATIC OFF CACHE BOOL "" FORCE)
     set(SDL_TEST   OFF CACHE BOOL "" FORCE)
 
-    # The same CMake-4 workaround the vendored codecs need, and for the same reason: SDL declares
-    # cmake_minimum_required(VERSION 3.0.0...3.5), which CMake 4 rejects outright. The APK builds
-    # with the NDK's bundled CMake 3.22.1 (pinned in app/build.gradle.kts) so this cannot bite
-    # today - it is here so that configuring native/ with a modern host CMake does not become the
-    # way somebody discovers it. See the long note above add_subdirectory(vendor/ogg).
+    # SDL asks for CMake 3.0 — the codecs' CMake 4 workaround above. The NDK's CMake 3.22.1 does not
+    # need it; a host CMake does.
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     add_subdirectory(vendor/SDL2)
     unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 
-# ─── Engine sources: portable core vs platform shell ───────────────────────────────────────────
-# ENGINE_CORE_SOURCES is the whole portable engine — no <oboe/*>, <android/*>, or <jni.h>
-# anywhere in it (logging goes through the audio-defs.h shim). A desktop/Linux build reuses
-# this list verbatim and supplies its own shell in place of ANDROID_PLATFORM_SOURCES.
+# ─── Engine sources ────────────────────────────────────────────────────────────────────────────
+# The portable engine: no <oboe/*>, <android/*> or <jni.h> (logging goes through audio-defs.h).
 # TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
 set(ENGINE_CORE_SOURCES
         songcore/schema-check.cpp
-        # The single definition of the file-open hook every layer above resolves against. It is a
-        # .cpp and not a header inline for a linkage reason byte_source.h states in full.
+        # The file-open hook, the RAM probe and the load progress: .cpps so a process holds one copy of
+        # each, not one per shared library (and <windows.h> stays out of the callers). See the headers.
         common/byte_source.cpp
-        # How much RAM the machine will actually give us. A .cpp for byte_source's linkage reason and
-        # to keep <windows.h> out of every TU that asks; see the header.
         common/platform_memory.cpp
-        # Where a slow load reports itself and where a cancel is read. A .cpp for platform_memory's
-        # linkage reason — one symbol, not one copy per shared library. See the header.
         common/load_progress.cpp
         soundfont-voice.cpp
-        # Reading a SoundFont's preset index without its samples, and writing a one-preset copy of
-        # it. Pure file-format handling over a FILE* — no tsf, no engine. See the header.
+        # A SoundFont's preset index, and a one-preset copy of it: file format only, no tsf.
         soundfont-trim.cpp
         sample-editor.cpp
         # One class, AudioEngine, over six files: the core, what the control thread sets, the sample
@@ -217,10 +142,8 @@ set(ENGINE_CORE_SOURCES
         engine-tables.cpp
         engine-mix.cpp
         transient-detector.cpp
-        # Native compressed-audio decoders. dr_mp3/dr_flac impl live inside audio-decoders.cpp;
-        # stb_vorbis and minimp4 each ship as a .c that must be its own translation unit (compiled as
-        # C) — minimp4's implementation defines short macros (ERROR/MALLOC/FREE) kept out of the
-        # shared audio-decoders.cpp TU. FAAD2 (the AAC decoder) is the separate faad2 target above.
+        # dr_mp3 and dr_flac are implemented inside audio-decoders.cpp. stb_vorbis and minimp4 are C files
+        # of their own; minimp4 defines ERROR/MALLOC/FREE, kept out of every other file. FAAD2 is above.
         audio-decoders.cpp
         vendor/stb_vorbis/stb_vorbis.c
         vendor/minimp4/minimp4_impl.c
@@ -256,10 +179,7 @@ set(ENGINE_CORE_SOURCES
         effects/soundpipe/pareq.c
 )
 
-# Android shell: the Oboe stream glue, and only that. Convergence Phase E deleted the JNI facade
-# (jni-bridge.cpp) and songcore's JNI shell (songcore-jni.cpp) along with the Kotlin UI they served —
-# there is no Kotlin left to call them. OboeAudioEngine is now constructed by the shared SDL shell's
-# android-main.cpp (it links this library), exactly as the desktop shell constructs SdlAudioEngine.
+# Android's audio: the Oboe stream, which android-main.cpp (pockettracker-sdl below) constructs.
 set(ANDROID_PLATFORM_SOURCES
         oboe-audio-engine.cpp
 )
@@ -267,21 +187,15 @@ set(ANDROID_PLATFORM_SOURCES
 if(ANDROID)
     add_library(pockettracker SHARED ${ENGINE_CORE_SOURCES} ${ANDROID_PLATFORM_SOURCES})
 else()
-    # Desktop consumers link the core as a static lib and provide their own shell/main.
+    # Desktop consumers link the core statically and bring their own shell.
     add_library(pockettracker STATIC ${ENGINE_CORE_SOURCES})
 endif()
 
 # ─── Compiler flags ────────────────────────────────────────────────────────────────────────────
-# Every flag below is GCC/Clang spelling, and the engine is now built by MSVC too (the host static
-# lib that tools/ptrender links — see the desktop branch above). cl.exe does not error on an unknown
-# `-f…`, it warns D9002 and IGNORES it, so an unguarded list would look fine and quietly do nothing.
-# Hence the explicit MSVC arm on each one.
-#
-# Warnings are on for OUR files on every compiler. The vendored sources compiled into this target
-# are silenced per file (their warnings are not ours to fix), and the vendored headers our TUs
-# include (tsf.h, stb_image.h, dr_mp3/dr_flac) are wrapped in a push/pop at the include.
-# PT_WERROR turns them into errors; CI sets it. ⚠️ Off by default on purpose: F-Droid builds the APK
-# itself, and a newer compiler's new warning must not fail a user's or a packager's build.
+# ⚠️ MSVC ignores an unknown `-f…` with a warning, so every GCC/Clang flag below has an MSVC arm.
+# Warnings are on for our files; vendored sources are silenced per file, vendored headers by a push/pop
+# at the include. ⚠️ PT_WERROR is off by default: F-Droid builds the APK itself, and a newer compiler's
+# new warning must not fail it. CI turns it on.
 option(PT_WERROR "Treat warnings in PocketTracker's own sources as errors" OFF)
 set(PT_VENDORED_ENGINE_SOURCES
         effects/soundpipe/pareq.c
@@ -296,16 +210,12 @@ set(PT_VENDORED_ENGINE_SOURCES
         effects/primitives/daisysp/balance.cpp
         effects/primitives/daisysp/reverbsc.cpp)
 if(MSVC)
-    # M_PI is not in MSVC's <cmath> without this — the engine uses it in the LFOs, the SOLA window
-    # and the FFT. (GCC/Clang expose it by default.) PUBLIC because sampler-voice.h uses M_PI in a
-    # header, so every desktop consumer that includes the engine needs the define too.
+    # M_PI. PUBLIC: sampler-voice.h uses it in a header.
     target_compile_definitions(pockettracker PUBLIC _USE_MATH_DEFINES)
-    # MSVC's default is already /fp:precise (no contraction, no reassociation) — state it anyway, so
-    # a future /fp:fast in a parent scope cannot silently change the DSP's rounding.
+    # MSVC's default already; stated so a parent scope's /fp:fast cannot change the DSP's rounding.
     target_compile_options(pockettracker PRIVATE /fp:precise)
 
-    # /W4 is gcc's -Wall -Wextra -Wshadow plus the int→float conversions. The two CRT defines drop
-    # MSVC's "use fopen_s / _fileno instead" notices, which are advice about Microsoft's API, not bugs.
+    # /W4 ≈ -Wall -Wextra -Wshadow. The CRT defines drop the "use fopen_s instead" advice.
     target_compile_options(pockettracker PRIVATE /W4 $<$<BOOL:${PT_WERROR}>:/WX>)
     target_compile_definitions(pockettracker PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
     set_source_files_properties(
@@ -315,63 +225,39 @@ if(MSVC)
             PROPERTIES COMPILE_OPTIONS "/W0"
     )
 else()
-    # -ffast-math here is a pure codegen optimisation (reassociation, no NaN/Inf special-casing)
-    # for the DSP-heavy TUs. It is NOT the denormal protection: that is
-    # setFlushToZeroForCurrentThread() in audio-engine.cpp, which sets the FP-environment
-    # FTZ/DAZ bits explicitly on every audio thread (a compile-only -ffast-math would not).
-    #
-    # ⚠️ The arch test, not an ANDROID test, on purpose — the Linux handhelds are arm and want the
-    # same speed. But it now also fires on an arm64 *host* (a macOS CI runner), so the DSP there is
-    # NOT bit-comparable with the x86-64 runners. Harmless for the trace goldens (songcore's own TU is
-    # IEEE-pinned below, and the engine never touches them) and harmless for ptrender's determinism
-    # check (same binary, twice) — but it is exactly why an audio golden cannot be a byte-exact
-    # cross-toolchain compare. See the S6b notes in docs/internal/order-of-work.md.
+    # -ffast-math is codegen only; the denormal protection is setFlushToZeroForCurrentThread(), armed
+    # per thread. ⚠️ An arch test, so the arm handhelds get it too — and so does an arm64 host (macOS
+    # CI), whose DSP is then not bit-equal to x86-64's: an audio golden cannot be a byte compare across
+    # toolchains.
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
         target_compile_options(pockettracker PRIVATE -ffast-math)
     endif ()
 
-    # The compressed-audio decoders are float-heavy (stb_vorbis's IMDCT especially). -ffast-math implies
-    # -ffinite-math-only, which can corrupt Vorbis decode/setup — so build the decoder TUs WITHOUT it
-    # (dr_mp3/dr_flac don't need it either; the perf delta on a one-shot file decode is negligible). The
-    # per-source flag is appended after the target's -ffast-math, so -fno-fast-math wins for these files.
+    # ⚠️ The decoders without it: -ffinite-math-only can corrupt a Vorbis decode. A file's flags come
+    # after the target's, so -fno-fast-math wins.
     set_source_files_properties(audio-decoders.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
-    # The two vendored decoders: the same flag, plus their warnings silenced (see -Wall below).
+    # The two vendored decoders: the same, and their warnings off.
     set_source_files_properties(
             vendor/stb_vorbis/stb_vorbis.c
             vendor/minimp4/minimp4_impl.c
             PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-w"
     )
 
-    # songcore's scheduling math is REQUIRED to be IEEE-exact (event-schema §5/§6: its float params are
-    # compared against the recorded goldens as raw binary32 BITS, so any reassociation — above all the fma
-    # contraction of `a + b*c` that aarch64 clang performs BY DEFAULT — changes the rounding and the trace
-    # stops matching). Convergence Phase E deleted songcore-jni.cpp, the TU that used to carry that flag
-    # pair here; no songcore scheduling math is instantiated in THIS library any more (ENGINE_CORE only
-    # includes songcore/schema-check.cpp, which is layout validation, not scheduling). The math now lives
-    # solely in the SDL shell's own TUs (app.cpp includes songcore/host.h), and pockettracker-sdl restates
-    # `-fno-fast-math -ffp-contract=off` for exactly that reason further down this file. The host tools do
-    # the same for their own TUs in tools/CMakeLists.txt.
+    # No sequencer math is compiled into this library; songcore, pt-ui and pockettracker-sdl, which
+    # compile it, pin IEEE rounding themselves.
 
-    # 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio
-    # engine too slow to test reliably on the Miyoo (the variant we test most). Force -O2 in Debug so
-    # debug builds run the engine at near-release speed; Release keeps -O3. (We debug via logcat, not
-    # native breakpoints, so the loss of -O0 debuggability is a non-issue here.) MSVC keeps CMake's
-    # own /Od-Debug, /O2-Release defaults: no real-time constraint applies to a host tool.
+    # -O2 in Debug: at -O0 the engine is too slow to run in real time on a handheld. MSVC keeps CMake's
+    # defaults — there it builds host tools only.
     target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
 
     target_compile_options(pockettracker PRIVATE -Wall -Wextra -Wshadow $<$<BOOL:${PT_WERROR}>:-Werror>)
     set_source_files_properties(${PT_VENDORED_ENGINE_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
-# freeverb3 is compiled for float samples, and names its own headers from the dragonfly/ root
-# (`#include "freeverb/utils.hpp"`, `#include "fv3_config.h"`). Both are scoped to those files, so
-# neither the define nor the extra root reaches the rest of the engine or anything that links it.
-#
-# ⚠️ DISABLE_UNDENORMAL compiles out freeverb's own per-filter denormal test (two float compares after
-# every filter, ~60 a sample in HALL). The engine's protection is flush-to-zero, armed on every thread
-# that runs DSP (`setFlushToZeroForCurrentThread`), so a host that runs these files on a thread of its
-# own must arm it too. That test also zeroed a NaN as a side effect: `DragonflyReverb::process` now
-# keeps one out at the door instead.
+# freeverb3: float samples, and headers named from the dragonfly/ root. Both scoped to these files.
+# ⚠️ DISABLE_UNDENORMAL drops freeverb's per-filter denormal test (~60 compares a sample in HALL), so a
+# thread that runs these files must arm flush-to-zero. That test also zeroed a NaN;
+# DragonflyReverb::process keeps one out at the door instead.
 file(GLOB PT_DRAGONFLY_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/freeverb/*.cpp)
@@ -381,20 +267,14 @@ set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES
 set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES COMPILE_OPTIONS
         $<IF:$<BOOL:${MSVC}>,/W0,-w>)   # vendored
 
-# Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
-#   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h).
-# PUBLIC, not PRIVATE: a desktop consumer (tools/ptrender, the future SDL shell) links this target and
-# must inherit the same include roots — otherwise it would have to restate them and could drift.
+# PUBLIC, so a consumer inherits the roots instead of restating them.
 target_include_directories(pockettracker PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/soundpipe
         ${CMAKE_CURRENT_SOURCE_DIR}/kissfft
 )
 
-# opusfile pulls in libopus + libogg (PUBLIC-linked) for native Opus decoding, and propagates the
-# opusfile.h include path. Oboe/android/log are Android-shell dependencies only — the core never
-# touches them. libm is required by tsf for math functions on Unix-likes; on Windows the CRT already
-# carries it and there is no `m.lib` to find, so asking for it fails the link.
+# libm for tsf on Unix-likes; Windows has no m.lib, and asking for one fails the link.
 target_link_libraries(pockettracker opusfile faad2)
 if(NOT WIN32)
     target_link_libraries(pockettracker m)
@@ -408,18 +288,17 @@ if(ANDROID)
 endif()
 
 # ─── songcore: the sequencer and the runtime that owns it ──────────────────────────────────────
-#
-# The rest of songcore is still header-only; these are the bodies of its two largest classes.
-# Static, so a tool that uses only the sequencer links only scheduler.cpp's object.
+# The bodies of its two largest classes; the rest is header-only. Static, so a tool that only
+# sequences links only scheduler.cpp's object.
 add_library(songcore STATIC
         songcore/scheduler.cpp
         songcore/host.cpp
 )
-# PUBLIC: host.h includes the engine's header and calls into it.
+# PUBLIC: host.h includes the engine's header.
 target_link_libraries(songcore PUBLIC pockettracker)
 
-# ⚠️ IEEE-exact, the rule stated at the `pockettracker` target: the sequencer's float params are
-# byte-compared against the goldens, and aarch64 clang fma-contracts `a + b*c` by default.
+# ⚠️ IEEE-exact: the traces compare the sequencer's float params bit for bit across x86 and aarch64,
+# and aarch64 clang fma-contracts `a + b*c` by default.
 if(MSVC)
     target_compile_options(songcore PRIVATE /fp:precise /W4 $<$<BOOL:${PT_WERROR}>:/WX>)
     target_compile_definitions(songcore PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
@@ -428,41 +307,13 @@ else()
     target_compile_options(songcore PRIVATE -Wall -Wextra -Wshadow $<$<BOOL:${PT_WERROR}>:-Werror>)
 endif()
 
-# ─── pt-ui: the portable UI (Linux-port plan Phase 3) ──────────────────────────────────────────
-#
-# The screen modules, the software canvas, the 5×5 font, the theme and the cursor-context system —
-# the C++ port of the Kotlin `ui/**` + `input/**` layer. It draws into a 640×480 ARGB framebuffer and
-# knows nothing about SDL, POSIX, a window or an audio device: the SHELL owns those and scales the
-# finished frame (ui/canvas.h). That is what makes `tools/ptshot` able to render a screen headlessly,
-# and it is the §12.8 obligation — "write the SDL UI as portable C++ with no Linux-isms, so that
-# 'Android on SDL' is a shell swap, not a rewrite".
-#
-# ⭐ UNCONDITIONAL since convergence phase C2 (2026-07-20). For the whole of the Linux port this
-# target was gated `if(NOT ANDROID)`, so that a UI still being written could not grow the APK by a
-# byte or break it in any way. That `if` was the one line standing between two UIs and one, and
-# deleting it is the convergence.
-#
-# ✅ **C3 GAVE THIS ARCHIVE A LINKER** — `pockettracker-sdl` at the bottom of this file. Android now
-# COMPILES pt-ui *and* SHIPS it, inside that .so.
-#
-# ⚠️⚠️ `assembleDebug` DOES NOT BUILD THIS TARGET, AND NO GATE IS WHAT STOPS IT.
-# Measured, not assumed: with the gate gone, `:app:externalNativeBuildDebug` printed BUILD SUCCESSFUL
-# and "5 actionable tasks: 5 executed" in 29 seconds having compiled pt-ui ZERO times. AGP fills the
-# `{LIST_OF_TARGETS_TO_BUILD}` placeholder in its ninja command with the targets it can PACKAGE — the
-# .so files — plus whatever ninja pulls in transitively; a static archive nothing links is never
-# named. The independent witness is `SDL2main`: libogg/libopus/libopusfile.a are all built (the
-# packaged libpockettracker.so links them) while libSDL2main.a has sat unbuilt since C1 for exactly
-# the same reason. So un-gating alone is a change that is real in the MODEL (pt-ui appears in
-# android_gradle_build.json with a declared libpt-ui.a output) and vacuous in the BUILD.
-#
-# The coverage therefore comes from CI naming the target explicitly, per ABI, against AGP's own
-# configure — .github/workflows/build.yml, "Compile pt-ui with the shipping NDK configuration".
-# ⚠️ Do NOT "fix" this by listing targets in app/build.gradle.kts's externalNativeBuild.cmake.targets:
-# that field is a WHITELIST, so it would work today and silently stop packaging the first .so a
-# future session forgets to add to it. Correctness that rests on every future site remembering is
-# already broken — the same rule this project keeps relearning. ✅ C3 removed the question the honest
-# way instead: pt-ui now has a real linker (`pockettracker-sdl`), so AGP builds it because it packages
-# the thing that needs it — no list to keep in sync.
+# ─── pt-ui: the portable UI ────────────────────────────────────────────────────────────────────
+# The screens, canvas, font, theme and input, drawn into a 640×480 ARGB framebuffer. No SDL, POSIX,
+# window or audio device: the shell owns those and scales the frame (ui/canvas.h), so a screen can
+# also be drawn headless.
+# ⚠️ AGP builds what it packages and what that links: pt-ui is built on Android because
+# pockettracker-sdl links it. Never list targets in build.gradle.kts's externalNativeBuild — that list
+# is a whitelist, and a .so left off it silently stops shipping.
 add_library(pt-ui STATIC
         ui/canvas.cpp
         ui/clipboard.cpp
@@ -528,48 +379,24 @@ add_library(pt-ui STATIC
         ui/modules/theme_editor.cpp
 )
 
-# ⚠️ std::filesystem needs a separate link library on gcc 8 and older — `stdc++fs`. It was folded
-# into libstdc++ proper in gcc 9. The CI runners are far newer (gcc 13, clang 18, MSVC), but a
-# PortMaster cross-toolchain can easily be gcc 8, and the failure mode is a wall of undefined
-# references at LINK time on a box the port author does not have.
-#
-# A compiler-version test, NOT a check_cxx_source_compiles probe: the probe does not inherit
-# CMAKE_CXX_STANDARD, so it compiles as C++14 on MSVC, fails to find <filesystem>, and concludes
-# that MSVC needs `stdc++fs` — a library that does not exist there. (Measured, not guessed: that is
-# exactly what the first version of this block did.)
+# ⚠️ gcc 8 and older keep std::filesystem in a separate stdc++fs; a cross-toolchain can be that old.
+# A version test, not a compile probe: the probe ignores CMAKE_CXX_STANDARD, compiles as C++14 on MSVC
+# and would ask for a stdc++fs that does not exist there.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
     target_link_libraries(pt-ui PUBLIC stdc++fs)
 endif()
 
-# PUBLIC: pt-ui's headers include songcore's (model.h, host.h), so anything linking pt-ui gets the
-# sequencer and the engine with it.
+# PUBLIC: pt-ui's headers include songcore's, so a consumer gets the sequencer and the engine with it.
 target_link_libraries(pt-ui PUBLIC songcore)
 
-# ui/std_filesystem.cpp asks Windows where `Documents` is — SHGetKnownFolderPath (shell32) and the
-# CoTaskMemFree that releases its result (ole32). Stated explicitly rather than inherited: CMake puts
-# both in MSVC's default CMAKE_CXX_STANDARD_LIBRARIES, so this line changes nothing there, but a
-# MinGW or clang-mingw build links neither by default and would fail with two undefined references
-# in a file whose Windows branch nothing else in the tree exercises.
+# std_filesystem.cpp asks Windows where `Documents` is (shell32, ole32). MSVC links both by default;
+# MinGW does not.
 if(WIN32)
     target_link_libraries(pt-ui PUBLIC shell32 ole32)
 endif()
 
-# IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
-# headers, and the rule stated above is that any TU which does must not have its math reassociated
-# or fma-contracted.
-#
-# ⚠️ S1..S7 carried this on the argument that "the UI does no float math worth the name today, but
-# the rule is what keeps that true after someone adds a meter". S8 IS THAT SOMEONE, and it turned
-# out to be load-bearing rather than prudent: the EQ editor's FREQ stepping advances until the
-# formatted READOUT changes (ui/modules/eq_editor.cpp), so `20 * 1000^(v/255)` and a "%.1f" of it
-# decide the value that ends up in the project — and that value is byte-compared against Kotlin's by
-# tools/ptinput, over all 256 of them. Reassociated math there is not a slightly different picture;
-# it is a red golden.
-#
-# ⚠️ On Android this is not merely inherited discipline: the APK build sets -ffast-math for
-# aarch64 on the `pockettracker` target above, and pt-ui is the other target that includes songcore
-# headers. Without these two flags the converged UI would compute its EQ readouts under different
-# rounding than the tools that certify them.
+# ⚠️ IEEE-exact, as songcore: it includes songcore's headers, and the EQ editor steps FREQ until the
+# formatted readout changes, so rounding decides the value stored in the project.
 if(MSVC)
     target_compile_options(pt-ui PRIVATE /fp:precise)
     target_compile_options(pt-ui PRIVATE /W4 $<$<BOOL:${PT_WERROR}>:/WX>)   # see the engine's note
@@ -579,26 +406,14 @@ else()
     target_compile_options(pt-ui PRIVATE -Wall -Wextra -Wshadow $<$<BOOL:${PT_WERROR}>:-Werror>)
 endif()
 
-# ─── The Android SDL app: pt-ui's first real linker (convergence C3) ───────────────────────────
-#
-# ⭐ **THIS TARGET IS WHAT MAKES C2 REAL.** C2 removed the `if(NOT ANDROID)` gate above and pt-ui
-# became an unconditional target — and nothing changed in the build, because AGP only names the
-# targets it can PACKAGE plus their transitive dependencies, and a static archive nothing links is
-# never compiled. The fix was never to whitelist targets (that is correctness resting on every
-# future session remembering, which this project has written down as broken by construction); it was
-# to give the archive a consumer that AGP has to build because it packages the result. That is this
-# `.so`, and pt-ui arrives inside it as an ordinary link-time dependency.
-#
-# ⚠️ **THIS LIBRARY IS THE APP**, on every build type — the manifest declares one activity and it is
-# an SDLActivity. `libpockettracker.so` above is the engine alone; it is a real DT_NEEDED of this one,
-# not a second app and not dead weight, which is why it is legitimately older than this after a build
-# that touched only the shell.
+# ─── The Android app ───────────────────────────────────────────────────────────────────────────
+# ⚠️ THIS LIBRARY IS THE APP, on every build type: the manifest's one activity is an SDLActivity.
+# libpockettracker.so is the engine alone, a real DT_NEEDED of this one, and legitimately older after a
+# build that touched only the shell.
 if(ANDROID)
     set(PT_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shell")
 
-    # app.cpp is the SHARED shell — the same boot sequence, frame loop and teardown the desktop runs,
-    # character for character. Only what is under shell/android/ is Android's; android-main.cpp is the
-    # twin of shell/main.cpp — set them side by side and the difference is the whole of the port.
+    # app.cpp is the shell the desktop runs too; android-main.cpp is shell/main.cpp's twin.
     add_library(pockettracker-sdl SHARED
             "${PT_SHELL_DIR}/app.cpp"
             "${PT_SHELL_DIR}/android/android-main.cpp"
@@ -626,37 +441,20 @@ if(ANDROID)
             "${PT_SHELL_DIR}/sdl/sdl-video.cpp"
     )
 
-    # Shell headers are included by their path from shell/ ("sdl/sdl-input.h"). The engine's and
-    # pt-ui's roots arrive PUBLIC through the link below, so this is the only path that has to be stated.
+    # Shell headers by their path from shell/; the engine's and pt-ui's roots come PUBLIC with the link.
     target_include_directories(pockettracker-sdl PRIVATE "${PT_SHELL_DIR}")
 
-    # app.cpp's boot banner, from the same parse the desktop and the Windows .rc use. On Android the
-    # log file is the only place a version can appear at all — there is no filename to read it off.
+    # The boot banner's version, from the parse the desktop and the Windows .rc use. On Android the log
+    # is the only place it shows.
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pt_version.cmake")
     target_compile_definitions(pockettracker-sdl PRIVATE "PT_VERSION_STRING=\"${PT_VERSION}\"")
 
-    # ─── IEEE-exactness: a CORRECTNESS requirement, and one this file was WARNED to restate ───────
-    #
-    # ⚠️⚠️ shell/CMakeLists.txt says, in as many words: "A future Android entry point linking app.cpp
-    # must restate it in ITS build." This is that entry point and this is that restatement.
-    #
-    # app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target. Its float
-    # params (velGain/volGain/pan, PSL/PBN/vibrato rates) are what the conformance traces compare as
-    # raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c` into an fma BY
-    # DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice. The `pockettracker`
-    # target above sets -ffast-math for aarch64, and without these two flags this target would inherit
-    # nothing to stop it: the converged Android app would sequence differently from the APK every
-    # golden was recorded against, on the exact architecture we ship to, and no test in the tree would
-    # say so. It would present as a song that plays subtly wrong only on a phone.
-    #
-    # PER-TARGET, never add_compile_options(): a directory-scope flag would countermand the ENGINE's
-    # own -ffast-math policy, which it is entitled to make for itself.
+    # ⚠️ IEEE-exact, as songcore: app.cpp includes songcore/host.h, so the sequencer is compiled here,
+    # beside the engine's aarch64 -ffast-math. Per target, never add_compile_options(): that would
+    # override the engine's own choice.
     target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
 
-    # pt-ui brings the engine and songcore with it (it links `songcore` PUBLIC), so this one line
-    # is the whole tracker. SDL2 is the vendored shared library from C1 — the same libSDL2.so
-    # SDLActivity.java loads by name, so there is exactly one copy in the APK and the C/Java version
-    # lock above governs it. `log` is android-main.cpp's own __android_log_print for the boot path,
-    # before the shell's console has anywhere to go.
+    # pt-ui brings songcore and the engine. SDL2 is the vendored shared library SDLActivity loads by
+    # name — one copy in the APK. `log` is android-main.cpp's logging before the console is up.
     target_link_libraries(pockettracker-sdl PRIVATE pt-ui SDL2 log android)
 endif()

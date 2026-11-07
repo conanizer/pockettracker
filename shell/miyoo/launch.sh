@@ -2,66 +2,38 @@
 #
 # PocketTracker — OnionOS (Miyoo Mini / Mini+) launch script.
 #
-# ⚠️ /bin/sh, NOT bash. OnionOS's userland is busybox ash; there is no bash on the device, and a
-# `#!/bin/bash` here is an app that does nothing at all when you press A on it.
+# ⚠️ /bin/sh: the device has busybox ash and no bash.
+# Run via PocketTracker.port -> Emu/PORTS/launch_standalone.sh, which already sets libs/ and clears
+# LD_PRELOAD; repeated here so the script also runs alone over SSH.
 #
-# ⚠️ IT IS NOT ONION THAT RUNS THIS DIRECTLY. The package installs as a PORT, so the chain is
-# Onion's ports launcher -> PocketTracker.port -> Emu/PORTS/launch_standalone.sh -> here. That
-# middle script already exports libs/ and clears LD_PRELOAD; both are repeated below so this file
-# still works when it is run on its own, which is how it is debugged over SSH.
-#
-# =============================================================================================
-#  This is NOT the PortMaster script and must not be made to look like one.
-# =============================================================================================
-#
-# The two differ on the one thing that matters most, and in OPPOSITE directions:
-#
-#   PortMaster   links the DEVICE's libSDL2 — the copy its CFW patched for that hardware — and
-#                deliberately sets no LD_LIBRARY_PATH.
-#   here         there IS no system libSDL2. Every Miyoo port carries the `mmiyoo` fork itself, so
-#                the libs/ directory beside this script is load-bearing rather than a mistake.
-#
-# The gptokeyb warning in the PortMaster script does not apply either: OnionOS has no gptokeyb.
-# ⚠️ The buttons arrive as a GAMEPAD, not as keys: the bundled SDL sends keys only to an app that
-# opens no controllers, and this one does.
+# ⚠️ Unlike PortMaster, the device has no SDL2 of its own: the `mmiyoo` fork in libs/ is the one.
+# ⚠️ The buttons arrive as a GAMEPAD, not keys: the bundled SDL sends keys only to an app that opens no
+# controllers.
 
 mydir=$(cd "$(dirname "$0")" && pwd)
 cd "$mydir" || exit 1
 
-# Everything this script and the app print, in one file, overwritten per launch — the run that just
-# went wrong is the one anybody wants. The app's own pockettracker-log.txt gets its lines too; this
-# file also has the script's.
+# The script's and the app's output, overwritten per launch.
 exec > "$mydir/log.txt" 2>&1
 
 echo "PocketTracker launch  $(date)"
 
 # ── The bundled SDL2 ─────────────────────────────────────────────────────────────────────────────
-# `mmiyoo` is SigmaStar MI GFX for video and MI AO for audio. Nothing here touches /dev/fb0, and
-# these three exports are the whole of the platform selection — every Miyoo port sets the same ones.
+# `mmiyoo`: the chip's own video and audio. These three exports are the whole platform choice.
 export LD_LIBRARY_PATH="$mydir/libs:$LD_LIBRARY_PATH"
 export SDL_VIDEODRIVER=mmiyoo
 export SDL_AUDIODRIVER=mmiyoo
 
 # ── Where songs live ─────────────────────────────────────────────────────────────────────────────
-# ⚠️⚠️ NOT this directory, and not because it could not be: this is where a user's work lives, and
-# the SD card's top level is the one place they can reach it. Plug the card into a PC and Projects/,
-# Samples/, Soundfonts/, Presets/, Renders/ and Themes/ are right there, rather than four levels
-# down inside a ports folder. The app creates them all at boot, so a card can be pulled, filled and
-# put back.
-#
-# ⚠️ IT IS ALSO AN UPGRADE PATH. This path is what the App-shelf package used, so a tester who
-# replaces that package with this one keeps every song they have written.
+# ⚠️ At the card's top level, not in the port's folder, so the user's work is easy to reach from a PC.
+# ⚠️ Also the older App package's path: replacing it keeps every song.
 PT_HOME=/mnt/SDCARD/PocketTracker
 export POCKETTRACKER_HOME="$PT_HOME"
 mkdir -p "$PT_HOME"
 
 # ── The Miyoo button map, seeded ONCE ─────────────────────────────────────────────────────────────
-# ⚠️⚠️ It has to land before the FIRST launch: the app seeds its own starter config.json when none
-# is present, and never rewrites the file after that. Without this one, L2/R2 do nothing and the
-# file names desktop keys this device never sends.
-#
-# ⚠️ It prints which branch it took. A copy that silently does nothing is exactly how a config file
-# looks applied and is not.
+# ⚠️ Before the first launch: otherwise the app writes its own desktop config.json and never rewrites
+# it, and L2/R2 do nothing. Each branch prints, so a failed copy cannot pass for an applied one.
 if [ -f "$PT_HOME/config.json" ]; then
     echo "config.json      : already present, left alone"
 elif cp "$mydir/miyoo-config.json" "$PT_HOME/config.json" 2>/dev/null; then
@@ -70,9 +42,8 @@ else
     echo "config.json      : SEED FAILED - the buttons will use the desktop map and will be wrong"
 fi
 
-# The same file again as config.example.json, on EVERY launch: a config.json seeded by an older
-# package never shows newer settings, and this is where the user finds them. The app does not write
-# this file on the Mini — its own template would name the desktop keys.
+# Refreshed as config.example.json on every launch, where newer settings show. The app writes no
+# example here: its own would name the desktop keys.
 if cp -f "$mydir/miyoo-config.json" "$PT_HOME/config.example.json" 2>/dev/null; then
     echo "config.example   : refreshed from miyoo-config.json"
 else
@@ -80,17 +51,10 @@ else
 fi
 
 # ── The demo song, seeded ONCE ────────────────────────────────────────────────────────────────────
-# Optional: `demo/` is only in a package built from a tree that had one, so the first branch below is
-# the normal public build rather than an error.
-#
-# ⚠️⚠️ GUARDED BY A MARKER, NOT BY "IS THE PROJECT THERE" — and the difference is the user's own
-# work. Seeding on a missing file would restore a demo they deleted on purpose, and worse, would
-# overwrite the copy of it they had spent an evening editing. The marker means the seed happens on a
-# fresh card and never again; wipe $PT_HOME and it seeds afresh, which is the recovery.
-#
-# ⚠️ `cp -r <dir> "$PT_HOME/"` per top-level folder, NOT a glob over the files: the sample names
-# contain spaces, and an unquoted glob hands `cp` "808" and "Bass.wav" as two arguments. Copying the
-# directories merges them into the ones the app makes, and carries any sub-folder with it.
+# Only in a package built from a tree that had `demo/`.
+# ⚠️ Guarded by a marker, not by "is the song there": that would bring back a deleted demo and
+# overwrite an edited one. Wiping $PT_HOME seeds it again.
+# ⚠️ Whole folders, not a file glob: the sample names contain spaces.
 DEMO_SEEDED="$PT_HOME/.demo-seeded"
 if [ ! -d "$mydir/demo" ]; then
     echo "demo song        : not in this package"
@@ -105,41 +69,18 @@ else
     if [ "$demo_ok" = 1 ] && touch "$DEMO_SEEDED" 2>/dev/null; then
         echo "demo song        : seeded into $PT_HOME"
     else
-        # Deliberately NOT marked seeded on a failure, so the next launch tries again. A part-copied
-        # demo is the one state worth retrying: a full card fails here and an emptied one recovers.
+        # Not marked, so the next launch tries again.
         echo "demo song        : SEED FAILED - the card may be full or read-only"
     fi
 fi
 
 # ── The audio device, taken back from Onion ───────────────────────────────────────────────────────
-# ⚠️⚠️ WITHOUT THIS THE APP EXITS DURING START-UP ON A REAL DEVICE, and it looks like a launcher
-# problem rather than an audio one: Onion runs a resident `audioserver` that holds the SigmaStar AO
-# device open and ENABLED, the chip will not let a second owner set the output attributes while it
-# is, and so MI_AO_SetPubAttr answers 0xa0052009 — module AO, "operation not permitted".
-# SDL_OpenAudioDevice then fails and shell/main.cpp treats no audio as fatal, which is the whole of
-# the "starts and closes again" report.
-#
-# This is Onion's own `KillAudioserver` flag from its ports collection, and the script below is what
-# implements it there: it stops the server AND re-applies the user's volume to whichever process
-# claims the device next — which is us. Prefer it over killing the process ourselves for exactly
-# that second half.
-#
-# ⚠️⚠️ THE PORT SHORTCUT LEAVES THAT FLAG OFF ON PURPOSE, so this block is the only thing doing
-# it. Onion's launcher stops the server and starts the app immediately; the wait below is what
-# that path is missing, and the wait only runs when this script is the one that found a server
-# to stop.
-#
-# ⚠️ NOTHING HERE PUTS THE SERVER BACK. Onion restarts it on the way to the menu (`start_audioserver`
-# in .tmp_update/runtime.sh), and a restart from here would take the device away from the app we are
-# about to hand it to. The volume KEYS are unaffected either way — Onion sets the level by ioctl
-# straight on /dev/mi_ao, which is below the server; what the server holds is the level itself, and
-# Onion's script is what carries that across to whoever takes the device next.
-#
-# ⚠️ `miyoodir` IS DEFAULTED FIRST, and it is not cosmetic. One branch of Onion's script restarts
-# `wpa_supplicant` and `udhcpc` from `$miyoodir/app/…` when it finds `libpadsp.so` preloaded into
-# them — with the variable unset it would kill the two and fail to start them again, and the
-# tester loses Wi-Fi until a reboot. Onion exports it from init_env.sh, so this only ever fires
-# where the environment did not reach us.
+# ⚠️ Without this the app closes during start-up: Onion's `audioserver` holds the audio device, the
+# chip refuses a second owner, and no audio is fatal. Onion's own stop script also carries the user's
+# volume over to the next owner, so it is preferred to a kill. The .port leaves Onion's flag off, so
+# this block (and its wait) is what stops it. Onion restarts the server on the way back to the menu.
+# ⚠️ `miyoodir` defaulted first: with it unset, one branch of Onion's script kills wpa_supplicant and
+# udhcpc and cannot restart them — no Wi-Fi until a reboot.
 : "${miyoodir:=/mnt/SDCARD/miyoo}"
 export miyoodir
 ONION_STOP_AUDIO=/mnt/SDCARD/.tmp_update/script/stop_audioserver.sh
@@ -149,9 +90,7 @@ if [ -f "$ONION_STOP_AUDIO" ]; then
     audio_stopped=1
     echo "audioserver      : stopped via Onion's stop_audioserver.sh"
 elif pgrep audioserver > /dev/null 2>&1; then
-    # No such script: not Onion, or an Onion older than it. The kill is the half that unblocks us;
-    # the volume the server was holding is NOT re-applied, so a quiet app on such a firmware is a
-    # known consequence rather than a mystery.
+    # Not Onion, or an older one: the kill frees the device, but the volume is not carried over.
     killall -q -9 audioserver audioserver.mod 2> /dev/null
     audio_stopped=1
     echo "audioserver      : killed directly (this firmware has no stop_audioserver.sh)"
@@ -159,11 +98,8 @@ else
     echo "audioserver      : not running"
 fi
 
-# ⚠️ THE RELEASE IS ASYNCHRONOUS. The driver only tears the AO device down when the dead process's
-# handle is closed, and asking a fraction of a second too early fails exactly as it did before, with
-# nothing on screen to say why. Bounded: a firmware that never releases it costs two seconds here
-# rather than hanging. `pgrep audioserver` matches the process NAME, so it does not see the shell
-# that stop_audioserver.sh leaves in the background re-applying the volume.
+# ⚠️ The release is asynchronous: opening a moment too early fails the same way. At most two seconds.
+# `pgrep` matches the process name, so the stop script's background volume shell does not count.
 if [ "$audio_stopped" = 1 ]; then
     waited=0
     while [ "$waited" -lt 10 ] && pgrep audioserver > /dev/null 2>&1; do
@@ -175,27 +111,18 @@ if [ "$audio_stopped" = 1 ]; then
     echo "audio handover   : waited ${waited}x0.2s, mi_ao node $MI_AO_NODE"
 fi
 
-# ⚠️ MainUI hands LD_PRELOAD=libpadsp.so down to what it launches — Miyoo's shim that routes an app's
-# audio calls into the server we have just stopped. Left set, it is a shim in front of nothing. The
-# app talks to the device itself, which is the point of the handover above.
+# MainUI's LD_PRELOAD routes audio into the server just stopped.
 unset LD_PRELOAD
 
-# A card unzipped on Windows arrives with no Unix mode bits, and the app then dies "Permission
-# denied" on a file that is plainly there. Harmless where the mount hands out +x anyway.
+# A card unzipped on Windows loses +x ("Permission denied"). Harmless where the mount grants it.
 chmod +x "$mydir/pockettracker" 2>/dev/null
 
 ./pockettracker
 rc=$?
 echo "exit code        : $rc"
 
-# ⚠️ A START-UP FAILURE ON THIS DEVICE IS A FLASH OF BLACK AND THE SHELF AGAIN — there is no console
-# and no window left to say anything in, and that is exactly what the first field report looked like
-# from the user's side. Onion's own message panel is the one screen still reachable from here, so a
-# failure names itself and points at the log instead of looking like the app "just closes".
-#
-# ⚠️ Its OWN LD_LIBRARY_PATH: the panel is a system binary and must not load the SDL2 we ship beside
-# this script. Guarded on the binary existing, output discarded, and the exit code stays the app's
-# either way — a firmware without the panel fails exactly as it did before.
+# A failed start is otherwise a flash of black and the menu again: Onion's message panel points at the log.
+# ⚠️ Its own LD_LIBRARY_PATH: the panel must not load our SDL2. The exit code stays the app's.
 INFO_PANEL=/mnt/SDCARD/.tmp_update/bin/infoPanel
 if [ "$rc" != 0 ] && [ -x "$INFO_PANEL" ]; then
     LD_LIBRARY_PATH="/mnt/SDCARD/miyoo/lib:/config/lib:/lib" "$INFO_PANEL" \

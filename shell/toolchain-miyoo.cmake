@@ -1,29 +1,21 @@
 # ─── Miyoo Mini / Mini+ (OnionOS) — the DEVICE toolchain ─────────────────────────────────────────
 #
-# ARM's 8.3-2019.03 arm-linux-gnueabihf with its own glibc 2.28 sysroot — the toolchain every Miyoo
-# Mini port is built with, so the glibc ceiling asserted in build-miyoo.sh is a reading, not a guess.
-#
-# ⚠️ IT IS NOT IN THE REPO AND IS NOT DOWNLOADED BY THIS FILE — 279 MB, from
-# `shauninman/miyoomini-toolchain-buildroot` releases. Point `MIYOO_TOOLCHAIN` at the directory that
-# has `bin/arm-linux-gnueabihf-gcc` under it:
+# ARM's 8.3-2019.03 arm-linux-gnueabihf with its glibc 2.28 sysroot — what every Miyoo Mini port is
+# built with. ⚠️ Not in the repo and not downloaded here (279 MB, `shauninman/miyoomini-toolchain-buildroot`
+# releases). Point `MIYOO_TOOLCHAIN` at the directory holding `bin/arm-linux-gnueabihf-gcc`:
 #
 #   cmake -S shell -B shell/build-miyoo -DCMAKE_BUILD_TYPE=Release \
 #         -DCMAKE_TOOLCHAIN_FILE=<abs>/shell/toolchain-miyoo.cmake \
 #         -DMIYOO_TOOLCHAIN=$HOME/pt-miyoo/tc/miyoomini-toolchain \
 #         -DSDL2_DIR=$HOME/pt-miyoo/sdk/lib/cmake/SDL2
 #
-# ⚠️ THE CPU IS NAMED, and it is not decoration. A bare armhf target is a VFPv3-D16 baseline with no
-# NEON, and vendored opus compiles its NEON intrinsics unconditionally once it sees ARM — 270
-# "inlining failed in call to always_inline vmlaq_f32: target specific option mismatch" errors, in
-# somebody else's code. The Mini is a SigmaStar SSD202D: a Cortex-A7 with NEON, so this is the real
-# target rather than a workaround.
+# ⚠️ The CPU is named: a bare armhf target has no NEON, and vendored opus compiles NEON intrinsics
+# whenever it sees ARM. The Mini's SSD202D is a Cortex-A7 with NEON.
 set(CMAKE_SYSTEM_NAME      Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 
-# ⚠️ WITHOUT THIS THE -D ON THE COMMAND LINE IS INVISIBLE HERE. CMake re-includes this file inside
-# every try_compile project it generates, and those start with an empty cache — so the compiler
-# check dies on the FATAL_ERROR below while the real configure line was perfectly correct. Naming
-# the variable is what carries it across.
+# ⚠️ Without this a -DMIYOO_TOOLCHAIN does not reach the try_compile projects, which re-include this
+# file with an empty cache, and the compiler check dies on the FATAL_ERROR below.
 list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES MIYOO_TOOLCHAIN)
 
 if(NOT MIYOO_TOOLCHAIN)
@@ -50,23 +42,17 @@ set(CMAKE_STRIP        "${MIYOO_PREFIX}strip")
 set(CMAKE_C_FLAGS_INIT   "-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard")
 set(CMAKE_CXX_FLAGS_INIT "-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard")
 
-# The compiler already knows this sysroot (it was configured --with-sysroot), so this is for CMake's
-# benefit: find_package/find_library must look there and nowhere else.
+# The compiler knows its sysroot already; this keeps CMake's find_* calls inside it.
 set(CMAKE_SYSROOT "${MIYOO_SYSROOT}")
 
-# ⚠️ THE SDL2 SDK IS ON THE FIND ROOT, NOT IN THE SYSROOT. The device's SDL2 is a fork with drivers
-# for this silicon (`mmiyoo`), it is not part of the toolchain, and — unlike every other handheld we
-# ship to — there is no system copy on the device either, so we bundle it. `SDL2_DIR` points at the
-# tiny package config beside the prebuilt .so; see build-miyoo.sh.
+# ⚠️ The SDL2 SDK is not in the sysroot: the Mini's SDL2 is a fork with drivers for its chip, the
+# device has no system copy, and we bundle it. `SDL2_DIR` names its package config (build-miyoo.sh).
 set(CMAKE_FIND_ROOT_PATH "${MIYOO_SYSROOT}")
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BEFORE)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 
-# ⚠️ The bundled libSDL2 has the SigmaStar vendor libraries (libmi_gfx, libmi_ao, libmi_sys…) as
-# DT_NEEDED, and those live on the DEVICE — nothing here has them. Without this the link fails on
-# "libmi_gfx.so, needed by libSDL2-2.0.so.0, not found" even though this binary references not one
-# symbol from them. It is the right relaxation and not a papering-over: the same undefined-symbol
-# check that would have caught a real mistake still runs against libSDL2 itself.
+# ⚠️ The bundled libSDL2 needs the chip vendor's libmi_* libraries, which only the device has. This binary
+# uses none of their symbols; the undefined-symbol check still runs against libSDL2 itself.
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-Wl,--allow-shlib-undefined")

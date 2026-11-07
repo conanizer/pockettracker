@@ -1,29 +1,19 @@
 # Build the Windows desktop package: build/windows/PocketTracker-<version>-windows-x64.zip
 #
-# Convergence plan A3. Run from the repo root, after building the shell:
+# Run from the repo root, after building the shell:
 #
 #     cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
 #     cmake --build shell/build --config Release
 #     powershell -ExecutionPolicy Bypass -File shell/build-windows.ps1
 #
-# This script PACKAGES, it does not build — unlike build-portmaster.sh, whose container owns its
-# whole toolchain. Here the compiler lives behind vcvars64.bat in whatever Visual Studio the machine
-# happens to have, and a packaging script that tried to find it would be guessing. It fails loudly
-# if the exe is missing or older than the sources instead.
-#
-# ⚠️ Nothing here is filtered down to the word "error". Every check prints what it actually found,
-# not a verdict — this project has been burned by a "PASS" printed by a check whose two inputs had
-# both failed and compared equal.
-#
-# ⚠️ SDL2 IS INSIDE THE EXE, and that is the difference from the PortMaster package that matters
-# most here. A handheld links the CFW's own libSDL2 and ships none; a Windows box has no system SDL
-# at all, so shell/CMakeLists.txt falls through to FetchContent and links it statically. That makes
-# this zip a binary distribution of SDL2 and puts its notice in the artifact — see the SDL2 section
-# of licenses/THIRD-PARTY-NOTICES.md, which said the opposite until this package existed.
+# It packages, it does not build: the compiler sits behind whatever Visual Studio the machine has. It
+# fails if the exe is missing or older than the sources.
+# ⚠️ Every check prints what it found, not just a verdict.
+# ⚠️ SDL2 is inside the exe: Windows has no system SDL, so it is fetched and linked statically, and
+# its notice ships in the zip.
 
 $ErrorActionPreference = 'Stop'
-# Both, and they are not interchangeable: ZipFile/ZipFileExtensions come from the FileSystem
-# assembly while ZipArchive/ZipArchiveMode come from System.IO.Compression itself.
+# Both: ZipFile/ZipFileExtensions are in the FileSystem assembly, ZipArchive/ZipArchiveMode in the other.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 
@@ -36,8 +26,7 @@ $stage = Join-Path $out  'stage'
 Write-Output ""
 Write-Output "############ 1/5  locate the build ############"
 
-# Both layouts, because the generator decides: ninja/make put the exe in the build root, while the
-# Visual Studio generators (the default on a bare windows-latest runner) put it in Release/.
+# Ninja puts the exe in the build root, the Visual Studio generators in Release/.
 $exe = @(
     (Join-Path $build 'pockettracker-sdl.exe'),
     (Join-Path $build 'Release\pockettracker-sdl.exe')
@@ -49,10 +38,7 @@ if (-not $exe) {
 Write-Output "exe: $exe"
 Write-Output ("     {0:N0} bytes, built {1}" -f (Get-Item $exe).Length, (Get-Item $exe).LastWriteTime)
 
-# ⚠️ STALENESS IS A HARD FAILURE, not a warning. Packaging an exe older than the code it claims to
-# be is the single most expensive mistake available in this repo — six separate sessions have been
-# burned by a stale artifact, and unlike those, this one would ship. Sources only (*.cpp/*.h/CMake),
-# so editing a README does not trip it.
+# ⚠️ A stale exe is a hard failure: it would ship. Sources only, so a README edit does not trip it.
 $newest = Get-ChildItem -Recurse -File `
               (Join-Path $repo 'shell'), (Join-Path $repo 'native') `
               -Include *.cpp, *.h, *.hpp, *.c, *.rc, *.rc.in, CMakeLists.txt |
@@ -66,7 +52,7 @@ if ($newest -and $newest.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
 }
 Write-Output "not stale: no source newer than the exe"
 
-# The version, from the same place shell/CMakeLists.txt read it — see the comment there.
+# The version, from where shell/CMakeLists.txt reads it.
 $gradle = Get-Content (Join-Path $repo 'app\build.gradle.kts') -Raw
 if ($gradle -notmatch 'versionName[ \t]*=[ \t]*"([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)"') {
     throw "could not find versionName in app/build.gradle.kts"
@@ -84,11 +70,7 @@ Write-Output "############ 2/5  stage the package ############"
 #      |- README.txt
 #      `- licenses/
 #
-# ONE top-level folder, deliberately: a zip that unpacks eight loose files into someone's Downloads
-# folder is a zip they will lose. And the exe is renamed on the way in — the build target is
-# `pockettracker-sdl` for every platform, `PocketTracker.exe` is what a Windows user should see.
-# build-portmaster.sh does the same thing (pockettracker-sdl -> pockettracker.aarch64); the build
-# output name and the shipped name are allowed to differ, and the packaging script is the seam.
+# One top-level folder, so the zip does not scatter files into Downloads. The exe is renamed here.
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 $app = Join-Path $stage 'PocketTracker'
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
@@ -96,9 +78,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
 Copy-Item $exe (Join-Path $app 'PocketTracker.exe')
 Copy-Item (Join-Path $PSScriptRoot 'windows\README.txt') (Join-Path $app 'README.txt')
 
-# PocketTracker is GPL-3.0 and statically links its decoders, so their notices ship with the binary
-# that contains them rather than only with the source tree that built it. A missing one is a licence
-# breach in the artifact, which is the only thing a user ever receives.
+# The statically linked components' notices ship with the binary that contains them.
 $lic = Join-Path $app 'licenses'
 Copy-Item (Join-Path $repo 'LICENSE')                                    (Join-Path $lic 'LICENSE')
 Copy-Item (Join-Path $repo 'docs\licenses\THIRD-PARTY-NOTICES.md')       $lic
@@ -107,17 +87,12 @@ Copy-Item (Join-Path $repo 'native\vendor\ogg\COPYING')                  (Join-P
 Copy-Item (Join-Path $repo 'native\vendor\opus\COPYING')                 (Join-Path $lic 'libopus-COPYING')
 Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-Path $lic 'libopus-LICENSE_PLEASE_READ.txt')
 
-# The OFL texts ship even though this package bundles no font file. THIRD-PARTY-NOTICES.md, which
-# does ship, cites them by path — a notices file pointing at a file that is not in the artifact
-# is the breach it exists to prevent. QuinqueFive's is owed regardless: the 5×5 UI font compiled
-# into the binary is adapted from it.
+# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
+# UI font compiled into the binary is adapted from QuinqueFive.
 Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-LiberationSans.txt')   (Join-Path $lic 'OFL-1.1-LiberationSans.txt')
 Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-QuinqueFive.txt')      (Join-Path $lic 'OFL-1.1-QuinqueFive.txt')
 
-# ⚠️ SDL's licence comes out of the SOURCE THAT WAS ACTUALLY COMPILED, not from a copy kept in this
-# repo. FetchContent put it in the build tree, so the licence that ships is the licence of the code
-# that shipped, by construction — and if the SDL2 pin in shell/CMakeLists.txt ever moves, this file
-# moves with it rather than quietly describing the old one.
+# ⚠️ SDL's licence from the source that was compiled (FetchContent's tree), so it follows the pin.
 $sdlLicense = Join-Path $build '_deps\sdl2-src\LICENSE.txt'
 if (-not (Test-Path $sdlLicense)) {
     throw ("SDL2's LICENSE.txt is not at $sdlLicense. This package links SDL2 STATICALLY into the " +
@@ -132,8 +107,7 @@ Write-Output ""
 Write-Output "############ 3/5  verify the ARTIFACT (not the build log) ############"
 $staged = Join-Path $app 'PocketTracker.exe'
 $bytes  = [System.IO.File]::ReadAllBytes($staged)
-# Latin-1 maps one byte to one char, so the file's bytes can be searched as text without a decoder
-# rewriting anything.
+# Latin-1: one byte, one char, so the bytes can be searched as text unchanged.
 $text   = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
 
 if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "not a PE image - no MZ header" }
@@ -142,21 +116,15 @@ $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
 if ($machine -ne 0x8664) { throw ("not x64 - PE machine type is 0x{0:X4}" -f $machine) }
 Write-Output "PE image           : x86-64"
 
-# ⚠️ IS THE SCAN EVEN WORKING? A check for the ABSENCE of something passes just as happily when the
-# thing doing the looking is broken - a mistyped path, an empty read, an encoding that mangles the
-# bytes - and it would then wave through exactly the defect it exists to catch. So prove the scan
-# finds a string that must be there before trusting it not to find the ones that must not.
+# ⚠️ The control: an absence check passes on a broken scan too, so it must first find what is there.
 if ($text -notmatch 'KERNEL32\.dll') {
     throw "the import scan cannot even find KERNEL32.dll - the scan is broken, not the exe"
 }
 Write-Output "import scan        : working (KERNEL32.dll found)"
 
-# --- the failure this whole package exists to prevent -------------------------------------------
-# Before A3 the exe imported MSVCP140.dll, VCRUNTIME140.dll and VCRUNTIME140_1.dll. Those live in
-# the Visual C++ redistributable, which a developer's machine has and a stranger's does not: they
-# would double-click and get a Windows error dialog naming a DLL. It is invisible on every box that
-# can build the thing, which is every box this shell had ever run on.
-# shell/CMakeLists.txt's CMAKE_MSVC_RUNTIME_LIBRARY is the fix; this is the assertion.
+# --- the static VC runtime -------------------------------------------------------------------
+# A machine without Visual Studio lacks VCRUNTIME140.dll and friends, and nothing shows it on one that
+# builds. CMAKE_MSVC_RUNTIME_LIBRARY in shell/CMakeLists.txt.
 $dynamicCrt = @('VCRUNTIME140.dll', 'VCRUNTIME140_1.dll', 'MSVCP140.dll', 'MSVCR120.dll') |
               Where-Object { $text -match [regex]::Escape($_) }
 if ($dynamicCrt) {
@@ -166,8 +134,7 @@ if ($dynamicCrt) {
 Write-Output "VC runtime         : static (no VCRUNTIME/MSVCP imports)"
 
 # --- SDL2 must be IN the exe, not beside it -----------------------------------------------------
-# The mirror image of build-portmaster.sh's check, which fails if SDL2 got statically bundled. Same
-# question, opposite correct answer, because the two artifacts have opposite linkage models.
+# build-portmaster.sh asks the opposite: there SDL2 must be the device's.
 if ($text -match 'SDL2\.dll') {
     throw "the exe imports SDL2.dll - nothing ships it, so it must be linked statically"
 }
@@ -183,14 +150,8 @@ if ($v.FileVersion -ne $version) {
     throw ("the exe says version $($v.FileVersion) but app/build.gradle.kts says $version - this " +
            "exe was not built from this tree")
 }
-# ⚠️ Asserts THIS icon, not "an icon". The obvious check — ExtractAssociatedIcon returning
-# non-null — passes on any exe Windows can find a default for, so it would go green on a build where
-# the .rc was dropped entirely; "a check that passes on both is not a check". The linker embeds each
-# RT_ICON's DIB bytes verbatim, so a distinctive slice out of the middle of the 128x128 frame is a
-# discriminator only the right binary can satisfy.
-#
-# (It also has no System.Drawing dependency, which matters: that assembly is not loadable from
-# PowerShell 7, and CI must be able to run this script under either interpreter.)
+# ⚠️ This icon, not "an icon": Windows finds a default for any exe. The linker embeds each RT_ICON's
+# bytes verbatim, so a slice of the 128x128 frame must appear in the exe.
 $icoBytes = [System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'windows\PocketTracker.ico'))
 $e128     = 6 + 16 * 5                                        # the 128x128 directory entry
 $off128   = [BitConverter]::ToUInt32($icoBytes, $e128 + 12)
@@ -208,19 +169,8 @@ if ($text -match 'KILDBG') {
 Write-Output "debug instr.       : none"
 
 # --- every statically linked component must have a notice ---------------------------------------
-# ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE — same mechanism and
-# same reasoning as build-portmaster.sh: the same commit that forgets the notice would forget the
-# list entry, so `native/vendor/` IS the list.
-#
-# ⚠️ SDL2 IS THE ONE EXCEPTION AND STAYS NAMED BY HAND, even though convergence C1 put a
-# native/vendor/SDL2/ in the tree. THIS build does not use it: the Android APK needs SDL vendored
-# because F-Droid compiles offline from source, while this package takes SDL from FetchContent at
-# configure time. So the directory the derived list globs and the SDL that is actually compiled into
-# this exe are two different things, and the list would be naming SDL2 for the wrong reason — it
-# would keep passing if the FetchContent SDL vanished, and it would stop naming SDL2 the moment the
-# Android build stopped vendoring it. Neither has anything to do with this artifact. A guard that
-# cannot see the component most specific to the package it guards is worth stating out loud rather
-# than leaving to be discovered.
+# ⚠️ `native/vendor/` is the list; a hand-kept one would be forgotten by the same commit.
+# ⚠️ SDL2 is named by hand as well: this exe's SDL is FetchContent's, not native/vendor/SDL2 (the APK's).
 $notices  = Get-Content (Join-Path $lic 'THIRD-PARTY-NOTICES.md') -Raw
 $vendored = Get-ChildItem (Join-Path $repo 'native\vendor') -Directory | ForEach-Object { $_.Name }
 $missing  = @()
@@ -240,16 +190,9 @@ Write-Output ""
 Write-Output "############ 4/5  zip ############"
 $zip = Join-Path $out "PocketTracker-$version-windows-x64.zip"
 
-# ⚠️ THE ENTRY NAMES ARE BUILT BY HAND, with forward slashes, because BOTH of the obvious ways to
-# do this get it wrong on Windows PowerShell 5.1. Compress-Archive is the known offender — but
-# [ZipFile]::CreateFromDirectory writes backslashes too on .NET Framework 4.x (it uses
-# Path.DirectorySeparatorChar; the fix only landed in .NET Core 3.0), and this script used it and
-# said so in a comment until the read-back check at step 5 printed
-# `PocketTracker\licenses\libogg-COPYING` and refused it.
-#
-# The zip spec (APPNOTE 4.4.17.1) requires forward slashes. Explorer forgives backslashes, which is
-# exactly why this would have shipped: on the machine that builds the package it looks perfect, and
-# on a Mac or a Linux box the whole tree arrives as single files with backslashes in their names.
+# ⚠️ Entry names by hand, with forward slashes: on PowerShell 5.1 both Compress-Archive and
+# CreateFromDirectory write backslashes. Explorer forgives them; a Mac or Linux box unpacks one flat
+# file per entry with backslashes in its name. The zip spec requires forward slashes.
 $archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($f in Get-ChildItem $stage -Recurse -File | Sort-Object FullName) {
@@ -263,9 +206,7 @@ try {
 Write-Output ("{0}  ({1:N0} bytes)" -f $zip, (Get-Item $zip).Length)
 
 # ─── 5/5  read it back OUT of the zip ───────────────────────────────────────────────────────────
-# ⚠️ EVERYTHING ABOVE INSPECTED THE STAGING DIRECTORY, and the zip is what ships. A broken archive
-# step could still have dropped any of it. Same discipline as build-portmaster.sh reading its
-# launch script's bytes back out rather than trusting the copy that produced them.
+# ⚠️ Out of the zip, not the staging folder: the zip is what ships.
 Write-Output ""
 Write-Output "############ 5/5  read the package back out of the zip ############"
 $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)

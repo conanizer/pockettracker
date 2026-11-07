@@ -2,21 +2,15 @@
 #
 # Build the OnionOS (Miyoo Mini / Mini+) package: build/miyoo/pockettracker-miyoo.zip
 #
-# Run from the repo root, on any Linux box (WSL is fine) with cmake, ninja, zip and qemu-arm-static:
+# Run from the repo root, on any Linux box with cmake, ninja, zip and qemu-arm-static:
 #
 #     sudo apt install cmake ninja-build zip qemu-user-static
 #     bash shell/build-miyoo.sh
 #
-# ⚠️ NO CONTAINER, and that is the difference from build-portmaster.sh. That build needs
-# ubuntu:20.04 because it links the host distro's glibc and the container IS the floor. Here the
-# floor arrives with the compiler: shauninman's device toolchain carries its own glibc 2.28 sysroot,
-# so the ceiling asserted below is a property of the toolchain rather than of the machine you are
-# sitting at. What this script must not do is fall back on a system arm-linux-gnueabihf — that one
-# finds its headers in the HOST's /usr/include and produces an ELF the device cannot load.
-#
-# ⚠️ Nothing here is filtered down to the word "error". Every command prints its own output. Four
-# separate sessions of this project have been burned by a build step that failed quietly and left a
-# stale artifact behind for the next step to "verify".
+# No container: the device toolchain carries its own glibc 2.28 sysroot, so the floor comes with the
+# compiler. ⚠️ Never a system arm-linux-gnueabihf: it reads the host's headers and builds an ELF the
+# device cannot load.
+# ⚠️ Nothing is filtered: a step that fails quietly leaves a stale artifact for the next to "verify".
 set -euo pipefail
 
 SRC=${SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
@@ -24,36 +18,28 @@ CACHE=${MIYOO_CACHE:-$HOME/.cache/pockettracker-miyoo}
 
 # ─── The two downloads, pinned ───────────────────────────────────────────────────────────────────
 #
-# ⚠️ BOTH ARE PINNED BY TAG, NOT BY "latest". A silently newer SDL2 fork is a different set of
-# undocumented limitations under a package we cannot test on hardware ourselves, and the whole point
-# of §Phase 2 is that the fork is the largest unknown in this port.
+# ⚠️ Pinned by tag, never "latest": a newer SDL2 fork is new undocumented behaviour on hardware we
+# rarely hold.
 TOOLCHAIN_TAG=${TOOLCHAIN_TAG:-v0.0.3}
 TOOLCHAIN_URL="https://github.com/shauninman/miyoomini-toolchain-buildroot/releases/download/$TOOLCHAIN_TAG/miyoomini-toolchain.tar.xz"
 
-# The **nogl** variant, deliberately. The GL build carries a 21 MB swiftshader libGLESv2, and this
-# app never asks for a GL renderer: sdl-video.cpp creates one STREAMING texture and blits it.
+# The nogl variant: the GL one carries a 21 MB libGLESv2, and the app only blits one streaming texture.
 SDL2_TAG=${SDL2_TAG:-sdl2-miyoo-f6319cf9}
 SDL2_URL="https://github.com/XK9274/sdl2_miyoo/releases/download/$SDL2_TAG/libSDL2-miyoo-nogl-f6319cf9.tar.gz"
 
-# Read off the toolchain's OWN sysroot (arm-linux-gnueabihf/libc/lib/libc-2.28.so), not guessed at,
-# and corroborated by the SDL2 fork: that .so — which every Miyoo port on every one of these devices
-# already loads — demands at most GLIBC_2.27.
+# The toolchain sysroot's own glibc (libc-2.28.so).
 GLIBC_MAX_ALLOWED=${GLIBC_MAX_ALLOWED:-2.28}
 
 TOOLCHAIN=$CACHE/miyoomini-toolchain
 SDL2_LIBDIR=$CACHE/sdl2
 SDK=$CACHE/sdk
 STUBS=$CACHE/stubs
-# ⚠️ THE BUILD TREE IS A SIBLING OF THE OUTPUT, NOT A CHILD OF IT. Step 3 starts `rm -rf "$OUT"`, so
-# a build tree under it is deleted with the staging directory and step 3 then cannot find the binary
-# it was about to copy.
+# ⚠️ Beside $OUT, not inside it: step 3 starts with `rm -rf "$OUT"`.
 BUILD=$SRC/build/miyoo-cmake
 OUT=$SRC/build/miyoo
 STAGE=$OUT/stage
-# ⚠️ THE INSTALL PATH IS THE FEATURE. Onion counts play time, launch count and the Game Switcher's
-# recent list only for what `check_is_game` in .tmp_update/runtime.sh accepts, and that test is
-# whether the launch command names /mnt/SDCARD/Roms/. The same files under App/ are recorded nowhere,
-# which is what this package used to be.
+# ⚠️ Under Roms/: Onion records play time and the recent list only for launch commands there
+# (`check_is_game`, .tmp_update/runtime.sh).
 PORTROOT=$STAGE/Roms/PORTS
 GAMEDIR=$PORTROOT/Games/PocketTracker
 SHORTCUT=$PORTROOT/Shortcuts/PocketTracker.port
@@ -82,17 +68,13 @@ fetch "$SDL2_URL"      "$CACHE/dl/sdl2-nogl.tar.gz"
 CROSS="$TOOLCHAIN/bin/arm-linux-gnueabihf-"
 "${CROSS}gcc" --version | head -1
 
-# ⚠️ THE SDL2 HERE IS BOTH A LINK SDK AND A SHIPPED LIBRARY, which is the exact inverse of the
-# PortMaster package. There is no system libSDL2 on this device, so the headers we compile against
-# and the .so the device loads have to be the same build or a mismatch shows up as a wrong-looking
-# app rather than as a link error. The headers come from the fork at the same pinned commit.
+# ⚠️ This SDL2 is linked against AND shipped (the device has none), so the headers come from the fork
+# at the same pinned commit as the .so.
 SDL2_SRC=$CACHE/sdl2-src
 if [ ! -d "$SDL2_SRC/.git" ]; then
     git clone --depth 1 https://github.com/XK9274/sdl2_miyoo.git "$SDL2_SRC"
 fi
-# ⚠️ `tag $SDL2_TAG`, not the abbreviated sha in the tag's name: GitHub's smart protocol will not
-# serve an abbreviated commit to `fetch`, and the failure — "couldn't find remote ref" — reads like
-# the pin is wrong rather than like the spelling is.
+# ⚠️ `tag $SDL2_TAG`, not the short sha in its name: GitHub will not fetch an abbreviated commit.
 # ⚠️ The fork's repository is gone from GitHub (404 since 2026-10), so a cached checkout is the only
 # copy: never fetch when the pinned tag is already here.
 git -C "$SDL2_SRC" rev-parse -q --verify "refs/tags/$SDL2_TAG" > /dev/null \
@@ -120,16 +102,10 @@ EOF
 printf 'set(PACKAGE_VERSION 2.0.20)\nset(PACKAGE_VERSION_COMPATIBLE TRUE)\n' \
     > "$SDK/lib/cmake/SDL2/SDL2ConfigVersion.cmake"
 
-# ⚠️ THE HELPER THAT SHIPS IS OURS, NOT THE ONE IN THE TARBALL. The fork's release carries a
-# `libneonarmmiyoo.so` whose upstream repository has no licence at all, which makes the whole
-# package unpublishable; shell/miyoo/neon_compat.c defines the same 25 symbols in plain C, and
-# check 9 below proves the set is complete against the libSDL2 that actually ships. The soname
-# is forced because the fork's `DT_NEEDED` is the bare file name and the tarball's copy records
-# no soname of its own.
-#
-# ⚠️ The -mcpu/-mfpu trio is REPEATED from toolchain-miyoo.cmake rather than inherited: this
-# compile does not go through CMake, and the toolchain's own default is a VFPv3 Cortex-A7 that
-# check 2 rejects.
+# ⚠️ Our own libneonarmmiyoo.so, not the tarball's, which has no licence: neon_compat.c defines the
+# same 25 symbols in plain C (check 9). The soname is the bare file name libSDL2 asks for.
+# ⚠️ The CPU flags repeat toolchain-miyoo.cmake's: this compile skips CMake, and the toolchain's
+# default is a VFPv3 target check 2 rejects.
 NEON_SO=$SDK/lib/libneonarmmiyoo.so
 "${CROSS}gcc" -O2 -fPIC -shared -Wl,-soname,libneonarmmiyoo.so \
     -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard \
@@ -137,16 +113,9 @@ NEON_SO=$SDK/lib/libneonarmmiyoo.so
 
 echo
 echo "############ 2/5  cross-build PocketTracker ############"
-# ⚠️ `-static-libstdc++ -static-libgcc` costs 370 KB and removes an entire class of unknown: this
-# toolchain is gcc 8.3 and the device's own libstdc++ is whatever its buildroot shipped, which is
-# not a question anything here can answer. Nothing crosses a C++ ABI boundary at runtime — the
-# bundled SDL2 is C — so absorbing it is free of consequence.
-#
-# ⚠️ `--allow-shlib-undefined` is REPEATED here rather than inherited: toolchain-miyoo.cmake sets it
-# through CMAKE_EXE_LINKER_FLAGS_INIT, which only *initializes* the cache variable — passing
-# -DCMAKE_EXE_LINKER_FLAGS below replaces it outright, and dropping the flag makes the link fail on
-# the SigmaStar libraries that live on the device. The note in the toolchain file says why it is
-# needed at all.
+# Static libstdc++ (370 KB): the device's own is unknown, and nothing C++ crosses into SDL2.
+# ⚠️ `--allow-shlib-undefined` repeated: -DCMAKE_EXE_LINKER_FLAGS replaces the toolchain file's
+# initial value, and the link then fails on the device's chip libraries.
 rm -rf "$BUILD"
 cmake -S "$SRC/shell" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -170,17 +139,9 @@ echo "############ 3/5  stage the Onion PORT package ############"
 #   |- licenses/
 #   `- demo/                OPTIONAL: a starter song, copied to the user's folder on first launch
 #
-# ⚠️ THE SHORTCUT AND THE IMAGE ARE PAIRED BY BASE NAME, and that name is also what the play-time
-# database stores. `Imgs/PocketTracker.png` is the artwork committed as `boxart.png`, renamed here:
-# check 11 asserts the pair rather than trusting these two lines to stay in step.
-#
-# ⚠️ THE PORTS SHELF, NOT THE APP SHELF, and the reason is not tidiness — see the note at PORTROOT.
-# Its `_required_files.txt` machinery is for engines needing licensed assets the user supplies and
-# does not apply to us; the shortcut's presence check simply names our own binary instead.
-#
-# ⚠️ IT COSTS A DEPENDENCY. `Emu/PORTS/launch_standalone.sh` comes from Onion's Ports Collection
-# package, so a device without it has no ports list to appear in. That is a README line, not
-# something this build can assert.
+# ⚠️ The shortcut and the image pair by base name, which is also what the play-time database stores
+# (check 11). The shortcut's presence check names our own binary.
+# ⚠️ It needs Onion's Ports Collection (Emu/PORTS/launch_standalone.sh) — a README line, not a check.
 rm -rf "$OUT"
 mkdir -p "$GAMEDIR/libs" "$GAMEDIR/licenses" "$(dirname "$SHORTCUT")" "$(dirname "$BOXART")"
 
@@ -192,14 +153,9 @@ cp "$SRC/shell/miyoo/README.md"           "$GAMEDIR/"
 chmod +x "$GAMEDIR/launch.sh" "$SHORTCUT"
 
 # ── The demo song, if this tree has one ──────────────────────────────────────────────────────────
-# ⚠️ OPTIONAL BY DESIGN, and the directory is gitignored. What is in there is other people's samples
-# and soundfonts, fine on a test card and not fine in a published GPL-3.0 package — so a clone builds
-# a demo-less zip and says so, rather than failing on a missing input.
-#
-# It is STAGED, not written into the user's folder: launch.sh copies it to $POCKETTRACKER_HOME on the
-# first launch only. Putting it in the zip at the card root instead would have overwritten a user's
-# edited copy on every upgrade, and would have broken the README's Wi-Fi install, which copies the
-# `App` folder alone.
+# Optional and gitignored: other people's samples, fine on a test card, not in a published package.
+# Staged beside the app; launch.sh copies it to $POCKETTRACKER_HOME once, so an upgrade never
+# overwrites an edited copy.
 DEMO_DIR=${DEMO_DIR:-$SRC/shell/miyoo/demo}
 if [ -d "$DEMO_DIR" ]; then
     cp -r "$DEMO_DIR" "$GAMEDIR/demo"
@@ -216,9 +172,7 @@ chmod +x "$BIN"
 cp "$SDL2_LIBDIR/libSDL2-2.0.so.0"   "$GAMEDIR/libs/"
 cp "$NEON_SO"                        "$GAMEDIR/libs/"
 
-# PocketTracker is GPL-3.0 and statically links its decoders, so their notices ship with the binary
-# that contains them. `docs/licenses/THIRD-PARTY-NOTICES.md` is the single source of truth and the
-# check in step 4 derives the required list from native/vendor/ rather than from a hand-kept one.
+# The statically linked components' notices ship with the binary (THIRD-PARTY-NOTICES.md; check 8).
 cp "$SRC/LICENSE"                                    "$GAMEDIR/licenses/LICENSE"
 cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"       "$GAMEDIR/licenses/"
 cp "$SRC/CREDITS.md"                                 "$GAMEDIR/licenses/CREDITS.md"
@@ -228,9 +182,8 @@ cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt" "$GAMEDIR/licenses/libopus-
 cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"   "$GAMEDIR/licenses/OFL-1.1-LiberationSans.txt"
 cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"      "$GAMEDIR/licenses/OFL-1.1-QuinqueFive.txt"
 
-# ⚠️ THESE TWO SHIP ONLY HERE. Every other package links the device's own SDL2 and therefore owes it
-# no notice; this one carries the binary, so it carries SDL's zlib text and the fork's GPL-3.0 text
-# with it. Taken from the fork's own tree at the pinned commit rather than from a copy of our own.
+# ⚠️ Only this package ships SDL2, so only it carries SDL's zlib text and the fork's GPL-3.0 text,
+# from the fork's own tree.
 cp "$SDL2_SRC/LICENSE.txt" "$GAMEDIR/licenses/libSDL2-zlib-LICENSE.txt"
 cp "$SDL2_SRC/LICENSE"     "$GAMEDIR/licenses/libSDL2-miyoo-fork-GPL-3.0.txt"
 ls -1 "$GAMEDIR/licenses/"
@@ -248,16 +201,13 @@ case "$FILE_OUT" in
     *) echo "FAIL: not a 32-bit ARM EABI5 ELF. The toolchain file did not take."; exit 1 ;;
 esac
 
-# --- 2 and 3 run over EVERY IMAGE WE COMPILE, which is two: the app and the helper library that
-# stands in for the fork's unlicensed one. A library compiled by hand outside CMake picks up the
-# toolchain's defaults rather than toolchain-miyoo.cmake's flags, so it is exactly the file that
-# can end up built for a CPU the device does not have.
+# --- 2 and 3 run over both images we compile: the app, and the helper built outside CMake.
 for IMAGE in "$BIN" "$GAMEDIR/libs/libneonarmmiyoo.so"; do
 echo "--- $(basename "$IMAGE")"
 
 # --- 2. the CPU it was compiled FOR ------------------------------------------------------------
-# ⚠️ Fails for a reason nothing else here does: -mcpu/-mfpu silently not applied. It is also NOT a
-# substitute for check 3 — the attributes said v7 while the binary contained ARMv8 instructions.
+# ⚠️ Catches -mcpu/-mfpu not applied. Not a substitute for check 3: the attributes can say v7 over
+# ARMv8 instructions.
 CPU_ARCH=$("${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_CPU_arch: *//p' | head -1)
 FP_ARCH=$( "${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_FP_arch: *//p'  | head -1)
 VFP_ARGS=$("${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_ABI_VFP_args: *//p' | head -1)
@@ -269,10 +219,8 @@ echo "VFP args           : $VFP_ARGS   (want VFP registers - hard float)"
 [ "$VFP_ARGS" = "VFP registers" ]       || { echo "FAIL: soft-float ABI - the device is hard-float."; exit 1; }
 
 # --- 3. no ARMv8-only instruction anywhere in the image ----------------------------------------
-# ⚠️⚠️ THE ONE CHECK THE FLAGS CANNOT MAKE FOR YOU. Inline asm goes past the compiler's idea of the
-# target entirely: a vendored DSP header guarded `vmaxnm.f32` on `__arm__`, which is true on every
-# 32-bit ARM, and the instruction exists only from ARMv8 (and on Cortex-M's FPv5). It would run on
-# qemu-user, whose default CPU model has it, and SIGILL on a Cortex-A7.
+# ⚠️ Inline asm bypasses the CPU flags: an `__arm__` guard is true on every 32-bit ARM, and an ARMv8
+# instruction runs under qemu-user and SIGILLs on a Cortex-A7.
 V8_COUNT=$("${CROSS}objdump" -d "$IMAGE" | grep -cE '\b(vmaxnm|vminnm|vrint[apmnxz]|vcvta|vcvtn|vcvtp|vcvtm|vsel)\b' || true)
 echo "ARMv8-only insns   : $V8_COUNT   (want 0)"
 if [ "$V8_COUNT" != "0" ]; then
@@ -312,14 +260,10 @@ fi
 echo "libstdc++          : absorbed (not a runtime dependency)"
 
 # --- 6. the ten-button map, resolved through the SDL2 THAT SHIPS -------------------------------
-# ⚠️ THE ONLY PART OF THE BUTTON MAP THAT CAN BE CHECKED WITHOUT THE DEVICE, and its failure is
-# quiet: a name SDL cannot resolve leaves that button doing nothing at all. So the names are read OUT
-# of miyoo-config.json (never retyped here — a hand-typed pair prints "got off, want off" forever)
-# and handed to the shipped libSDL2 under qemu. The Mini's buttons arrive as a PAD (sdl-input.cpp,
-# apply_input_config), so they are checked as controller button and trigger names.
-#
-# ⚠️ The vendor libraries libSDL2 needs are on the DEVICE. Empty stubs with the right sonames are
-# what let the loader finish; the name lookups touch none of them and need no SDL_Init.
+# ⚠️ A name SDL cannot resolve is a button that silently does nothing. The names are read out of
+# miyoo-config.json and handed to the shipped libSDL2 under qemu, as controller names (the Mini's
+# buttons arrive as a pad). Empty stubs stand in for the device's chip libraries; the lookups need
+# none of them.
 command -v qemu-arm-static >/dev/null || { echo "FAIL: qemu-arm-static missing (apt install qemu-user-static)."; exit 1; }
 mkdir -p "$STUBS"
 : > "$CACHE/empty.c"
@@ -383,8 +327,7 @@ if ! run_keycheck "${KEYNAMES[@]}"; then
     echo "FAIL: a name in miyoo-config.json is not one SDL answers to - that button does nothing."
     exit 1
 fi
-# ⚠️ THE CONTROL, and it is not ceremony: this check's pass is "nothing was printed", which cannot
-# tell a working lookup from a keycheck that never ran.
+# ⚠️ The control: a pass prints nothing, which a keycheck that never ran does too.
 if run_keycheck "nonexistentbutton" >/dev/null 2>&1; then
     echo "FAIL: the control passed - keycheck resolves a name that does not exist, so it proves nothing."
     exit 1
@@ -392,16 +335,13 @@ fi
 echo "control            : an invented name IS rejected"
 
 # --- 7. no button doing two jobs -------------------------------------------------------------------
-# ⚠️ A DIFFERENT FAILURE FROM 6, and the one §3.4 of the scope warns about: a name can resolve
-# perfectly and still be bound to two buttons, and the symptom then looks like the gptokeyb
-# double-input bug rather than like a config typo.
+# A name can resolve and still be bound to two buttons, which on the device looks like double input.
 DUPES=$(printf '%s\n' "${KEYNAMES[@]}" | sort | uniq -d | tr '\n' ' ')
 echo "bound twice        : ${DUPES:-none}"
 [ -z "$DUPES" ] || { echo "FAIL: those Miyoo buttons are bound to more than one app button."; exit 1; }
 
 # --- 8. every statically linked component must have a notice -----------------------------------
-# ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE — the same commit that
-# forgets the notice forgets the list entry. So the vendor directory IS the list.
+# ⚠️ The vendor directory is the list; a hand-kept one would be forgotten by the same commit.
 NOTICES="$GAMEDIR/licenses/THIRD-PARTY-NOTICES.md"
 echo
 echo "licence notices:"
@@ -422,13 +362,9 @@ if [ -n "$MISSING" ]; then
 fi
 
 # --- 9. our libneonarmmiyoo.so defines every symbol the shipped libSDL2 needs from it ----------
-# ⚠️ THE ONLY THING STANDING BETWEEN THIS PACKAGE AND A LOADER ERROR ON THE DEVICE. The wanted
-# list is read out of the libSDL2 THAT SHIPS, never typed here: the fork is pinned but not ours,
-# and a bumped tag that calls one more scaler has to fail this line rather than the boot.
-#
-# ⚠️ It is also not reachable by the qemu run below. A missing function symbol in a NEEDED
-# library is a lazy-binding failure — the loader would let keycheck start and the device would
-# die at the first frame instead.
+# ⚠️ The wanted list is read out of the libSDL2 that ships, so a bumped fork that calls one more
+# scaler fails here, not at boot. The qemu run cannot see it: a missing function binds lazily, at
+# the first frame.
 echo
 WANT=$("${CROSS}gcc-nm" -D --undefined-only "$GAMEDIR/libs/libSDL2-2.0.so.0" \
     | grep -oE '\b(neon_memcpy|scale[0-9]+x[0-9]+_n(16|32))\b' | sort -u)
@@ -440,8 +376,7 @@ UNMET=$(comm -23 <(printf '%s\n' "$WANT") <(printf '%s\n' "$HAVE") | tr '\n' ' '
 echo "libSDL2 wants from libneonarmmiyoo : $WANT_N symbols"
 echo "our libneonarmmiyoo defines         : $HAVE_N symbols"
 echo "unresolved                          : ${UNMET:-none}"
-# The wanted list being EMPTY is the failure this check would otherwise report as a pass — a
-# renamed nm, a stripped .so or a changed symbol spelling all look like "nothing missing".
+# An empty wanted list would pass as "nothing missing".
 if [ "$WANT_N" -lt 25 ]; then
     echo "FAIL: read only $WANT_N wanted symbols out of libSDL2, and it has 25. The reader is broken,"
     echo "      or the pinned fork changed. Check with: ${CROSS}gcc-nm -D --undefined-only <so>"
@@ -454,17 +389,9 @@ if [ -n "$UNMET" ]; then
 fi
 
 # --- 10. every sample and soundfont the demo song names is IN the demo we staged -----------------
-# ⚠️⚠️ THE ONE THING IN THIS PACKAGE WITH NO SIGNAL AT ALL. A media path that does not resolve is not
-# an error anywhere: the project loads, the instrument reads empty, its steps play silence, and the
-# only way to find out is to hold the device. Everything else here fails loudly or shows on screen.
-#
-# The demo is authored on a phone, so its paths are that install's — `pt://<tree-id>/Samples/x.wav`,
-# or an absolute `/storage/emulated/0/…`. The app re-roots them onto $POCKETTRACKER_HOME through
-# songcore::app_root_relative_tail (native/songcore/media_path.h), and this repeats that function's
-# two anchors so the question asked here is the question the device asks.
-#
-# ⚠️ The paths are READ OUT of the .ptp, never listed here. A hand-typed list is a list that agrees
-# with itself while the project names something else entirely.
+# ⚠️ A media path that does not resolve is silent everywhere: the instrument loads empty and plays
+# nothing. The paths are read out of the .ptp and re-rooted with the two anchors of
+# songcore::app_root_relative_tail (media_path.h), as the device does.
 if [ -d "$GAMEDIR/demo" ]; then
 echo
 # Anchor 1 is "/PocketTracker/"; anchor 2 is the last media sub-tree, kept whole so it re-roots as
@@ -482,8 +409,7 @@ mapfile -t DEMO_REFS < <(
         | grep -oE '"(sampleFilePath|soundfontPath)":"[^"]+"' \
         | sed 's/^"[^"]*":"//; s/"$//' | sort -u)
 echo "demo media named   : ${#DEMO_REFS[@]}"
-# The parse finding NOTHING is the failure this check would otherwise report as a pass — an empty
-# list has no unresolved entries in it.
+# An empty parse would pass: it has nothing unresolved.
 [ "${#DEMO_REFS[@]}" -ge 1 ] || { echo "FAIL: no sample or soundfont path parsed out of the demo .ptp - the reader is broken."; exit 1; }
 DEMO_UNMET=0
 for REF in "${DEMO_REFS[@]}"; do
@@ -511,14 +437,9 @@ fi
 fi
 
 # --- 11. the shortcut, read back with ONION'S OWN PARSE ------------------------------------------
-# ⚠️⚠️ THE WHOLE PACKAGE HANGS OFF FOUR STRINGS IN ONE FILE, AND NONE OF THEM FAILS LOUDLY. A wrong
-# folder name makes Onion rename the shortcut to `.notfound` and the port is simply absent from the
-# list; a wrong executable name is a menu entry that does nothing when you press A. Neither says
-# anything, on the device or here.
-#
-# ⚠️ The values are lifted with Onion's own greps (Emu/PORTS/import.sh), NOT retyped: a comment line
-# in the shortcut carrying `GameDir=` is picked up as the real assignment, and that is a trap only
-# the real parse can find.
+# ⚠️ Four strings, none failing loudly: a wrong folder hides the port (`.notfound`), a wrong executable
+# is an entry that does nothing. Read with Onion's own greps (Emu/PORTS/import.sh), which also pick up
+# an assignment inside a comment.
 echo
 port_field() {   # field name -> what Onion's import.sh would read out of the staged shortcut
     grep "$1=" "$SHORTCUT" | cut -d "=" -f2 | grep -o '".*"' | tr -d '"'
@@ -529,8 +450,7 @@ P_DATA=$(port_field GameDataFile)
 printf 'shortcut GameDir   : %s\n'        "${P_DIR:-<EMPTY>}"
 printf 'shortcut executable: %s\n'        "${P_EXE:-<EMPTY>}"
 printf 'shortcut data file : %s\n'        "${P_DATA:-<EMPTY>}"
-# A field reading EMPTY - or reading two lines because a comment matched - is the failure this check
-# would otherwise report as a pass, since an empty name makes every test below vacuous.
+# An empty field, or two lines because a comment matched, would make every test below vacuous.
 for F in "$P_DIR" "$P_EXE" "$P_DATA"; do
     case "$F" in
         "")  echo "FAIL: a field parsed EMPTY. The shortcut's assignments are not what import.sh reads."; exit 1 ;;
@@ -549,24 +469,19 @@ echo "presence check finds: ${FOUND_DATA:-<NOTHING>}"
 [ -n "$FOUND_DATA" ] \
     || { echo "FAIL: Onion would rename this shortcut to .notfound - the port never appears in the list."; exit 1; }
 
-# ⚠️ THE TRACKING CONDITION ITSELF, which is the only reason this package is a port at all: Onion
-# records play time and a Game Switcher entry when the launch command names /mnt/SDCARD/Roms/.
-# Asserted with runtime.sh's own grep, over the path this zip really installs to.
+# The play-time condition, with runtime.sh's own grep, over the path this zip installs to.
 INSTALL_PATH=/mnt/SDCARD/${SHORTCUT#"$STAGE"/}
 echo "installs to        : $INSTALL_PATH"
 echo "$INSTALL_PATH" | grep -q "/mnt/SDCARD/Roms/" \
     || { echo "FAIL: that path is not under Roms/ - no play time, no Game Switcher, no launch count."; exit 1; }
 
-# ⚠️ Onion pairs the artwork with the shortcut by BASE NAME alone. A mismatch is no picture, and
-# nothing anywhere reports it.
+# ⚠️ Artwork pairs by base name alone; a mismatch is a silent missing picture.
 echo "artwork pairs with : $(basename "$BOXART" .png)  (shortcut: $(basename "$SHORTCUT" .port))"
 [ "$(basename "$BOXART" .png)" = "$(basename "$SHORTCUT" .port)" ] \
     || { echo "FAIL: the image and the shortcut have different base names - the list shows no picture."; exit 1; }
 
-# ⚠️ Onion's own audio-handover flag must stay OFF. Its launcher stops the sound service and starts
-# the app in the same breath; launch.sh stops it and WAITS for the hardware to release, and that
-# wait is skipped when it finds nothing left to stop. Flipping this to 1 is a device that fails to
-# start, with nothing here or on screen to connect it to this line.
+# ⚠️ Onion's audio flag stays off: launch.sh's wait for the chip runs only if launch.sh stops the
+# server itself (PocketTracker.port says why).
 KILLFLAG=$(grep '^KillAudioserver=' "$SHORTCUT" | cut -d= -f2)
 echo "audio flag         : KillAudioserver=$KILLFLAG   (want 0 - launch.sh owns the handover)"
 [ "$KILLFLAG" = "0" ] \
@@ -574,14 +489,11 @@ echo "audio flag         : KillAudioserver=$KILLFLAG   (want 0 - launch.sh owns 
 
 echo
 echo "############ 5/5  zip (extracts at the SD card root) ############"
-# ⚠️ MODES ARE SET HERE, NOT INHERITED. `zip` records whatever `stat` reports, and Onion runs
-# launch.sh — which, unlike the binary, cannot repair its own bit once the card is in the device.
+# ⚠️ Modes set, not inherited: zip records what `stat` says, and launch.sh cannot repair its own bit.
 find "$PORTROOT" -type f -exec chmod 644 {} +
 chmod 755 "$GAMEDIR/launch.sh" "$SHORTCUT" "$BIN" "$GAMEDIR/libs"/*.so*
-# ⚠️ …and on a filesystem that carries no Unix modes — a Windows drive mounted under WSL is the one
-# that will actually happen — the chmod above is silently a no-op and every member is recorded 0777.
-# That still RUNS, so nothing here fails on it; it is said out loud instead, because "the package
-# came out with different permissions" is otherwise invisible until a user reports it.
+# On a filesystem without Unix modes the chmod is a no-op and every member is 0777. It still runs,
+# so it is a note, not a failure.
 STAGED_MODE=$(stat -c%a "$GAMEDIR/miyoo-config.json")
 if [ "$STAGED_MODE" != "644" ]; then
     echo "NOTE: this filesystem reports mode $STAGED_MODE where 644 was set, so it carries no Unix"
@@ -594,8 +506,7 @@ echo
 ls -lh "$OUT/pockettracker-miyoo.zip"
 unzip -l "$OUT/pockettracker-miyoo.zip"
 
-# ⚠️ READ IT BACK OUT OF THE ZIP. Everything above inspected files a broken `zip` step could still
-# have failed to include, and the zip is what ships.
+# ⚠️ Out of the zip, not the staging folder: the zip is what ships.
 echo
 echo "read back out of the zip:"
 G=Roms/PORTS/Games/PocketTracker
@@ -617,17 +528,14 @@ MEMBERS=( Roms/PORTS/Shortcuts/PocketTracker.port
           $G/licenses/OFL-1.1-QuinqueFive.txt
           $G/licenses/libSDL2-zlib-LICENSE.txt
           $G/licenses/libSDL2-miyoo-fork-GPL-3.0.txt )
-# ⚠️ An ARRAY, and the demo's members are APPENDED FROM THE STAGING TREE rather than typed: the file
-# names carry spaces, which the old unquoted `for M in a b c` list could not have held, and a demo
-# is a different set of files in every tree that has one. Nothing above check 10 reads the zip, so
-# without this the whole demo could be absent from it and every line here would still be green.
+# An array, with the demo's members appended from the staging tree: their names carry spaces, and
+# nothing else reads the demo back out of the zip.
 if [ -d "$GAMEDIR/demo" ]; then
     while IFS= read -r M; do MEMBERS+=("$M"); done \
         < <(cd "$STAGE" && find "$G/demo" -type f | LC_ALL=C sort)
 fi
 for M in "${MEMBERS[@]}"; do
-    # ⚠️ `|| BYTES=0` is what makes the failure READABLE: unzip exits 11 on a missing member, and
-    # under `set -euo pipefail` that kills the script before the line that would have named it.
+    # ⚠️ `|| BYTES=0`: unzip exits 11 on a miss, and pipefail would end the script before the FAIL line.
     BYTES=$(unzip -p "$OUT/pockettracker-miyoo.zip" "$M" | wc -c) || BYTES=0
     printf '  %9s  %s\n' "$BYTES" "$M"
     if [ "$BYTES" -lt 60 ]; then

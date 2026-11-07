@@ -48,23 +48,14 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -PptWerror --no-daemon   # a warning in OUR sources fails the build
 
-      # ─── SDL2 must be IN the APK, not merely in the build (convergence plan C1) ────────────────
-      #
-      # `assembleDebug` going green proves the NDK COMPILED the vendored SDL2. It proves nothing
-      # about the artifact, and every one of the three things below is decided somewhere else:
-      # whether a .so exists at all is SDL_SHARED, whether it is packaged is AGP, and whether the
-      # Java half reaches the DEX is one sourceSet line in app/build.gradle.kts that NOTHING in the
-      # app references until phase C3 — so a refactor could delete it and no compiler would say a
-      # word. The failure would surface as an inscrutable crash the first time an SDLActivity boots.
-      #
-      # So the check is on the ARTIFACT, and it names literals only a correct build produces.
-      - name: Assert the APK carries SDL2 (convergence C1)
+      # ─── SDL2 must be IN the APK ─────────────────────────────────────────────────────────────
+      # A green build proves SDL2 compiled. Whether a .so exists (SDL_SHARED), is packaged (AGP) and
+      # its Java half reaches the DEX (a sourceSet line) is decided elsewhere, and a miss is a crash
+      # at launch — so this reads the artifact.
+      - name: Assert the APK carries SDL2
         run: |
-          # ⚠️ EVERY check fails EXPLICITLY. An earlier draft of this step relied on `set -e` plus
-          # bare `test` lines, and when the llvm-nm lookup silently produced nothing it printed
-          # "ALL CHECKS PASSED" over a symbol count of ZERO. A step whose pass is the absence of an
-          # error cannot tell a working build from a broken instrument — so nothing here reports a
-          # verdict it did not measure, and the evidence is printed either way.
+          # ⚠️ Every check fails explicitly and prints its evidence: with `set -e` and bare tests, an
+          # empty lookup once passed over a count of zero.
           FAIL=0
           APK=$(ls app/build/outputs/apk/debug/*.apk)
           echo "APK: $APK"
@@ -78,11 +69,8 @@ jobs:
             fi
           done
 
-          # (2) the JNI entry point SDLActivity's static initialiser calls to compare its own
-          # hardcoded version triple against the C library's, refusing to start on a mismatch.
-          # ⚠️ Read out of the DYNAMIC SYMBOL TABLE, not grepped out of the file: the symbol name
-          # also appears in debug info, so a plain `grep libSDL2.so` passes on a library that
-          # exports nothing at all.
+          # (2) the JNI entry point SDLActivity calls at start to compare versions. ⚠️ From the
+          # dynamic symbol table: the name is in the debug info too, so a grep passes on no export.
           NM=$(find "$ANDROID_SDK_ROOT/ndk" -type f -name llvm-nm | head -1)
           if [ -z "$NM" ] || [ ! -x "$NM" ]; then
             echo "FAIL  llvm-nm not found under $ANDROID_SDK_ROOT/ndk - the symbol check cannot run"
@@ -111,27 +99,14 @@ jobs:
 
           exit $FAIL
 
-      # ─── pt-ui compiles with the NDK, and is NEVER PACKAGED AS ITS OWN .so ─────────────────────
-      #
-      # ⚠️ A target being in the CMake model does not mean a build compiles it. AGP fills its ninja
-      # command with the targets it can PACKAGE plus their transitive dependencies — so a static
-      # archive nothing links is reported BUILD SUCCESSFUL having been compiled zero times, and the
-      # independent witness for that is libSDL2main.a, which is never built, while
-      # libogg/libopus/libopusfile.a are, because the packaged .so links them.
-      #
-      # So the target is named explicitly, per ABI, against AGP's OWN configure directory — which is
-      # what makes this the shipping toolchain, STL, API level and flags rather than a second
-      # configuration free to drift from them. ⚠️ Do not "simplify" it into
-      # externalNativeBuild.cmake.targets — that field is a whitelist and would silently stop
-      # packaging the first .so somebody forgets.
-      #
-      # The second half is the invariant: pt-ui is COMPILED and NOT PACKAGED. It reaches the app
-      # inside libpockettracker-sdl.so, never beside it.
+      # ─── pt-ui compiles with the NDK, and is never packaged as its own .so ─────────────────────
+      # ⚠️ AGP compiles only what it packages and what that links. pt-ui is named explicitly, per ABI,
+      # in AGP's own configure directory — the shipping toolchain and flags, not a second
+      # configuration. Never externalNativeBuild.cmake.targets: a whitelist silently stops packaging
+      # the first .so left off it.
       - name: Compile pt-ui with the shipping NDK configuration
         run: |
-          # ⚠️ Explicit per-check failure, and every verdict prints the number it rests on — the C1
-          # lesson: a step whose pass is the absence of an error cannot tell a working build from a
-          # broken instrument.
+          # ⚠️ Every check fails explicitly and prints the number it rests on.
           FAIL=0
           NINJA="$ANDROID_SDK_ROOT/cmake/3.22.1/bin/ninja"
           if [ ! -x "$NINJA" ]; then
@@ -139,9 +114,7 @@ jobs:
           fi
 
           for ABI in arm64-v8a x86_64; do
-            # AGP picks the hash in the path, so resolve it — and fail if it is not EXACTLY one.
-            # A glob that silently matches nothing is how this step would pass having built nothing,
-            # and a stale second directory is how C1 nearly "proved" SDL was not configured at all.
+            # AGP picks the hash in the path: exactly one, or a stale or empty glob decides.
             N=$(ls -d app/.cxx/Debug/*/"$ABI" 2>/dev/null | wc -l)
             if [ "$N" -ne 1 ]; then
               echo "FAIL  expected exactly 1 AGP configure dir for $ABI, found $N"; FAIL=1; continue
@@ -164,9 +137,8 @@ jobs:
             fi
           done
 
-          # pt-ui stays a STATIC archive: it reaches the APK linked INSIDE libpockettracker-sdl.so
-          # (C3), never as a library of its own. A libpt-ui.so appearing would mean someone made the
-          # target SHARED and grew every install by a second, dead copy of the UI.
+          # pt-ui reaches the APK inside libpockettracker-sdl.so; a libpt-ui.so would be a second,
+          # dead copy of the UI.
           APK=$(ls app/build/outputs/apk/debug/*.apk)
           if unzip -l "$APK" | grep -q 'libpt-ui\.so'; then
             echo "FAIL  libpt-ui.so is in the APK - pt-ui is linked into the shell .so, not shipped alone"
@@ -177,17 +149,15 @@ jobs:
 
           exit $FAIL
 
-      - name: Assert the SDL app links pt-ui and is reachable (convergence C3)
+      - name: Assert the SDL app links pt-ui and is reachable
         run: |
-          # ⚠️ C2's whole finding was that a green build proves nothing about what was COMPILED, and
-          # C3's equivalent is that a link line proves nothing about what ENDED UP in the .so. So
-          # every check below reads the artifact, and every verdict prints the number it rests on.
+          # A link line proves nothing about what ended up in the .so: every check reads the artifact.
           FAIL=0
           NDK="$ANDROID_SDK_ROOT/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin"
           NM="$NDK/llvm-nm"
           READELF="$NDK/llvm-readelf"
           for T in "$NM" "$READELF"; do
-            if [ ! -x "$T" ]; then echo "FAIL  $T not found - the C3 checks cannot run"; exit 1; fi
+            if [ ! -x "$T" ]; then echo "FAIL  $T not found - the checks cannot run"; exit 1; fi
           done
 
           APK=$(ls app/build/outputs/apk/debug/*.apk)
@@ -201,10 +171,8 @@ jobs:
             echo "ok    $ABI: libpockettracker-sdl.so packaged, $SZ bytes"
 
             # ── 2. SDL_main, in the DYNAMIC symbol table ─────────────────────────────────────────
-            # SDLActivity.getMainSharedObject() dlsym's this name out of the last library
-            # getLibraries() returns. ⚠️ .dynsym specifically: a plain `grep` of the .so, or a hit in
-            # .symtab, would pass on a library that exports nothing — the C1 lesson about reading a
-            # symbol out of the debug info and calling it an export.
+            # SDLActivity dlsym's it from the last library getLibraries() returns. ⚠️ .dynsym: a grep
+            # or a .symtab hit passes on a library that exports nothing.
             unzip -p "$APK" "lib/$ABI/libpockettracker-sdl.so" > /tmp/sdl-$ABI.so
             N=$("$READELF" --dyn-syms /tmp/sdl-$ABI.so | grep -cw "SDL_main")
             if [ "$N" -ge 1 ]; then
@@ -215,14 +183,8 @@ jobs:
             fi
 
             # ── 3. Is pt-ui actually INSIDE it? ──────────────────────────────────────────────────
-            # ⚠️ This must read the UNSTRIPPED intermediate, not the APK copy: pt::ui symbols are
-            # internal to the .so, so stripping removes them from the packaged artifact. Checking the
-            # APK copy here would find zero and mean nothing.
-            #
-            # ⚠️ And the comparison is against libpt-ui.a's OWN symbol list rather than a hand-picked
-            # name. A first draft grepped for "phrase_editor" and friends and got 0 for three of five
-            # — because C++ mangled names carry namespaces and classes, not source filenames. A check
-            # built on a guessed discriminator fails in both directions.
+            # ⚠️ The unstripped intermediate: pt::ui symbols are internal, and the APK copy is
+            # stripped. Compared against libpt-ui.a's own symbol list, not hand-picked names.
             D=$(ls -d app/.cxx/Debug/*/"$ABI")
             OBJ=$(ls app/build/intermediates/cxx/Debug/*/obj/"$ABI"/libpockettracker-sdl.so 2>/dev/null | head -1)
             if [ ! -f "$OBJ" ]; then
@@ -241,12 +203,8 @@ jobs:
             fi
           done
 
-          # ── 4. The Compose→SDL swap shipped, verified on the merged manifests ──────────────────
-          # Through phases C and D the SDL UI rode in a debug-only second activity (SdlActivity,
-          # src/debug), and this step asserted it stayed OUT of release. Phase E deleted the Compose
-          # MainActivity and moved the SDL activity into src/main UNDER that name, so the invariant
-          # inverts: the SDL activity is now the shipping launcher, and the old debug-only one is gone.
-          # Verified on the merged manifests rather than believed from the source layout.
+          # ── 4. The launcher, on the merged manifests ─────────────────────────────────────────────
+          # MainActivity (the SDL activity) launches release; no SdlActivity in either manifest.
           ./gradlew :app:processReleaseManifest :app:processDebugManifest --rerun-tasks --no-daemon
           RELMF=$(ls app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml)
           DBGMF=$(ls app/build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml)
@@ -256,33 +214,22 @@ jobs:
           # The shipping launcher must be MainActivity, present in RELEASE.
           MAIN=$(grep -c 'MainActivity' "$RELMF" || true)
           if [ "$RN" -eq 0 ] && [ "$DN" -eq 0 ] && [ "$MAIN" -ge 1 ]; then
-            echo "ok    Phase E swap: SdlActivity gone from both manifests, MainActivity is the release launcher ($MAIN)"
+            echo "ok    launcher: no SdlActivity in either manifest, MainActivity is the release launcher ($MAIN)"
           else
-            echo "FAIL  Phase E swap: SdlActivity refs debug=$DN release=$RN (want 0/0), MainActivity in release=$MAIN (want >=1)"
+            echo "FAIL  launcher: SdlActivity refs debug=$DN release=$RN (want 0/0), MainActivity in release=$MAIN (want >=1)"
             FAIL=1
           fi
 
           exit $FAIL
 
-      # ⚠️ There is no `./gradlew test` step, and no C++ conformance job either. The sequencer and UI
-      # are C++, so the JVM has nothing left to unit-test; the golden regression suite that does cover
-      # them lives outside this repository and CI cannot reach it. The JVM recorders that produced
-      # those goldens are preserved at tag `kotlin-golden-source`.
+      # ⚠️ No test step: the sequencer and UI are C++, and their regression suite lives outside this
+      # repository, where CI cannot reach it.
 
-      # ─── THE JNI KEEP RULES, IN THE ONLY BUILD THAT CAN BREAK THEM ────────────────────────────
-      #
-      # ⚠️ **EVERY OTHER CHECK IN THIS JOB READS A DEBUG APK, AND DEBUG NEVER RUNS R8**
-      # (`isMinifyEnabled` is release-only). So the SDL DEX assertion above passes by construction —
-      # it greps an unminified DEX for a class name — and a keep rule deleted, misspelled or simply
-      # not added for a new callback would be invisible here and fatal on a user's device. That is
-      # the exact bug class that killed every render in the first v0.9.3 APK.
-      #
-      # No keystore is needed: `signingConfig` falls back to the debug key when keystore.properties
-      # is absent (app/build.gradle.kts), so this builds a genuinely minified APK in CI.
-      #
-      # ⚠️ The names are extracted FROM proguard-rules.pro, never typed here — a list maintained in
-      # two places is a list that will disagree — and the count is asserted before anything is
-      # compared, so a parse that quietly matched nothing cannot report success.
+      # ─── The JNI keep rules, in the only build that can break them ────────────────────────────
+      # ⚠️ Every other check reads a DEBUG APK, and debug never runs R8: a missing keep rule for a
+      # JNI callback is invisible there and fatal in release. Without keystore.properties the release
+      # build signs with the debug key, so CI builds a really minified APK. The names come out of
+      # proguard-rules.pro, and their count is checked before anything is compared.
       - name: Build release APK and assert the JNI keep rules survived R8
         run: |
           set -u
@@ -302,8 +249,7 @@ jobs:
           rm -rf /tmp/dexchk && mkdir -p /tmp/dexchk
           unzip -o -q "$APK" 'classes*.dex' -d /tmp/dexchk
 
-          # ⚠️ ONE grep pattern for BOTH halves. The control below is only evidence that R8 ran in
-          # this build if it is measured exactly the way the kept names are.
+          # ⚠️ One grep for both halves: the control proves R8 ran only if measured the same way.
           present=0
           while read -r n; do
             if cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
@@ -314,10 +260,8 @@ jobs:
           done < /tmp/kept.txt
           echo "kept members present: $present of $WANT"
 
-          # THE CONTROL, and without it "13 of 13 present" is equally true of a DEX R8 never touched.
-          # These five are private members of the same class with no keep rule; R8 must have renamed
-          # every one of them. ⚠️ A name gone from the source is absent from any DEX: each must still
-          # be in MainActivity.kt, or its absence proves nothing.
+          # The control: "13 of 13 present" is true of a DEX R8 never touched too. Five private
+          # members with no keep rule must all be renamed. ⚠️ Each must still exist in MainActivity.kt.
           KT=app/src/main/java/com/conanizer/pockettracker/MainActivity.kt
           survived=0
           for n in hideSystemBars askForNotificationsOnce watchScreenRecording onScreenRecording visualizerIndex; do
@@ -337,19 +281,9 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
 
-  # ─── The SDL shell (convergence plan A4) ────────────────────────────────────────────────────────
-  #
-  # This job is what keeps the desktop and PortMaster artifacts from being hand-built on one Linux box
-  # and never configured anywhere else. Not a hypothetical gap: the first Windows configure ever
-  # attempted failed outright, because the audio profiler in sdl-audio-engine.cpp used POSIX
-  # clock_gettime, which MSVC does not have — broken for as long as it had existed, with nothing
-  # watching.
-  #
-  # The two runners also cover BOTH branches of shell/CMakeLists.txt's SDL2 lookup, which is worth
-  # more than doubling the platform count: ubuntu apt-installs libsdl2-dev, so find_package(SDL2)
-  # succeeds and the link is against the SYSTEM SDL — the model every PortMaster CFW requires. Windows
-  # has no system SDL, so it falls through to FetchContent and builds SDL from source, which is the
-  # model the desktop package (A3) ships. Neither path can rot unnoticed now.
+  # ─── The SDL shell ─────────────────────────────────────────────────────────────────────────────
+  # The desktop app on Linux and Windows. The two runners also take both branches of
+  # shell/CMakeLists.txt's SDL2 lookup: Linux the system's (as on every CFW), Windows FetchContent.
   shell:
     name: SDL shell (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -363,33 +297,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # System SDL2 on Linux only — see the job comment. Windows deliberately gets none, so that
-      # runner exercises the FetchContent fallback.
+      # Linux only: Windows takes the FetchContent branch.
       - name: Install SDL2 (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
 
-      # CMAKE_BUILD_TYPE explicitly, per shell/CMakeLists.txt's own warning: a Debug engine may not
-      # keep up with a real-time audio callback, and the usual "default it if empty" guard does not
-      # fire on MSVC.
+      # Release stated: shell/CMakeLists.txt says why.
       - name: Configure
         run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DPT_WERROR=ON
 
       - name: Build
         run: cmake --build shell/build --config Release
 
-      # The handheld's own code (the SCHED_FIFO thread, the exclusive ALSA open) is compiled only with
-      # PT_HANDHELD, which only the PortMaster release turns on — compiled here too, so it is not first
-      # built on release day.
+      # The handheld-only code (PT_HANDHELD), so it is not first compiled on release day.
       - name: Build the handheld variant (Linux)
         if: runner.os == 'Linux'
         run: |
           cmake -S shell -B shell/build-handheld -DCMAKE_BUILD_TYPE=Release -DPT_WERROR=ON -DPT_HANDHELD=ON
           cmake --build shell/build-handheld
 
-      # `error` rather than `warn` on no match — a shell that silently stopped being produced is
-      # exactly the failure this job exists to catch, and a green job with an empty artifact would
-      # hide it.
+      # `error` on no match: a green job with no artifact would hide a shell no longer produced.
       - name: Upload the shell (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
@@ -399,21 +326,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # ─── The double-clickable Windows package (convergence plan A3) ──────────────────────────────
-      #
-      # Windows uploads the ZIP rather than the bare exe, because the zip is the artifact that is
-      # meant to reach a person: exe renamed to PocketTracker.exe, README, and the licences that a
-      # statically linked SDL2 + decoder stack obliges us to ship.
-      #
-      # The script verifies the ARTIFACT before it zips — that the VC runtime is static (a stranger
-      # has no redistributable installed), that the icon in the binary is ours, that the version
-      # matches app/build.gradle.kts, and that every statically linked component has a notice — and
-      # then reads the whole package back out of the zip. It handles both build layouts itself
-      # (ninja puts the exe in the build root, a multi-config VS generator in Release/).
-      #
-      # ⚠️ `powershell` explicitly, NOT the runner's default shell. It is Windows PowerShell 5.1 the
-      # script was written and tested against; pwsh 7 cannot load some of the assemblies it uses, and
-      # a package step that only fails on the runner is the exact failure mode this job exists for.
+      # ─── The Windows package ───────────────────────────────────────────────────────────────────
+      # The zip, not the bare exe: it is what reaches a person. build-windows.ps1 checks the artifact.
+      # ⚠️ `powershell` (5.1), not the runner's default pwsh 7, which cannot load some of its assemblies.
       - name: Package the Windows desktop zip
         if: runner.os == 'Windows'
         shell: powershell
@@ -427,11 +342,3 @@ jobs:
           path: build/windows/*.zip
           if-no-files-found: error
           retention-days: 7
-
-# The A5 "pt-ui NDK canary" job lived here until convergence C2 (2026-07-20). Its purpose was to
-# compile pt-ui with the NDK while the target was still gated out of the Android build, so that C2
-# would be the un-gating of a target already known to compile rather than the day a pile of platform
-# breakage was discovered. It did that job — it compiled clean on the first attempt — and C2 retired
-# it, because the `build` job above now compiles pt-ui against AGP's own configure on BOTH shipping
-# ABIs. Keeping a second, standalone NDK configuration alongside the real one would have been exactly
-# the drift this plan exists to delete. Its option, PT_UI_ON_ANDROID, went with it.
