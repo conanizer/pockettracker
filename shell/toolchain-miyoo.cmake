@@ -1,18 +1,7 @@
 # ─── Miyoo Mini / Mini+ (OnionOS) — the DEVICE toolchain ─────────────────────────────────────────
 #
-# The toolchain that produces a SHIPPABLE armhf ELF, as opposed to `toolchain-armhf.cmake`, which is
-# Ubuntu's generic cross compiler and exists only to answer "is this codebase 32-bit clean?" under
-# qemu. The two are not interchangeable and the difference is the SYSROOT:
-#
-#   toolchain-armhf.cmake   compiles 32-bit, then finds its headers in the HOST's /usr/include and
-#                           links against a modern glibc. Fine for a portability smoke test — the
-#                           headers are read by the 32-bit compiler, so the type sizes are the
-#                           target's — and exactly how a build picks up a header the device has not
-#                           got.
-#   this file               ARM's 8.3-2019.03 arm-linux-gnueabihf with its own glibc 2.28 sysroot,
-#                           which is the toolchain every Miyoo Mini port is built with and the
-#                           reason the glibc ceiling asserted in build-miyoo.sh is a READING rather
-#                           than a guess.
+# ARM's 8.3-2019.03 arm-linux-gnueabihf with its own glibc 2.28 sysroot — the toolchain every Miyoo
+# Mini port is built with, so the glibc ceiling asserted in build-miyoo.sh is a reading, not a guess.
 #
 # ⚠️ IT IS NOT IN THE REPO AND IS NOT DOWNLOADED BY THIS FILE — 279 MB, from
 # `shauninman/miyoomini-toolchain-buildroot` releases. Point `MIYOO_TOOLCHAIN` at the directory that
