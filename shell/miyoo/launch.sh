@@ -29,8 +29,8 @@ mydir=$(cd "$(dirname "$0")" && pwd)
 cd "$mydir" || exit 1
 
 # Everything this script and the app print, in one file, overwritten per launch — the run that just
-# went wrong is the one anybody wants. ⚠️ THE APP LEAVES IT ALONE: its own session log only takes
-# over a TERMINAL (main.cpp, open_session_log), so a launcher redirect stays the launcher's.
+# went wrong is the one anybody wants. The app's own pockettracker-log.txt gets its lines too; this
+# file also has the script's.
 exec > "$mydir/log.txt" 2>&1
 
 echo "PocketTracker launch  $(date)"

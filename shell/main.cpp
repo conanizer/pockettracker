@@ -10,7 +10,10 @@
 #define NOMINMAX
 #include <windows.h>     // AttachConsole
 #else
-#include <unistd.h>      // dup2/isatty
+#include <fcntl.h>
+#include <unistd.h>      // pipe/dup2
+#include <cerrno>
+#include <thread>
 #endif
 
 #define SDL_MAIN_HANDLED
@@ -63,10 +66,65 @@ std::string dir_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
 }
 
-// stdout and stderr → `<app root>/pockettracker-log.txt`, truncated each session. ⚠️ The Windows build
-// has no console, so without this every line goes nowhere. Only a terminal is taken over (a PortMaster
-// script's log is left alone); always on Windows. `PT_CONSOLE=1` keeps the output where it was.
-// ⚠️ `dup2`, not a second `freopen` — two FILE*s on one path overwrite each other's lines.
+constexpr const char* kLogName = "pockettracker-log.txt";
+
+#ifndef _WIN32
+// The tee: a pipe takes stdout and stderr, and its reader writes every chunk to the file (up to the
+// cap) and to wherever stdout went before (a terminal, a launcher's log, the session's journal).
+// ⚠️ What a crash prints in its last microseconds can die in the pipe with the process.
+constexpr size_t kLogCap = 512 * 1024;
+
+struct LogTee {
+    int         in   = -1;   // the pipe's read end
+    int         copy = -1;   // the old stdout; -1 = it was closed
+    int         file = -1;
+    std::thread reader;
+};
+LogTee g_tee;
+
+void write_all(int fd, const char* p, size_t n) {
+    while (n > 0) {
+        const ssize_t w = write(fd, p, n);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) return;
+        p += w;
+        n -= static_cast<size_t>(w);
+    }
+}
+
+void tee_reader() {
+    char   buf[4096];
+    size_t size = 0;
+    for (;;) {
+        const ssize_t n = read(g_tee.in, buf, sizeof(buf));
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;   // every write end closed: the process is leaving
+        if (g_tee.copy >= 0) write_all(g_tee.copy, buf, static_cast<size_t>(n));
+        if (size < kLogCap) {
+            write_all(g_tee.file, buf, static_cast<size_t>(n));
+            size += static_cast<size_t>(n);
+            if (size >= kLogCap) {
+                static const char capped[] = "\n--- log capped at 512 KB ---\n";
+                write_all(g_tee.file, capped, sizeof(capped) - 1);
+            }
+        }
+    }
+}
+
+// At exit: stdout and stderr go back to the old stdout, which closes the pipe's last write ends, so
+// the reader drains what is left and stops.
+void stop_tee() {
+    const int back = g_tee.copy >= 0 ? g_tee.copy : open("/dev/null", O_WRONLY);
+    dup2(back, STDOUT_FILENO);
+    dup2(back, STDERR_FILENO);
+    if (g_tee.reader.joinable()) g_tee.reader.join();
+    close(g_tee.file);
+}
+#endif
+
+// stdout and stderr → `<app root>/pockettracker-log.txt`, rewritten each session. Elsewhere a copy keeps
+// going where stdout went; Windows has no console, so the file alone. `PT_CONSOLE=1` keeps the output
+// where it was and writes no file.
 void open_session_log(const std::string& appRoot) {
     if (std::getenv("PT_CONSOLE")) {
 #ifdef _WIN32
@@ -78,21 +136,34 @@ void open_session_log(const std::string& appRoot) {
 #endif
         return;
     }
-#ifndef _WIN32
-    if (!isatty(fileno(stdout))) return;
-#endif
     std::error_code ec;
     std::filesystem::create_directories(appRoot, ec);   // first launch
-    const std::string path = appRoot + "/pockettracker-log.txt";
-    if (!std::freopen(path.c_str(), "w", stdout)) return;
+    const std::string path = appRoot + "/" + kLogName;
 #ifdef _WIN32
+    // ⚠️ `_dup2`, not a second `freopen` — two FILE*s on one path overwrite each other's lines.
+    if (!std::freopen(path.c_str(), "w", stdout)) return;
     _dup2(_fileno(stdout), _fileno(stderr));
-#else
-    dup2(fileno(stdout), fileno(stderr));
-#endif
     // ⚠️ Again: freopen resets the buffering, and a file is fully buffered by default.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+#else
+    g_tee.file = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (g_tee.file < 0) return;
+    int fds[2];
+    if (pipe(fds) != 0) {
+        close(g_tee.file);
+        return;
+    }
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    g_tee.in   = fds[0];
+    g_tee.copy = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
+    dup2(fds[1], STDOUT_FILENO);
+    dup2(fds[1], STDERR_FILENO);
+    close(fds[1]);
+    g_tee.reader = std::thread(tee_reader);
+    std::atexit(stop_tee);
+#endif
 }
 
 }  // namespace
