@@ -226,7 +226,9 @@ CursorContext InputDispatcher::cursor_context() const {
 
 bool InputDispatcher::apply_edit(const InputAction& action) {
     const ScreenHandler* h = screen();
-    return h && h->edit && (this->*h->edit)(action);
+    if (!h || !h->edit) return false;
+    if (changes_nothing(action, cursor_context())) return false;
+    return (this->*h->edit)(action);
 }
 
 void InputDispatcher::mark_dirty_and_arm_autosave() {

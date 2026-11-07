@@ -46,11 +46,20 @@ const ByteCell* byte_cell(int row) {
     return nullptr;
 }
 
-// The bank's own cycle; A+B back to row 0 (NORMAL, the defaults).
-CursorContext preset_name_context(int cycle_index, int count) {
+// The bank's own cycle; A+B back to row 0 (NORMAL, the defaults). `exact`: the cells are that row's.
+CursorContext preset_name_context(int cycle_index, int count, bool exact) {
     CursorContext c = cc::index_cycle(cycle_index, count);
     c.defaultValue  = 0;
+    c.reappliesSame = !exact;
     return c;
+}
+
+bool reverb_is_exactly(const songcore::Project& p, int i) {
+    return reverb_bank_match(p) == i && (p.reverbPreset.empty() || p.reverbPreset == kReverbPresets[i].name);
+}
+
+bool delay_is_exactly(const songcore::Project& p, int i) {
+    return delay_bank_match(p) == i && (p.delayPreset.empty() || p.delayPreset == kDelayPresets[i].name);
 }
 
 }  // namespace
@@ -270,10 +279,14 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
             return c;
         }
 
-        case ROW_REV_TYPE:
-            return preset_name_context(reverb_bank_cycle_index(p), kReverbPresetCount);
-        case ROW_DLY_TYPE:
-            return preset_name_context(delay_bank_cycle_index(p), kDelayPresetCount);
+        case ROW_REV_TYPE: {
+            const int i = reverb_bank_cycle_index(p);
+            return preset_name_context(i, kReverbPresetCount, reverb_is_exactly(p, i));
+        }
+        case ROW_DLY_TYPE: {
+            const int i = delay_bank_cycle_index(p);
+            return preset_name_context(i, kDelayPresetCount, delay_is_exactly(p, i));
+        }
 
         // ⚠️ Read-only, not absent: they answer a bare A, and `none()` would hide the cursor box.
         case ROW_REV_SAVE:
@@ -363,9 +376,7 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
         case ROW_REV_TYPE: {
             if (!isSet || action.value < 0 || action.value >= kReverbPresetCount) break;
             // ⚠️ Compared first: landing back on the shown preset must not bump the dirty counter.
-            if (reverb_bank_match(p) == action.value &&
-                (p.reverbPreset.empty() || p.reverbPreset == kReverbPresets[action.value].name))
-                break;
+            if (reverb_is_exactly(p, action.value)) break;
             reverb_apply_bank(p, action.value);
             return {true};
         }
@@ -376,9 +387,7 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
         case ROW_DLY_TYPE: {
             // As the reverb's, dirty counter included.
             if (!isSet || action.value < 0 || action.value >= kDelayPresetCount) break;
-            if (delay_bank_match(p) == action.value &&
-                (p.delayPreset.empty() || p.delayPreset == kDelayPresets[action.value].name))
-                break;
+            if (delay_is_exactly(p, action.value)) break;
             delay_apply_bank(p, action.value);
             return {true};
         }

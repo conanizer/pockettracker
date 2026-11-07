@@ -55,6 +55,7 @@ void InputDispatcher::eq_edit(InputAction (*fn)(const CursorContext&)) {
 
     const CursorContext ctx = eq_.cursor_context(es);
     const InputAction   act = fn(ctx);
+    if (changes_nothing(act, ctx)) return;
     const EqInputResult r =
         eq_.handle_input(host_.edit_project(), s_.eq.slotIndex, s_.eq.cursorRow, act);
 
@@ -68,7 +69,8 @@ void InputDispatcher::eq_step_slot(int delta) {
     // ⚠️ CLAMPS at 0 and 127 where every other B+LEFT/RIGHT wraps: wrapping would silently re-point
     // the cell at an unrelated curve.
     const int newSlot = std::clamp(s_.eq.slotIndex + delta, 0, 127);
-    s_.eq.slotIndex   = newSlot;
+    if (newSlot == s_.eq.slotIndex) return;
+    s_.eq.slotIndex = newSlot;
     apply_caller_eq_slot_change(newSlot);
 }
 
@@ -112,9 +114,9 @@ void InputDispatcher::apply_caller_eq_slot_change(int new_slot) {
             break;
         }
         case EqCallerContext::Kind::SAMPLE_EDITOR_FX:
-            // No engine call: the sample editor's EQ is read on APPLY.
+            // The editor's session, not the document; its EQ is read on APPLY.
             s_.sampleEditor.fxEqSlot = new_slot;
-            break;
+            return;
     }
 
     // Dirty and armed, without mark_modified's heavy push.

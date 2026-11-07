@@ -325,6 +325,19 @@ int Clipboard::cut_table_rows(Project& p, int tableId, int startRow, int startCo
 }
 
 // ─── Delete: a cleared velocity is 0x7F, a table volume −1, a chain ref −1, a transpose 0x00 ─────
+//
+// Each returns the cells that CHANGED, so a delete over cells already empty is no edit. A command's
+// type column clears its value with it, as A+B on the one cell does.
+
+namespace {
+
+template <class T> void clear_to(T& field, const T& empty, int& changed) {
+    if (field == empty) return;
+    field = empty;
+    ++changed;
+}
+
+}  // namespace
 
 int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int startColumn,
                                    int endRow, int endColumn) {
@@ -332,26 +345,26 @@ int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int s
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-    int itemsDeleted = 0;
+    int changed = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
         songcore::PhraseStep& step = phrase.steps[static_cast<size_t>(row)];
         for (int col = minCol; col <= maxCol; ++col) {
             switch (col) {
-                case 1: step.note       = Note::EMPTY(); ++itemsDeleted; break;
-                case 2: step.volume     = 0x7F;          ++itemsDeleted; break;  // max velocity
-                case 3: step.instrument = 0;             ++itemsDeleted; break;
-                case 4: step.fx1Type    = 0;             ++itemsDeleted; break;
-                case 5: step.fx1Value   = 0;             ++itemsDeleted; break;
-                case 6: step.fx2Type    = 0;             ++itemsDeleted; break;
-                case 7: step.fx2Value   = 0;             ++itemsDeleted; break;
-                case 8: step.fx3Type    = 0;             ++itemsDeleted; break;
-                case 9: step.fx3Value   = 0;             ++itemsDeleted; break;
+                case 1: clear_to(step.note, Note::EMPTY(), changed); break;
+                case 2: clear_to(step.volume, 0x7F, changed); break;  // max velocity
+                case 3: clear_to(step.instrument, 0, changed); break;
+                case 4: clear_to(step.fx1Type, 0, changed); clear_to(step.fx1Value, 0, changed); break;
+                case 5: clear_to(step.fx1Value, 0, changed); break;
+                case 6: clear_to(step.fx2Type, 0, changed); clear_to(step.fx2Value, 0, changed); break;
+                case 7: clear_to(step.fx2Value, 0, changed); break;
+                case 8: clear_to(step.fx3Type, 0, changed); clear_to(step.fx3Value, 0, changed); break;
+                case 9: clear_to(step.fx3Value, 0, changed); break;
                 default: break;
             }
         }
     }
-    return itemsDeleted;
+    return changed;
 }
 
 int Clipboard::delete_chain_rows(Project& p, int chainId, int startRow, int startColumn, int endRow,
@@ -360,31 +373,22 @@ int Clipboard::delete_chain_rows(Project& p, int chainId, int startRow, int star
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-    int itemsDeleted = 0;
+    int changed = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
         for (int col = minCol; col <= maxCol; ++col) {
-            switch (col) {
-                case 1:
-                    chain.phraseRefs[static_cast<size_t>(row)] = -1;
-                    ++itemsDeleted;
-                    break;
-                case 2:
-                    chain.transposeValues[static_cast<size_t>(row)] = 0x00;
-                    ++itemsDeleted;
-                    break;
-                default: break;
-            }
+            if (col == 1) clear_to(chain.phraseRefs[static_cast<size_t>(row)], -1, changed);
+            if (col == 2) clear_to(chain.transposeValues[static_cast<size_t>(row)], 0x00, changed);
         }
     }
-    return itemsDeleted;
+    return changed;
 }
 
 int Clipboard::delete_song_cells(Project& p, int startRow, int startColumn, int endRow,
                                  int endColumn) {
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-    int itemsDeleted = 0;
+    int changed = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
         for (int col = minCol; col <= maxCol; ++col) {
@@ -393,13 +397,11 @@ int Clipboard::delete_song_cells(Project& p, int startRow, int startColumn, int 
 
             songcore::Track& track = p.tracks[static_cast<size_t>(trackIndex)];
             // Only rows the track has: delete does not grow it.
-            if (row < static_cast<int>(track.chainRefs.size())) {
-                track.chainRefs[static_cast<size_t>(row)] = -1;
-                ++itemsDeleted;
-            }
+            if (row < static_cast<int>(track.chainRefs.size()))
+                clear_to(track.chainRefs[static_cast<size_t>(row)], -1, changed);
         }
     }
-    return itemsDeleted;
+    return changed;
 }
 
 int Clipboard::delete_table_rows(Project& p, int tableId, int startRow, int startColumn, int endRow,
@@ -408,25 +410,25 @@ int Clipboard::delete_table_rows(Project& p, int tableId, int startRow, int star
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-    int itemsDeleted = 0;
+    int changed = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
         songcore::TableRow& tr = table.rows[static_cast<size_t>(row)];
         for (int col = minCol; col <= maxCol; ++col) {
             switch (col) {
-                case 1: tr.transpose = 0x00; ++itemsDeleted; break;
-                case 2: tr.volume    = -1;   ++itemsDeleted; break;  // a table volume CAN be empty
-                case 3: tr.fx1Type   = 0;    ++itemsDeleted; break;
-                case 4: tr.fx1Value  = 0;    ++itemsDeleted; break;
-                case 5: tr.fx2Type   = 0;    ++itemsDeleted; break;
-                case 6: tr.fx2Value  = 0;    ++itemsDeleted; break;
-                case 7: tr.fx3Type   = 0;    ++itemsDeleted; break;
-                case 8: tr.fx3Value  = 0;    ++itemsDeleted; break;
+                case 1: clear_to(tr.transpose, 0x00, changed); break;
+                case 2: clear_to(tr.volume, -1, changed); break;  // a table volume CAN be empty
+                case 3: clear_to(tr.fx1Type, 0, changed); clear_to(tr.fx1Value, 0, changed); break;
+                case 4: clear_to(tr.fx1Value, 0, changed); break;
+                case 5: clear_to(tr.fx2Type, 0, changed); clear_to(tr.fx2Value, 0, changed); break;
+                case 6: clear_to(tr.fx2Value, 0, changed); break;
+                case 7: clear_to(tr.fx3Type, 0, changed); clear_to(tr.fx3Value, 0, changed); break;
+                case 8: clear_to(tr.fx3Value, 0, changed); break;
                 default: break;
             }
         }
     }
-    return itemsDeleted;
+    return changed;
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────────────────────────

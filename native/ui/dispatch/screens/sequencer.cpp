@@ -270,15 +270,13 @@ GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteT
 
         case Gesture::A_B:
             if (!s_.selection.active) return GestureResult::PASS;
-            (this->*clip)(ClipOp::DELETE, s_.selection.bounds());
-            mark_modified();
+            if ((this->*clip)(ClipOp::DELETE, s_.selection.bounds()) > 0) mark_modified();
             s_.selection.exit();
             return GestureResult::TAKEN;
 
         case Gesture::L_A: {
             if (s_.selection.active) {
-                (this->*clip)(ClipOp::CUT, s_.selection.bounds());
-                mark_modified();
+                if ((this->*clip)(ClipOp::CUT, s_.selection.bounds()) > 0) mark_modified();
                 s_.selection.exit();
                 return GestureResult::TAKEN;
             }
@@ -293,67 +291,63 @@ GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteT
     }
 }
 
-void InputDispatcher::song_clip(ClipOp op, const SelectionBounds& b) {
+int InputDispatcher::song_clip(ClipOp op, const SelectionBounds& b) {
     Project& p = host_.edit_project();
     switch (op) {
         case ClipOp::COPY:
             clip_.copy_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return 0;
         case ClipOp::CUT:
-            clip_.cut_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.cut_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
         case ClipOp::DELETE:
-            clip_.delete_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.delete_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
     }
+    return 0;
 }
 
-void InputDispatcher::chain_clip(ClipOp op, const SelectionBounds& b) {
+int InputDispatcher::chain_clip(ClipOp op, const SelectionBounds& b) {
     Project&  p  = host_.edit_project();
     const int id = s_.currentChain;
     switch (op) {
         case ClipOp::COPY:
             clip_.copy_chain_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return 0;
         case ClipOp::CUT:
-            clip_.cut_chain_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.cut_chain_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
         case ClipOp::DELETE:
-            clip_.delete_chain_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.delete_chain_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
     }
+    return 0;
 }
 
-void InputDispatcher::phrase_clip(ClipOp op, const SelectionBounds& b) {
+int InputDispatcher::phrase_clip(ClipOp op, const SelectionBounds& b) {
     Project&  p  = host_.edit_project();
     const int id = s_.currentPhrase;
     switch (op) {
         case ClipOp::COPY:
             clip_.copy_phrase_steps(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return 0;
         case ClipOp::CUT:
-            clip_.cut_phrase_steps(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.cut_phrase_steps(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
         case ClipOp::DELETE:
-            clip_.delete_phrase_steps(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.delete_phrase_steps(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
     }
+    return 0;
 }
 
-void InputDispatcher::table_clip(ClipOp op, const SelectionBounds& b) {
+int InputDispatcher::table_clip(ClipOp op, const SelectionBounds& b) {
     Project&  p  = host_.edit_project();
     const int id = s_.currentTable;
     switch (op) {
         case ClipOp::COPY:
             clip_.copy_table_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return 0;
         case ClipOp::CUT:
-            clip_.cut_table_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.cut_table_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
         case ClipOp::DELETE:
-            clip_.delete_table_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
-            break;
+            return clip_.delete_table_rows(p, id, b.topLeftRow, b.topLeftColumn, b.bottomRightRow, b.bottomRightColumn);
     }
+    return 0;
 }
 
 // ─── A on an empty cell, and A,A ─────────────────────────────────────────────────────────────────

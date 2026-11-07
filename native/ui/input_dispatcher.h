@@ -486,7 +486,8 @@ class InputDispatcher {
     // "What is under the cursor?", asked of the current screen's row in `SCREENS`.
     CursorContext cursor_context() const;
 
-    // Apply a resolved action to the document. True if anything changed.
+    // Apply a resolved action to the document. True if anything changed; a SET of the value already
+    // in the cell is not applied at all.
     bool apply_edit(const InputAction& action);
 
     // Context → action → mutate → echo to the engine; `fn` is one of the generic handlers.
@@ -883,11 +884,11 @@ class InputDispatcher {
     bool          table_edit(const InputAction& action);
 
     enum class ClipOp { COPY, CUT, DELETE };
-    using ClipFn = void (InputDispatcher::*)(ClipOp, const SelectionBounds&);
-    void song_clip(ClipOp op, const SelectionBounds& b);
-    void chain_clip(ClipOp op, const SelectionBounds& b);
-    void phrase_clip(ClipOp op, const SelectionBounds& b);
-    void table_clip(ClipOp op, const SelectionBounds& b);
+    using ClipFn = int (InputDispatcher::*)(ClipOp, const SelectionBounds&);   // the cells changed
+    int  song_clip(ClipOp op, const SelectionBounds& b);
+    int  chain_clip(ClipOp op, const SelectionBounds& b);
+    int  phrase_clip(ClipOp op, const SelectionBounds& b);
+    int  table_clip(ClipOp op, const SelectionBounds& b);
 
     // What the four share: L+B marks a selection; inside one B copies, A+B deletes, L+A cuts.
     // Outside one L+A pastes into item `pasteTarget`, and A+B is the cell's own delete.

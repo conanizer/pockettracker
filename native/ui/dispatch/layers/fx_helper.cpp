@@ -71,7 +71,7 @@ int InputDispatcher::current_fx_type_code() const {
 }
 
 void InputDispatcher::apply_fx_type_change(int effect_code) {
-    if (!on_fx_type_column()) return;
+    if (!on_fx_type_column() || effect_code == current_fx_type_code()) return;
     const int slot = fx_slot_at_cursor();
     with_fx_row(s_, host_.edit_project(), [&](auto& r) { fx_type_of(r, slot) = effect_code; });
     mark_modified(/*table_touched=*/s_.currentScreen == ScreenType::TABLE);

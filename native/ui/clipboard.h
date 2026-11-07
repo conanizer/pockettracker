@@ -80,7 +80,7 @@ class Clipboard {
     PasteResult paste(songcore::Project& p, ScreenType target, int targetId, int cursorRow,
                       int cursorColumn);
 
-    // ── Cut: copy + delete; returns the cells cleared ────────────────────────────────────────────
+    // ── Cut: copy + delete; returns the cells that changed ───────────────────────────────────────
     int cut_phrase_steps(songcore::Project& p, int phraseId, int startRow, int startColumn,
                          int endRow, int endColumn);
     int cut_chain_rows(songcore::Project& p, int chainId, int startRow, int startColumn, int endRow,
@@ -90,7 +90,7 @@ class Clipboard {
     int cut_table_rows(songcore::Project& p, int tableId, int startRow, int startColumn, int endRow,
                        int endColumn);
 
-    // ── Delete: A+B over a selection; the clipboard untouched ────────────────────────────────────
+    // ── Delete: A+B over a selection, the clipboard untouched ────────────────────────────────────
     int delete_phrase_steps(songcore::Project& p, int phraseId, int startRow, int startColumn,
                             int endRow, int endColumn);
     int delete_chain_rows(songcore::Project& p, int chainId, int startRow, int startColumn,

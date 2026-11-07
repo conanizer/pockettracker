@@ -68,6 +68,8 @@ struct CursorContext {
     int                emptyValue   = 0xFF;
     int                fxSlot       = 0;  // for effects: which FX slot (1, 2, 3)
     int                defaultValue = NO_DEFAULT;  // A+B resets a non-deletable value to this
+    // A SET of `currentValue` still writes: a preset name whose cells are not that preset's re-applies it.
+    bool               reappliesSame = false;
 
     // NOTE cells: the pitch classes that may be typed, bit 0 = `scaleKey`; 0x0FFF is chromatic.
     // On the context because stepping must move a whole degree.
@@ -515,6 +517,13 @@ inline InputAction decrement_fast(const CursorContext& c) {
     if (c.capabilities.canDecrement)
         return InputAction::set_value(step_value(c.currentValue, -c.smallStep, c));
     return InputAction::none();
+}
+
+// A SET of the value a filled cell already holds — a step at a clamped end, A+B on a value at its
+// default, a scale with no further note. It is no edit, and must not reach the dirty counter.
+inline bool changes_nothing(const InputAction& a, const CursorContext& c) {
+    return a.type == ActionType::SET_VALUE && !c.capabilities.isEmpty && !c.reappliesSame &&
+           a.value == c.currentValue;
 }
 
 // A+B: clear a deletable cell, else reset to `defaultValue` if it has one.

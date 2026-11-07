@@ -116,10 +116,13 @@ CursorContext ScaleModule::cursor_context(const ScaleState& s) const {
         // ⚠️ SAVE and LOAD are read-only, not absent: they answer a bare A, and `none()` would hide
         // the cursor box.
         if (s.cursorColumn != SCALE_NAME_COL_NAME) return cc::read_only();
-        CursorContext c = cc::index_cycle(songcore::scale_bank_cycle_index(s.scale),
-                                          static_cast<int>(songcore::scale_bank().size()));
+        const int index = songcore::scale_bank_cycle_index(s.scale);
+        CursorContext c = cc::index_cycle(index, static_cast<int>(songcore::scale_bank().size()));
         // A+B on the name resets to Chromatic (bank row 0, the default slot).
         c.defaultValue = 0;
+        songcore::Scale applied = s.scale;
+        songcore::scale_apply_bank(applied, index);
+        c.reappliesSame = applied.name != s.scale.name || applied.enabled != s.scale.enabled;
         return c;
     }
 

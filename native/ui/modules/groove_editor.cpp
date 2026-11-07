@@ -124,9 +124,13 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
         switch (s.panelRow) {
             case GROOVE_PANEL_NAME: {
                 // The factory list, cycled as SCALE's name row.
-                CursorContext c = cc::index_cycle(songcore::groove_bank_cycle_index(s.groove),
-                                                  static_cast<int>(songcore::groove_bank().size()));
+                const int index = songcore::groove_bank_cycle_index(s.groove);
+                CursorContext c = cc::index_cycle(index, static_cast<int>(songcore::groove_bank().size()));
                 c.defaultValue = 0;  // A+B: STRAIGHT, a new groove's own steps
+                songcore::Groove applied = s.groove;
+                songcore::groove_apply_bank(applied, index);
+                c.reappliesSame = applied.steps != s.groove.steps || applied.name != s.groove.name ||
+                                  applied.ticksPerStep != s.groove.ticksPerStep;
                 return c;
             }
             case GROOVE_PANEL_QNT:

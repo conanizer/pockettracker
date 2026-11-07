@@ -88,13 +88,16 @@ void InputDispatcher::qwerty_apply() {
         case QwertyContext::INSTRUMENT_NAME: {
             Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(s_.currentInstrument)];
             // A cleared name reverts to "INSTxx": an unnamed instrument must still be identifiable.
-            ins.name = text.empty() ? songcore::default_instrument_name(ins.id) : text;
+            const std::string name = text.empty() ? songcore::default_instrument_name(ins.id) : text;
+            if (name == ins.name) break;
+            ins.name = name;
             mark_modified();
             break;
         }
 
         case QwertyContext::PROJECT_NAME:
             // An empty name is allowed; SAVE supplies a fallback filename (save_project).
+            if (text == host_.edit_project().name) break;
             host_.edit_project().name = text;
             mark_modified();
             break;
@@ -136,7 +139,9 @@ void InputDispatcher::qwerty_apply() {
             SampleEditorState& se = s_.sampleEditor;
             const std::string  name = text.empty() ? se.sampleName : text;
             se.sampleName = name;
-            host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)].name = name;
+            std::string& insName = host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)].name;
+            if (insName == name) break;
+            insName = name;
             mark_modified();
             break;
         }
