@@ -46,8 +46,10 @@ struct SampleEditorState {
     int         sampleRate  = 44100; // the FILE's rate, not the device's
     int         totalFrames = 0;
 
-    // 620 (min, max) pairs, one per pixel column. Refilled by the feed on zoom/scroll.
+    // 620 (min, max) pairs, one per pixel column, of the view. Filled by the feed alone: on zoom,
+    // scroll, the channel, and whenever `audioVersion` moves.
     std::vector<float> waveformData;
+    int                audioVersion = 0;   // bumped by every load or op that rewrites the audio
 
     // ── Row 1: the view ──────────────────────────────────────────────────────────────────────────
     int  zoomLevel     = 0;      // 0 = 1×, 1 = 2×, … 4 = 16×

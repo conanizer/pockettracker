@@ -287,12 +287,13 @@ private:
         // A new marker set can leave the index above the ceiling.
         se.sliceIndex = std::clamp(se.sliceIndex, 0, se.slice_index_ceiling());
 
-        // The waveform, re-binned when the window (zoom, scroll) or the channel changes.
+        // The waveform, re-binned when the window (zoom, scroll), the channel or the audio changes.
         const int64_t vs = se.view_start();
         const int64_t ve = se.view_end();
         if (!wfKeyValid_ || vs != wfStart_ || ve != wfEnd_ || se.sourceMode != wfSource_ ||
-            se.totalFrames != wfTotal_ || se.instrumentId != wfInst_) {
+            se.totalFrames != wfTotal_ || se.instrumentId != wfInst_ || se.audioVersion != wfAudio_) {
             wfKeyValid_ = true;
+            wfAudio_    = se.audioVersion;
             wfStart_    = vs;
             wfEnd_      = ve;
             wfSource_   = se.sourceMode;
@@ -313,7 +314,7 @@ private:
     // What the sample editor's bins were computed from.
     bool    wfKeyValid_ = false;
     int64_t wfStart_ = 0, wfEnd_ = 0;
-    int     wfSource_ = -1, wfTotal_ = -1, wfInst_ = -1;
+    int     wfSource_ = -1, wfTotal_ = -1, wfInst_ = -1, wfAudio_ = -1;
 
     int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
     bool        sfCachedIsSf_ = false;

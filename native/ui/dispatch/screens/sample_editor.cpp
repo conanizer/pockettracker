@@ -12,14 +12,6 @@ namespace pt::ui {
 
 namespace {
 
-/** The waveform panel's width: one (min, max) pair per pixel. */
-constexpr int WAVEFORM_BINS = SampleEditorModule::WAVEFORM_W;
-
-/** SOURCE mode → the channel the waveform is drawn from: 0 = left, 1 = right, 2 = averaged. */
-int waveform_channel(int source_mode) {
-    return (source_mode == 0) ? 0 : (source_mode == 1) ? 1 : 2;
-}
-
 /** A+LEFT/RIGHT nudge by about one visible pixel, A+UP/DOWN by sixteen — both scaled by the zoom. */
 int64_t fine_step(const SampleEditorState& se) {
     return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (256LL << se.zoomLevel));
@@ -212,8 +204,7 @@ void InputDispatcher::init_sample_editor_state() {
     // ⚠️ SOURCE opens on STEREO for a stereo sample: any other mode saves one channel.
     se.sourceMode = se.hasStereoData ? 2 /*STEREO*/ : 0;
 
-    se.waveformData  = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
-                                             waveform_channel(se.sourceMode));
+    ++se.audioVersion;   // the feed re-bins the view
 
     // The selection opens on the instrument's own window, stored as 0..255 and scaled to frames here.
     if (se.totalFrames > 0) {
@@ -472,8 +463,7 @@ bool InputDispatcher::apply_sample_rate_and_bits() {
     rescale_positions(se, oldLen, newLen);
     se.totalFrames = newLen;
     se.sampleRate  = host_.sample_rate_of(se.instrumentId);
-    se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
-                                            waveform_channel(se.sourceMode));
+    ++se.audioVersion;   // the feed re-bins the view
     se.isModified = true;
     return true;
 }
@@ -513,10 +503,7 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
         se.sliceIndex      = 0;   // the ceiling has just collapsed to a single slice, the whole sample
     }
 
-    se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS,
-                                            static_cast<int>(se.view_start()),
-                                            static_cast<int>(se.view_end()),
-                                            waveform_channel(se.sourceMode));
+    ++se.audioVersion;   // the feed re-bins the view
 }
 
 // ─── A on the op rows, the FX row, the name and the save buttons ─────────────────────────────────
@@ -780,8 +767,7 @@ bool InputDispatcher::bake_pending_pitch() {
     se.pitchSemitones = 0;   // spent
     se.rateMode       = 0;   // the shifted buffer IS the new original — see sample_edit.h
     // ⚠️ BIT is NOT reset. This runs on the way INTO a save, and BIT is the depth that save writes.
-    se.waveformData   = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
-                                              waveform_channel(se.sourceMode));
+    ++se.audioVersion;   // the feed re-bins the view
 
     // The instrument's playback params were derived from the old buffer's length.
     host_.push_instrument(se.instrumentId);
