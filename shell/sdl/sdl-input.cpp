@@ -374,8 +374,13 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
         }
 
         case SDL_CONTROLLERDEVICEADDED:
+            // ⚠️ SDL queues one for every pad already open at boot too: the same handle comes back
+            // with its count raised, and is held once.
             if (SDL_GameController* c = SDL_GameControllerOpen(e.cdevice.which)) {
-                controllers_.push_back(c);
+                if (std::find(controllers_.begin(), controllers_.end(), c) == controllers_.end())
+                    controllers_.push_back(c);
+                else
+                    SDL_GameControllerClose(c);
             }
             break;
 
