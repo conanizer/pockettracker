@@ -33,6 +33,8 @@ class SafFileSystem : public pt::ui::FileSystem {
   public:
     // `private_root` is `context.filesDir`.
     explicit SafFileSystem(std::string private_root);
+    // Takes its hooks back: Android can run `SDL_main` again in the same process.
+    ~SafFileSystem() override;
 
     // Installs this as `byte_source.h`'s resolver, so file operations below the UI accept `pt://`.
     // Called once, right after construction. All three hooks go together: a render opens its temp

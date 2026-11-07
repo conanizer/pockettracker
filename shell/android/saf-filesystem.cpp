@@ -94,6 +94,12 @@ SafFileSystem* g_instance = nullptr;
 
 SafFileSystem::SafFileSystem(std::string private_root) : priv_(private_root, private_root) {}
 
+SafFileSystem::~SafFileSystem() {
+    if (g_instance != this) return;
+    pt_set_file_hooks(PtFileHooks{});
+    g_instance = nullptr;
+}
+
 extern "C" int saf_open_hook_trampoline(const char* path, const char* mode) {
     if (!g_instance || !path || !mode) return -1;
     return g_instance->open_fd(path, mode);

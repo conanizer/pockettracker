@@ -58,6 +58,7 @@ size_t      g_logFileSize = 0;
 std::string g_logPath;            // what g_logFile is open on; "" = nothing open
 constexpr size_t      kLogFileCap  = 512 * 1024;
 constexpr const char* kLogFileName = "pockettracker-log.txt";
+bool                  g_logPumpStarted = false;   // once per process; stdout stays on its pipe
 
 // Everything written so far, for the relocation to carry across. ⚠️ Held in memory, not re-read
 // from the first file (that would race the pump); appended under the write's lock, so no line is
@@ -252,13 +253,21 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
-    // Opened before the pump starts, so the first line is teed. A failure costs nothing.
-    if (!privateRoot.empty()) {
-        const std::string path = privateRoot + "/" + kLogFileName;
-        g_logFile     = std::fopen(path.c_str(), "w");
+    // Opened before the pump starts, so the first line is teed. A failure costs nothing. ⚠️ Under the
+    // lock: after EXIT and a relaunch `SDL_main` runs again in this process, the first run's pump is
+    // still reading, and the new session starts a fresh log.
+    {
+        const std::string path = privateRoot.empty() ? std::string() : privateRoot + "/" + kLogFileName;
+        FILE* file = path.empty() ? nullptr : std::fopen(path.c_str(), "w");
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        if (g_logFile) std::fclose(g_logFile);
+        g_logFile     = file;
         g_logFileSize = 0;
-        if (g_logFile) g_logPath = path;
+        g_logPath     = file ? path : std::string();
+        g_logCarrying = true;
+        g_logCarry.clear();
     }
+    if (g_logPumpStarted) return;
 
     int pfd[2];
     if (pipe(pfd) != 0) return;  // No console is a degraded bring-up, not a failure to launch.
@@ -275,6 +284,7 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
     pthread_t t;
     if (pthread_create(&t, nullptr, log_pump, reinterpret_cast<void*>((intptr_t)pfd[0])) == 0) {
         pthread_detach(t);
+        g_logPumpStarted = true;
         if (savedOut >= 0) close(savedOut);
         if (savedErr >= 0) close(savedErr);
         return;
