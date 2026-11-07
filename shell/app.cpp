@@ -529,8 +529,10 @@ class FrameLoop {
     // saved after this returns). ⚠️ A kill during the synchronous export is seen only when it ends.
     void run();
 
-    // The progress readout pushed from inside a blocking render.
+    // The progress readout pushed from inside a blocking render or load. ⚠️ Not while backgrounded:
+    // Android has taken the window's surface.
     void repaint() {
+        if (bg.backgrounded) return;
         layout.draw(screen.canvas, state);
         screen.present(state, input);
     }
