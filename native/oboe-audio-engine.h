@@ -23,8 +23,9 @@ public:
     // OpenSL ES's buffer size, which cannot ask the device. <= 0 keeps Oboe's default.
     void setPlatformDefaults(int sampleRate, int framesPerBurst);
 
-    // While this file exists the device stays on OpenSL ES (see openStream). Empty = no guard.
-    void setSlowOpenMarker(std::string path);
+    // While this file names `appVersion` the device stays on OpenSL ES (see openStream). Empty = no
+    // guard. ⚠️ Kept out of Auto Backup (res/xml): it belongs to this device.
+    void setSlowOpenMarker(std::string path, std::string appVersion);
 
     // Set while a screen recording runs. ⚠️ The direct path is silent in a recording and a stream keeps
     // its path, so it is avoided while set, and `deviceLost` asks for one reopen per flip. Null = never.
@@ -68,6 +69,7 @@ private:
     int platformBurst_ = 0;
 
     std::string slowOpenMarker_;
+    std::string appVersion_;
 
     // The frame loop's thread only.
     const std::atomic<bool>* playbackCaptured_ = nullptr;

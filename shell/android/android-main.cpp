@@ -448,7 +448,8 @@ int main(int argc, char** argv) {
     int deviceRate = 0, deviceBurst = 0;
     query_device_audio_defaults(deviceRate, deviceBurst);
     audio.setPlatformDefaults(deviceRate, deviceBurst);
-    if (!privateRoot.empty()) audio.setSlowOpenMarker(privateRoot + "/audio-slow-open");
+    if (!privateRoot.empty())
+        audio.setSlowOpenMarker(privateRoot + "/audio-slow-open", PT_VERSION_STRING);
     audio.setPlaybackCaptured(&g_playbackCaptured);
 
     if (!audio.openStream()) {

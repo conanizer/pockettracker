@@ -3,10 +3,9 @@
 #include "audio-engine.h"
 #include "audio-defs.h"  // LOGD/LOGE
 
-#include <unistd.h>
-
 #include <chrono>
 #include <cstdio>
+#include <string>
 
 OboeAudioEngine::OboeAudioEngine(AudioEngine* core) : core(core) {}
 
@@ -21,9 +20,24 @@ void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
     if (framesPerBurst > 0) oboe::DefaultStreamValues::FramesPerBurst = framesPerBurst;
 }
 
-void OboeAudioEngine::setSlowOpenMarker(std::string path) {
+void OboeAudioEngine::setSlowOpenMarker(std::string path, std::string appVersion) {
     slowOpenMarker_ = std::move(path);
+    appVersion_     = std::move(appVersion);
 }
+
+namespace {
+
+// Does the marker exist and name `version`? An older build left it empty.
+bool marker_names(const std::string& path, const std::string& version) {
+    FILE* f = std::fopen(path.c_str(), "r");
+    if (!f) return false;
+    char         buf[64];
+    const size_t n = std::fread(buf, 1, sizeof(buf), f);
+    std::fclose(f);
+    return std::string(buf, n) == version;
+}
+
+}  // namespace
 
 void OboeAudioEngine::setPlaybackCaptured(const std::atomic<bool>* captured) {
     playbackCaptured_ = captured;
@@ -54,14 +68,18 @@ bool OboeAudioEngine::openStream() {
     builder.setSampleRate(AudioEngine::SAMPLE_RATE);
 
     // ⚠️ The modern API first (the only way to the low-latency direct path), behind a marker file:
-    // one ROM stalls startup for up to 35 s opening it. The marker is removed only after a quick open
-    // AND start; left behind, the device goes straight to OpenSL ES from then on.
-    const bool legacyOnly = !slowOpenMarker_.empty() && access(slowOpenMarker_.c_str(), F_OK) == 0;
+    // one ROM stalls startup for up to 35 s opening it. The marker holds the app version that wrote it
+    // and is removed only after a quick open AND start; while it names this version the device goes
+    // straight to OpenSL ES. A new version tries the modern API once more.
+    const bool legacyOnly = !slowOpenMarker_.empty() && marker_names(slowOpenMarker_, appVersion_);
     const auto t0 = std::chrono::steady_clock::now();
     oboe::Result result = oboe::Result::ErrorInternal;
     if (!legacyOnly) {
         if (!slowOpenMarker_.empty()) {
-            if (FILE* f = std::fopen(slowOpenMarker_.c_str(), "w")) std::fclose(f);
+            if (FILE* f = std::fopen(slowOpenMarker_.c_str(), "w")) {
+                std::fputs(appVersion_.c_str(), f);
+                std::fclose(f);
+            }
         }
         // Unspecified, so Oboe avoids AAudio on Android 8.0. Exclusive is only a request.
         builder.setAudioApi(oboe::AudioApi::Unspecified);
@@ -152,7 +170,7 @@ bool OboeAudioEngine::openStream() {
         if (openMs < kSlowOpenMs) {
             std::remove(slowOpenMarker_.c_str());
         } else {
-            LOGE("openStream: took %lld ms - OpenSL ES only from the next launch", openMs);
+            LOGE("openStream: took %lld ms - OpenSL ES only until the next app version", openMs);
         }
     }
 
