@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.os.Environment
 import android.util.Log
 import android.view.InputDevice
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -164,6 +166,26 @@ class MainActivity : SDLActivity() {
         watchScreenRecording()
         super.onResume()
         stopPlaybackService()
+    }
+
+    // ⚠️ Some pad drivers send the D-pad as BTN_DPAD keys that the system's key map for that pad
+    // does not list (a Switch Pro Controller over Bluetooth on a recent kernel): they arrive with no
+    // keycode and SDL drops them. They go on as keyboard arrows, which the shell reads as the D-pad.
+    // Not as the pad's own buttons: SDL built that pad's layout without a D-pad and would drop them too.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val arrow = if (event.keyCode == KeyEvent.KEYCODE_UNKNOWN) dpadKeyFor(event.scanCode) else 0
+        if (arrow == 0) return super.dispatchKeyEvent(event)
+        return super.dispatchKeyEvent(KeyEvent(
+            event.downTime, event.eventTime, event.action, arrow, event.repeatCount, event.metaState,
+            KeyCharacterMap.VIRTUAL_KEYBOARD, event.scanCode, event.flags, InputDevice.SOURCE_KEYBOARD))
+    }
+
+    private fun dpadKeyFor(scanCode: Int): Int = when (scanCode) {
+        BTN_DPAD_UP    -> KeyEvent.KEYCODE_DPAD_UP
+        BTN_DPAD_DOWN  -> KeyEvent.KEYCODE_DPAD_DOWN
+        BTN_DPAD_LEFT  -> KeyEvent.KEYCODE_DPAD_LEFT
+        BTN_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT
+        else           -> 0
     }
 
     // Harmless when not running. Also called from native when a song stops in the background, so
@@ -601,6 +623,12 @@ class MainActivity : SDLActivity() {
 
     private companion object {
         const val TAG = "PocketTrackerSDL"
+
+        // Linux input codes (`input-event-codes.h`).
+        const val BTN_DPAD_UP    = 0x220
+        const val BTN_DPAD_DOWN  = 0x221
+        const val BTN_DPAD_LEFT  = 0x222
+        const val BTN_DPAD_RIGHT = 0x223
 
         /** How long an accepted rotation takes, before [portraitCheck] concludes it was refused. */
         const val ORIENTATION_SETTLE_MS = 2000L
