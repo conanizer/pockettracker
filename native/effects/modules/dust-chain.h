@@ -35,6 +35,8 @@ public:
     void prepare(double sampleRate, int blockSize, int numChannels);
     void reset();
 
+    // A change is reached across the next block, sample by sample: the wobble's depth, the
+    // compressor's threshold and its makeup click when they step.
     void setDustAmount(float v) noexcept { dustAmount = v; }
 
     void process(float* buf, int numFrames, int channelCount);
@@ -97,6 +99,8 @@ private:
 
     double sampleRate      = 48000.0;
     float  dustAmount      = 0.0f;
+    float  amountFrom      = 0.0f;   // where the last block ended
+    bool   fresh           = true;   // after a reset the amount starts where it is
     bool   tubeHighSR      = false;
     float  tubePostGainLin = 1.0f;
     float  compInEnvSq     = 0.0f;

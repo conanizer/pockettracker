@@ -110,6 +110,7 @@ void DustChain::reset()
     compOutEnvSq = 0.0f;
     wowPhase     = 0.0f;
     driftLpZ     = 0.0f;
+    fresh        = true;
 }
 
 void DustChain::process(float* buf, int numFrames, int channelCount)
@@ -117,6 +118,12 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
     const int n  = numFrames;
     const int nc = std::min(channelCount, (int)chans.size());
     if (n == 0 || nc == 0) return;
+
+    if (fresh) { amountFrom = dustAmount; fresh = false; }
+    const float amountStep = (dustAmount - amountFrom) / (float)n;
+    const float amount0    = amountFrom;
+    amountFrom = dustAmount;
+    auto amountAt = [&](int sample) { return amount0 + amountStep * (float)(sample + 1); };
 
     // Stages 2 and 8 share one cutoff.
     const float lpCutoff = kLPCutoffMax * std::pow(kLPCutoffMin / kLPCutoffMax, dustAmount);
@@ -194,7 +201,6 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
 
     // 4. FET compressor (APComp): fully linked, feed-forward, tanh ceiling at 0 dBFS.
     {
-        const double thresholdDb      = (double)(dustAmount * kCompThresholdMin);
         const double ratioVal         = kCompRatio;
         const double convexityVal     = kCompConvexity;
         const double inertiaCoef      = kCompInertia;
@@ -210,6 +216,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
 
         for (int sample = 0; sample < n; ++sample)
         {
+            const double thresholdDb = (double)(amountAt(sample) * kCompThresholdMin);
             float  inputSample[2] = { 0.0f, 0.0f };
             double inAbsDb[2]     = { 0.0,  0.0  };
             double grDb[2]        = { 0.0,  0.0  };
@@ -282,7 +289,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
 
             float makeupLin = 1.0f;
             if (compInEnvSq > 1.0e-9f && compOutEnvSq > 1.0e-9f) {
-                const float drive = 1.0f + dustAmount * kCompMakeupDrive;
+                const float drive = 1.0f + amountAt(sample) * kCompMakeupDrive;
                 makeupLin = std::sqrt(compInEnvSq / compOutEnvSq) * drive;
             }
 
@@ -296,9 +303,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
     // delayed by the centre, and the two re-sum.
     {
         const float wowFreq   = kWowFreqMin  + dustAmount * (kWowFreqMax  - kWowFreqMin);
-        const float wowAmp    = kWowAmpMin   + dustAmount * (kWowAmpMax   - kWowAmpMin);
         const float driftLpHz = kDriftLpMin  + dustAmount * (kDriftLpMax  - kDriftLpMin);
-        const float driftAmp  = kDriftAmpMin + dustAmount * (kDriftAmpMax - kDriftAmpMin);
         const float phaseInc  = kTwoPi * wowFreq / (float)sampleRate;
         const float dCoef     = 1.0f - std::exp(-kTwoPi * driftLpHz / (float)sampleRate);
         const float dScale    = 1.0f / std::sqrt(dCoef * 0.5f);
@@ -307,7 +312,10 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         {
             wowPhase += phaseInc;
             if (wowPhase > kTwoPi) wowPhase -= kTwoPi;
-            const float wowOff = std::sin(wowPhase) * wowAmp;
+            const float amount   = amountAt(sample);
+            const float wowAmp   = kWowAmpMin   + amount * (kWowAmpMax   - kWowAmpMin);
+            const float driftAmp = kDriftAmpMin + amount * (kDriftAmpMax - kDriftAmpMin);
+            const float wowOff   = std::sin(wowPhase) * wowAmp;
 
             driftRng = driftRng * 1664525u + 1013904223u;
             const float noise = (float)((int32_t)driftRng) * (1.0f / 2147483648.0f);

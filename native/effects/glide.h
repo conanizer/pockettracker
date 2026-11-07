@@ -12,6 +12,7 @@ constexpr int MUTE_GATE_SAMPLES   = 256;  // MUTE/SOLO, both ways
 constexpr int FADER_GLIDE_SAMPLES = 256;  // a fader's full swing, by hand, VTR or VMV; a short move is quicker
 constexpr int PAN_GLIDE_SAMPLES   = 256;  // at 128 a low note's swing still clicks
 constexpr int PAN_GLIDE_STEP      = 64;   // a pan glides in pieces this long: TSF pans once a render
+constexpr int MASTER_FX_SAMPLES   = 256;  // OTT's depth, and the master's OTT or DUST coming in or going out
 
 // The voice's form: a number read once a sample (`next`) or once a piece (`skip`).
 struct Ramp {

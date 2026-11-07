@@ -833,7 +833,7 @@ void AudioEngine::applyBusSettings() {
     if (due(BUS_DELAY_INEQ))     applyEqPresetToModule(delaySend.inputEq, s.delayInputEq);
     if (due(BUS_MASTER_EQ))      applyEqPresetToModule(masterChain.masterEq, s.masterEqSlot);
     if (due(BUS_OTT)) {
-        if (s.ottForRender) masterChain.ott.resetForRender(s.ottDepth / 255.0f);
+        if (s.ottForRender) masterChain.setOttDepthForRender(s.ottDepth / 255.0f);
         else                masterChain.ott.setDepth(s.ottDepth / 255.0f);
     }
     if (due(BUS_MASTER_FX)) masterChain.setMasterFx(s.masterFx);

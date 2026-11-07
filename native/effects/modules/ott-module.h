@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "../primitives/lr-crossover.h"
 #include "../primitives/daisysp/dsp.h"
+#include "../glide.h"
 
 // One band of OTT: downward then upward compression, stereo-linked on the louder channel's RMS, then
 // makeup. Gains are in dB; the attack/release smoothing runs on the gain, not on the level.
@@ -73,7 +74,7 @@ struct BandCompressor {
 };
 
 // OTT on the master bus: three bands (crossover 88.3 Hz / 2.5 kHz), each compressed both ways, summed,
-// then a wet/dry mix by depth (0 = bypass).
+// then a wet/dry mix by depth (0 = bypass, reached by a glide).
 //
 //   band   thresh   above      below   band gain
 //   low    -30 dB   66.7:1     4:1     +10.3 dB
@@ -94,10 +95,9 @@ struct OttModule {
     LRCrossover    xover;
     BandCompressor bandLow, bandMid, bandHigh;
 
-    float depth      = 0.0f;
-    float postGain   = 1.0f;   // follows depth
+    Ramp  depth;               // the wet share: glides while sounding, so a depth change never steps
+    float postGain   = 1.0f;   // at depth's goal
     float sampleRate = 44100.f;
-    bool  enabled    = false;
 
     // Long enough for the 88.3 Hz crossover to settle from zero (~−39 dB).
     int   warmupRemaining = 0;
@@ -125,14 +125,16 @@ struct OttModule {
         silenceCounter  = 0;
     }
 
+    // Running, or gliding down to bypass.
+    bool audible() const { return depth.audible(); }
+
     void setDepth(float d) {
-        bool wasEnabled = enabled;
-        depth   = d;
-        postGain = daisysp::pow10f(POST_DB_FULL / 20.f * d);
-        enabled = (d > 0.f);
-        // Only on switching on: a reset per depth change would keep the compressors from ever
-        // building up gain during a sweep.
-        if (!wasEnabled && enabled) restart();
+        const bool wasOn = audible();
+        depth.set(d, wasOn, MASTER_FX_SAMPLES);
+        postGain = postGainAt(d);
+        // Only on switching on, where the warmup fades it in: a reset per depth change would keep the
+        // compressors from ever building up gain during a sweep.
+        if (!wasOn && audible()) restart();
     }
 
     // The DSP from zero, behind the dry→wet warmup fade.
@@ -146,14 +148,15 @@ struct OttModule {
 
     // Before an offline render: start from zero behind the warmup fade.
     void resetForRender(float d) {
-        depth   = d;
-        postGain = daisysp::pow10f(POST_DB_FULL / 20.f * d);
-        enabled = (d > 0.f);
-        if (enabled) {
+        depth.set(d, false);
+        postGain = postGainAt(d);
+        if (audible()) {
             restart();
             silenceCounter = 0;
         }
     }
+
+    static float postGainAt(float d) { return daisysp::pow10f(POST_DB_FULL / 20.f * d); }
 
     void process(float* buf, int numFrames, int channelCount) {
         // Signal after a long silence restarts the DSP. Both channels: a hard-right passage is not
@@ -192,11 +195,12 @@ struct OttModule {
             float wetL = lowL + midL + highL;
             float wetR = lowR + midR + highR;
 
-            float pos = depth;
-            float post = postGain;
+            const bool gliding = depth.moving();
+            float pos = depth.next();
+            float post = gliding ? postGainAt(pos) : postGain;
             if (warmupRemaining > 0) {
                 pos *= (float)(WARMUP_SAMPLES - warmupRemaining) / WARMUP_SAMPLES;
-                post = daisysp::pow10f(POST_DB_FULL / 20.f * pos);
+                post = postGainAt(pos);
                 warmupRemaining--;
             }
             float dry = 1.0f - pos;
