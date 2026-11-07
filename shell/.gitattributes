@@ -14,7 +14,7 @@
 *.sh text eol=lf
 
 # The container recipe is read by docker on Linux; a CRLF in a RUN line ends up inside the command.
-Dockerfile.portmaster text eol=lf
+Dockerfile.* text eol=lf
 
 # ⚠️ THE REST OF THE PACKAGE IS AN ARTIFACT TOO, AND THE RULE ABOVE DOES NOT CARE THAT THESE PARSE
 # EITHER WAY. `port.json`, `gameinfo.xml` and the shipped README are copied into the zip byte-for-byte
