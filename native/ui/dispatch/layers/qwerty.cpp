@@ -147,7 +147,7 @@ void InputDispatcher::qwerty_apply() {
         }
 
         case QwertyContext::SAMPLE_SAVE: {
-            // SAVE-AS never replaces (SNARE, SNARE_0001, …): OVERWRITE is its own button.
+            // SAVE-AS never replaces (SNARE, SNARE_2, …): OVERWRITE is its own button.
             const std::string stem = free_wav_stem(fs_, k.contextExtra, text.empty() ? "SAMPLE" : text);
             save_sample_to(k.contextExtra + "/" + stem + ".wav", /*adopt_name=*/true);
             break;

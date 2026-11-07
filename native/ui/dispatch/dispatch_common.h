@@ -6,7 +6,6 @@
 #include "ui/std_filesystem.h"   // path_stem
 
 #include <algorithm>
-#include <cstdio>
 #include <string>
 
 namespace pt::ui {
@@ -47,14 +46,10 @@ inline int page_clamping(int value, int direction, int count) {
     return std::clamp(value + direction * 16, 0, count - 1);
 }
 
-/** `base`, or the first free `base_0001`, `base_0002`, … — a WAV name in `dir` that nothing holds yet. */
+/** `base`, or the first free `base_2`, `base_3`, … — a WAV name in `dir` that nothing holds yet. */
 inline std::string free_wav_stem(FileSystem& fs, const std::string& dir, const std::string& base) {
     std::string stem = base;
-    for (int n = 1; fs.file_exists(dir + "/" + stem + ".wav"); ++n) {
-        char suffix[16];   // "_%04d" of an int can be 12 bytes (-Wformat-truncation)
-        std::snprintf(suffix, sizeof(suffix), "_%04d", n);
-        stem = base + suffix;
-    }
+    for (int n = 2; fs.file_exists(dir + "/" + stem + ".wav"); ++n) stem = base + "_" + std::to_string(n);
     return stem;
 }
 
