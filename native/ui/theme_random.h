@@ -245,20 +245,28 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
         const auto harder = [&](Argb p, Argb q) {
             return (ok_lightness(p) * polarity > ok_lightness(q) * polarity) ? p : q;
         };
+        // One ink on `ground`: its lift, hue and chroma drawn in that order. ⚠️ Never inside one
+        // argument list — the order there is the compiler's, and a seed would roll per compiler.
+        const auto roll_ink = [&](Argb ground, double floorRatio, double liftLo, double liftHi, double cLo,
+                                  double cHi) {
+            const double lift = rng.range(liftLo, liftHi);
+            const double hue  = scheme_hue(rng, scheme, baseHue);
+            const double c    = chroma(cLo, cHi);
+            return ink_at(away(ground, floorRatio, lift), hue, c, ground, floorRatio);
+        };
 
         // ── The two accents: each a ground and an ink, so it clears the harder of its two grounds ──
         const double cursorExtra = rng.range(0.06, 0.18);
         if (!locked_field(&Theme::rowCursor)) {
-            const Argb g = harder(t.background, t.meterBackground);
-            t.rowCursor  = ink_at(away(g, FLOOR_TEXT, cursorExtra), scheme_hue(rng, scheme, baseHue),
-                                  chroma(0.08, 0.20), g, FLOOR_TEXT);
+            const Argb   g   = harder(t.background, t.meterBackground);
+            const double hue = scheme_hue(rng, scheme, baseHue);
+            const double c   = chroma(0.08, 0.20);
+            t.rowCursor = ink_at(away(g, FLOOR_TEXT, cursorExtra), hue, c, g, FLOOR_TEXT);
         }
         if (!locked_field(&Theme::rowSelection)) {
             const Argb g = harder(t.rowEvery4th, t.meterBackground);
             // A ladder step past the cursor, not a second free colour.
-            t.rowSelection = ink_at(away(g, FLOOR_TEXT, cursorExtra + rng.range(0.04, 0.14)),
-                                    scheme_hue(rng, scheme, baseHue), chroma(0.08, 0.20),
-                                    g, FLOOR_TEXT);
+            t.rowSelection = roll_ink(g, FLOOR_TEXT, cursorExtra + 0.04, cursorExtra + 0.14, 0.08, 0.20);
         }
 
         // ── The ink ladder: every text role lands on four grounds, so it is solved on the hardest ──
@@ -269,39 +277,27 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
         // The floors give the order — EMPTY, PARAM, then VALUE and TITLE — so a placeholder is never
         // louder than its value.
         if (!locked_field(&Theme::textEmpty)) {
-            t.textEmpty = ink_at(away(hardest, FLOOR_SUPPORT, rng.range(0.00, 0.03)),
-                                 scheme_hue(rng, scheme, baseHue), chroma(0.0, 0.05),
-                                 hardest, FLOOR_SUPPORT);
+            t.textEmpty = roll_ink(hardest, FLOOR_SUPPORT, 0.00, 0.03, 0.0, 0.05);
         }
         if (!locked_field(&Theme::textParam)) {
-            t.textParam = ink_at(away(hardest, FLOOR_SUPPORT, rng.range(0.07, 0.13)),
-                                 scheme_hue(rng, scheme, baseHue), chroma(0.0, 0.05),
-                                 hardest, FLOOR_SUPPORT);
+            t.textParam = roll_ink(hardest, FLOOR_SUPPORT, 0.07, 0.13, 0.0, 0.05);
         }
         if (!locked_field(&Theme::textValue)) {
-            t.textValue = ink_at(away(hardest, FLOOR_TEXT, rng.range(0.04, 0.12)),
-                                 scheme_hue(rng, scheme, baseHue), chroma(0.0, 0.06),
-                                 hardest, FLOOR_TEXT);
+            t.textValue = roll_ink(hardest, FLOOR_TEXT, 0.04, 0.12, 0.0, 0.06);
         }
         if (!locked_field(&Theme::textTitle)) {
             // The one loud role allowed real colour.
-            t.textTitle = ink_at(away(hardest, FLOOR_TEXT, rng.range(0.00, 0.10)),
-                                 scheme_hue(rng, scheme, baseHue), chroma(0.10, 0.22),
-                                 hardest, FLOOR_TEXT);
+            t.textTitle = roll_ink(hardest, FLOOR_TEXT, 0.00, 0.10, 0.10, 0.22);
         }
         if (!locked_field(&Theme::textPlayhead)) {
-            t.textPlayhead = ink_at(away(hardest, FLOOR_SUPPORT, rng.range(0.04, 0.14)),
-                                    scheme_hue(rng, scheme, baseHue), chroma(0.06, 0.20),
-                                    hardest, FLOOR_SUPPORT);
+            t.textPlayhead = roll_ink(hardest, FLOOR_SUPPORT, 0.04, 0.14, 0.06, 0.20);
         }
 
         // ── The visualizer and the meters ────────────────────────────────────────────────────────
         if (!locked_field(&Theme::vizWave)) {
             // OCTA draws on `background`, the other modes on `vizBackground`.
             const Argb vizGround = harder(t.vizBackground, t.background);
-            t.vizWave = ink_at(away(vizGround, FLOOR_TEXT, rng.range(0.02, 0.12)),
-                               scheme_hue(rng, scheme, baseHue), chroma(0.10, 0.25),
-                               vizGround, FLOOR_TEXT);
+            t.vizWave = roll_ink(vizGround, FLOOR_TEXT, 0.02, 0.12, 0.10, 0.25);
         }
         if (!locked_field(&Theme::vizCenterLine)) {
             t.vizCenterLine = to_argb(OkLch{away(t.vizBackground, FLOOR_DECOR, rng.range(0.0, 0.04)),
@@ -355,12 +351,15 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
         }
         if (!locked_field(&Theme::eqBorder)) {
             const Argb g = harder(eqGround, t.eqFill);
-            t.eqBorder = ink_at(away(g, FLOOR_SUPPORT, rng.range(0.02, 0.10)),
-                                scheme_hue(rng, scheme, baseHue), 0.10 * ctx.chromaScale, g, FLOOR_SUPPORT);
+            const double lift = rng.range(0.02, 0.10);
+            const double hue  = scheme_hue(rng, scheme, baseHue);
+            t.eqBorder = ink_at(away(g, FLOOR_SUPPORT, lift), hue, 0.10 * ctx.chromaScale, g, FLOOR_SUPPORT);
         }
         if (!locked_field(&Theme::eqTxt)) {
-            t.eqTxt = ink_at(away(eqGround, FLOOR_SUPPORT, rng.range(0.0, 0.06)),
-                             scheme_hue(rng, scheme, baseHue), 0.04 * ctx.chromaScale, eqGround, FLOOR_SUPPORT);
+            const double lift = rng.range(0.0, 0.06);
+            const double hue  = scheme_hue(rng, scheme, baseHue);
+            t.eqTxt = ink_at(away(eqGround, FLOOR_SUPPORT, lift), hue, 0.04 * ctx.chromaScale, eqGround,
+                             FLOOR_SUPPORT);
         }
 
         t.visualizerType = base.visualizerType;
