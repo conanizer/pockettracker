@@ -2,6 +2,7 @@
 #include <cmath>
 #include "../soundpipe/soundpipe.h"
 #include "../primitives/daisysp/svf.h"
+#include "../glide.h"
 
 // The 3-band parametric EQ. Band types — the number is stored in projects, append only:
 // 0 off, 1 low shelf, 2 low cut, 3 bell, 4 high shelf, 5 high cut.
@@ -24,8 +25,8 @@ inline float pareq_tick(sp_data& sp, sp_pareq& p, bool& derive, float in) {
     return yn;
 }
 
-// One band: sp_pareq for shelves and bell, DaisySP's SVF for the cuts.
-struct EqBandModule {
+// One band's filter: sp_pareq for shelves and bell, DaisySP's SVF for the cuts.
+struct EqBandFilter {
     sp_pareq pL, pR;
     sp_data  sp;
     // Coefficients owed, per side (a mono voice never runs pR). Set wherever fc, v or q change.
@@ -45,20 +46,25 @@ struct EqBandModule {
         bypass = true; useHpLp = false; hpLpType = 0;
     }
 
-    void setParams(int type, float freqHz, float gainDb, float q) {
+    // A filter coming back after the other kind ran starts from silence, not from its stale state.
+    void set(int type, float freqHz, float gainDb, float q) {
+        const bool wasOn = !bypass, wasHpLp = useHpLp;
         bypass  = (type == 0);
         if (bypass) return;
 
         useHpLp  = (type == 2 || type == 5);
         hpLpType = type;
+        const bool cold = !wasOn || wasHpLp != useHpLp;
 
         if (useHpLp) {
+            if (cold) { svfL.Init(sp.sr); svfR.Init(sp.sr); }
             float hz  = fminf(freqHz, sp.sr * 0.45f);
             // damp = 1/Q, and DaisySP's damp is 2(1 − res).
             float res = fmaxf(0.0f, fminf(0.99f, 1.0f - 1.0f / (2.0f * q)));
             svfL.SetFreq(hz); svfL.SetRes(res); svfL.SetDrive(0.0f);
             svfR.SetFreq(hz); svfR.SetRes(res); svfR.SetDrive(0.0f);
         } else {
+            if (cold) { sp_pareq_init(&sp, &pL); sp_pareq_init(&sp, &pR); }
             int pareqMode = (type == 1) ? 1 : (type == 4) ? 2 : 0;   // 0 bell, 1 low shelf, 2 high shelf
             float v    = powf(10.0f, gainDb / 20.0f);
             float mode = (float)pareqMode;
@@ -93,24 +99,81 @@ struct EqBandModule {
     }
 };
 
-struct EqModule {
-    EqBandModule bands[3];
-    bool active = false;
+// One band. The glide rule (glide.h) as a crossfade from the old settings' output; the same settings
+// sent again change nothing.
+struct EqBandModule {
+    EqBandFilter now;
+    EqBandFilter was;      // the settings fading out
+    Ramp  oldShare;        // was's share of the output, 1 to 0
+    int   type   = 0;
+    float freqHz = 0.f, gainDb = 0.f, q = 0.f;
 
     void reset(float sr) {
-        for (auto& b : bands) b.reset(sr);
-        active = false;
+        now.reset(sr);
+        oldShare = Ramp{};
+        type = 0;
+    }
+
+    // Filtering, or fading out.
+    bool on() const { return type != 0 || oldShare.moving(); }
+
+    void setParams(int t, float hz, float db, float qq, bool sounding) {
+        if (t == type && (t == 0 || (hz == freqHz && db == gainDb && qq == q))) return;
+        if (sounding) {
+            was = now;
+            oldShare.start(1.0f, 0.0f, GLIDE_SAMPLES);
+        }
+        now.set(t, hz, db, qq);
+        type = t; freqHz = hz; gainDb = db; q = qq;
     }
 
     inline float processMono(float in) {
-        if (!active) return in;
+        float out = now.processMono(in);
+        if (oldShare.moving()) {
+            const float k = oldShare.next();
+            out = was.processMono(in) * k + out * (1.0f - k);
+        }
+        return out;
+    }
+
+    inline void processStereo(float& L, float& R) {
+        if (!oldShare.moving()) { now.processStereo(L, R); return; }
+        float oL = L, oR = R;
+        now.processStereo(L, R);
+        was.processStereo(oL, oR);
+        const float k = oldShare.next();
+        L = oL * k + L * (1.0f - k);
+        R = oR * k + R * (1.0f - k);
+    }
+};
+
+struct EqModule {
+    EqBandModule bands[3];
+    bool fresh = true;   // until sound has passed: a band set lands at once
+
+    void reset(float sr) {
+        for (auto& b : bands) b.reset(sr);
+        fresh = true;
+    }
+
+    // Some band on or fading: off, a sample through costs nothing.
+    bool active() const { return bands[0].on() || bands[1].on() || bands[2].on(); }
+
+    void setBand(int i, int type, float freqHz, float gainDb, float q) {
+        bands[i].setParams(type, freqHz, gainDb, q, !fresh);
+    }
+
+    inline float processMono(float in) {
+        fresh = false;
+        if (!active()) return in;
         in = bands[0].processMono(in);
         in = bands[1].processMono(in);
         return bands[2].processMono(in);
     }
 
     inline void processStereo(float& L, float& R) {
-        if (!active) return;
+        fresh = false;
+        if (!active()) return;
         bands[0].processStereo(L, R);
         bands[1].processStereo(L, R);
         bands[2].processStereo(L, R);

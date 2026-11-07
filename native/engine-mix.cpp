@@ -135,10 +135,9 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     sv.chain.drive.setDrive(ip.drive);
     sv.chain.crush.setParams(ip.crush, ip.downsample);
     if (ip.eqActive) {
-        sv.chain.eq.active = true;
         for (int i = 0; i < 3; i++) {
-            sv.chain.eq.bands[i].setParams(ip.eqBands[i].type, ip.eqBands[i].freqHz,
-                                           ip.eqBands[i].gainDb, ip.eqBands[i].q);
+            sv.chain.eq.setBand(i, ip.eqBands[i].type, ip.eqBands[i].freqHz, ip.eqBands[i].gainDb,
+                                ip.eqBands[i].q);
         }
     }
     voiceSetSends(sv, ip.reverbSend, ip.delaySend);

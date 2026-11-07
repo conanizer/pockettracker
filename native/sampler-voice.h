@@ -341,12 +341,9 @@ struct Voice : public IAudioVoice {
                                instrParams.filterRes, instrParams.filterDrive, sampleRate);
         chain.filter.snapshotCoeffs();   // or the first piece would ramp from the reset defaults
         if (instrParams.eqActive) {
-            chain.eq.active = true;
             for (int i = 0; i < 3; i++) {
-                chain.eq.bands[i].setParams(instrParams.eqBands[i].type,
-                                            instrParams.eqBands[i].freqHz,
-                                            instrParams.eqBands[i].gainDb,
-                                            instrParams.eqBands[i].q);
+                chain.eq.setBand(i, instrParams.eqBands[i].type, instrParams.eqBands[i].freqHz,
+                                 instrParams.eqBands[i].gainDb, instrParams.eqBands[i].q);
             }
         }
 

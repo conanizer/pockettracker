@@ -52,7 +52,8 @@ struct MasterChain {
 
     // Interleaved stereo, in place.
     void process(float* buf, int numFrames, int channelCount) {
-        if (masterEq.active) {
+        masterEq.fresh = false;   // the master always sounds
+        if (masterEq.active()) {
             for (int i = 0; i < numFrames; i++) {
                 float L = buf[i * channelCount];
                 float R = buf[i * channelCount + 1];

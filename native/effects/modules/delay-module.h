@@ -191,9 +191,7 @@ struct DelayModule {
 
         for (int i = 0; i < numFrames; i++) {
             float l = inL[i], r = inR[i];
-            if (inputEq.active) {
-                inputEq.processStereo(l, r);
-            }
+            inputEq.processStereo(l, r);
 
             float readL, readR;
             if (moving) {

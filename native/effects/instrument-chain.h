@@ -31,13 +31,13 @@ struct InstrumentChain {
     // Nothing on or fading: a sample through is just `touch()`. Holds until the next write.
     bool idle() const {
         return !crush.enabled() && !crush.oldShare.moving() && !drive.enabled() && !drive.oldShare.moving() &&
-               !filter.enabled() && !filter.typeFade.moving() && !eq.active;
+               !filter.enabled() && !filter.typeFade.moving() && !eq.active();
     }
 
     // What a sample through an idle chain leaves behind.
     void touch() {
         started = true;
-        crush.fresh = drive.fresh = filter.fresh = false;
+        crush.fresh = drive.fresh = filter.fresh = eq.fresh = false;
     }
 
     inline float processMono(float in) {

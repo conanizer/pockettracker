@@ -611,10 +611,9 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
             eq.reset(sampleRate);
             for (int b = 0; b < 3; b++) {
                 const EqBandData& bd = preset.bands[b];
-                eq.bands[b].setParams(bd.type, bd.freqHz, bd.gainDb, bd.q);
-                if (bd.type != 0) eq.active = true;
+                eq.setBand(b, bd.type, bd.freqHz, bd.gainDb, bd.q);
             }
-            if (eq.active) {
+            if (eq.active()) {
                 for (int i = 0; i < len; i++) buf[i] = eq.processMono(buf[i]);
             }
         }

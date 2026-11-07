@@ -364,27 +364,24 @@ static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
 }
 
 void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
-    bool any = false;
     for (int i = 0; i < 3; i++) {
         EqBandData d = eqBandFromHex(bands.type[i], bands.freq[i], bands.gain[i], bands.q[i]);
-        eq.bands[i].setParams(d.type, d.freqHz, d.gainDb, d.q);
-        if (d.type != 0) any = true;
+        eq.setBand(i, d.type, d.freqHz, d.gainDb, d.q);
     }
-    eq.active = any;
 }
 
-// The module was initialised by its owner; only the band params are set. `active` means some band
-// is on, so an all-off preset costs nothing per sample.
+// The module was initialised by its owner; only the band params are set. A slot out of range turns
+// every band off.
 void AudioEngine::applyEqPresetToModule(EqModule& eq, int slot) {
-    if (slot < 0 || slot >= 128) { eq.active = false; return; }
-    const EqPresetBank& preset = eqPresets[slot];
-    bool any = false;
-    for (int i = 0; i < 3; i++) {
-        eq.bands[i].setParams(preset.bands[i].type, preset.bands[i].freqHz,
-                              preset.bands[i].gainDb, preset.bands[i].q);
-        if (preset.bands[i].type != 0) any = true;
+    if (slot < 0 || slot >= 128) {
+        for (int i = 0; i < 3; i++) eq.setBand(i, 0, 0.f, 0.f, 0.f);
+        return;
     }
-    eq.active = any;
+    const EqPresetBank& preset = eqPresets[slot];
+    for (int i = 0; i < 3; i++) {
+        eq.setBand(i, preset.bands[i].type, preset.bands[i].freqHz, preset.bands[i].gainDb,
+                   preset.bands[i].q);
+    }
 }
 
 static const int SPECTRUM_FFT_SIZE = 2048;

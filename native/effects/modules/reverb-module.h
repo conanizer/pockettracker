@@ -188,7 +188,7 @@ struct ReverbModule {
 
     void feed(float& l, float& r, int& preRead, const Shape& shape) {
         constexpr int ring = static_cast<int>(REVERB_PREDELAY_MAX_SAMPLES);
-        if (inputEq.active) inputEq.processStereo(l, r);
+        inputEq.processStereo(l, r);
         if (shape.delayed) {
             preBufL[preWrite] = l;
             preBufR[preWrite] = r;
