@@ -90,11 +90,12 @@ class MidiInManager(context: Context) {
             return false
         }
 
+        // Emptied before the connect, so the first byte to arrive is kept.
+        synchronized(this) { head = 0; count = 0; dropped = 0L; warnedDrop = false }
+
         // ⚠️ Without the connect an open port is silent: the device is held and nothing arrives.
         val r = Receiver()
         p.connect(r)
-
-        synchronized(this) { head = 0; count = 0; dropped = 0L; warnedDrop = false }
 
         device = d
         port = p
