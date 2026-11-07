@@ -3,6 +3,7 @@
 #include "ui/dispatch/dispatch_common.h"
 
 #include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load
+#include "ui/navigation.h"
 #include "ui/song_pointer.h"
 
 #include <algorithm>
@@ -18,27 +19,21 @@ namespace pt::ui {
  */
 void InputDispatcher::reset_editing_context() {
     s_.currentPhrase = s_.currentChain = s_.currentInstrument = 0;
-    s_.currentTable  = s_.currentGroove = 0;
+    s_.currentTable  = s_.currentGroove = s_.currentScale = 0;
     s_.lastEditedPhrase = s_.lastEditedChain = s_.lastEditedTable = 0;
     s_.lastEditedInstrument = s_.lastEditedTranspose = 0;
     s_.lastEditedNote   = songcore::Note::C4();
     s_.lastEditedVolume = 0x7F;
 
     // …and every secondary screen's own cursor, or they point into the previous song after a LOAD.
-    s_.cursorRow = 0; s_.cursorColumn = 1;
+    for (const ScreenType screen : {ScreenType::SONG, ScreenType::TABLE, ScreenType::GROOVE, ScreenType::SCALE,
+                                    ScreenType::INSTRUMENT, ScreenType::MODS, ScreenType::MIXER})
+        reset_screen_cursor(s_, screen);
     s_.songScrollPosition = 0;
-    s_.instrumentCursorRow = 0; s_.instrumentCursorColumn = 1;
-    // ⚠️ Both halves, or a master-only row over a track column shows no cursor.
-    s_.mixerCursorColumn = 0;
-    s_.mixerMasterRow    = 0;
-    s_.effectsCursorRow  = 0;
-    s_.tableCursorRow = 0; s_.tableCursorColumn = 1;
-    s_.grooveCursorRow = 0; s_.grooveCursorColumn = GROOVE_COL_TICK;
-    s_.groovePanelRow = 0;  s_.groovePanelColumn  = 0;
+    s_.effectsCursorRow   = 0;
+    s_.projectCursorRow = 0; s_.projectCursorColumn = 1;
     // The quantize pointer is an editing aid, not a setting, so it resets with the project.
     s_.grooveQuantize = 0;
-    s_.modCursorRow = 0; s_.modCursorPair = 0; s_.modCursorSide = 0;
-    s_.projectCursorRow = 0; s_.projectCursorColumn = 1;
 
     // The REMEMBER slots, or REMEMBER mode restores a cursor from the previous song.
     s_.songCursorRow = 0;   s_.songCursorColumn = 1;

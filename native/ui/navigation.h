@@ -164,6 +164,42 @@ inline NavState nav_state_of(const AppState& s) {
     return NavState{s.currentScreen, s.previousColumn, s.instrumentFromPool};
 }
 
+// A screen's own cursor back to its top-left cell: REFRESH on entry, NEW and LOAD on every screen.
+// SONG, CHAIN and PHRASE share the live cursor.
+inline void reset_screen_cursor(AppState& s, ScreenType screen) {
+    switch (screen) {
+        case ScreenType::SONG:
+        case ScreenType::CHAIN:
+        case ScreenType::PHRASE:
+            s.cursorRow    = 0;
+            s.cursorColumn = min_cursor_column(screen);
+            break;
+        case ScreenType::TABLE:
+            s.tableCursorRow = 0; s.tableCursorColumn = 1;
+            break;
+        case ScreenType::GROOVE:
+            s.grooveCursorRow    = 0;
+            s.grooveCursorColumn = GROOVE_COL_TICK;
+            s.groovePanelRow     = 0;
+            s.groovePanelColumn  = 0;
+            break;
+        case ScreenType::SCALE:
+            s.scaleCursorRow = 0; s.scaleCursorColumn = 0;
+            break;
+        case ScreenType::INSTRUMENT:
+            s.instrumentCursorRow = 0; s.instrumentCursorColumn = 1;
+            break;
+        case ScreenType::MODS:
+            s.modCursorRow = 0; s.modCursorPair = 0; s.modCursorSide = 0;
+            break;
+        case ScreenType::MIXER:
+            // ⚠️ Both halves, or a master-only row over a track column shows no cursor.
+            s.mixerCursorColumn = 0; s.mixerMasterRow = 0;
+            break;
+        default: break;
+    }
+}
+
 // Land on a screen: save and restore the shared cursor (the three screens' column counts differ),
 // point TABLE at the current instrument, keep the pool flag only on INSTRUMENT.
 inline void go_to_screen(AppState& s, const NavResult& r) {
@@ -204,36 +240,8 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
         }
     } else {
         // Back to the top-left editable cell. EFFECTS, PROJECT and SETTINGS persist in both modes.
-        switch (r.screen) {
-            case ScreenType::SONG:
-            case ScreenType::CHAIN:
-            case ScreenType::PHRASE:
-                s.cursorRow    = 0;
-                s.cursorColumn = min_cursor_column(r.screen);
-                break;
-            case ScreenType::TABLE:
-                s.tableCursorRow = 0; s.tableCursorColumn = 1;
-                break;
-            case ScreenType::GROOVE:
-                s.grooveCursorRow    = 0;
-                s.grooveCursorColumn = GROOVE_COL_TICK;
-                s.groovePanelRow     = 0;
-                s.groovePanelColumn  = 0;
-                break;
-            case ScreenType::INSTRUMENT:
-                s.instrumentCursorRow = 0; s.instrumentCursorColumn = 1;
-                break;
-            case ScreenType::MODS:
-                s.modCursorRow = 0; s.modCursorPair = 0; s.modCursorSide = 0;
-                break;
-            case ScreenType::INST_POOL:
-                s.poolCursorColumn = 0;   // not currentInstrument: that is the pool's row
-                break;
-            case ScreenType::MIXER:
-                s.mixerCursorColumn = 0; s.mixerMasterRow = 0;
-                break;
-            default: break;
-        }
+        reset_screen_cursor(s, r.screen);
+        if (r.screen == ScreenType::INST_POOL) s.poolCursorColumn = 0;   // not currentInstrument: the pool's row
     }
 
     // ⚠️ Bounds checks, in both modes: a remembered cell may not be drawn here. SETTINGS hides rows per
