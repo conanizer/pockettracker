@@ -85,6 +85,13 @@ void InputDispatcher::load_project_done(const std::string& path) {
 
 // ─── EXPORT ──────────────────────────────────────────────────────────────────────────────────────
 
+// Drawn from inside a blocking render. The pump keeps the window answering (a desktop marks one that
+// reads nothing for seconds as hung); a press made meanwhile is dropped, not delivered afterwards.
+void InputDispatcher::paint_progress() {
+    if (render_.pump) render_.pump();
+    if (render_.repaint) render_.repaint();
+}
+
 void InputDispatcher::export_song(bool stems) {
     if (s_.isRendering) return;   // a second press while one runs is a mis-press, not a request
 
@@ -94,11 +101,11 @@ void InputDispatcher::export_song(bool stems) {
     s_.isRendering    = true;
     s_.renderProgress = 0.0f;
     set_status(s_, stems ? "RENDERING STEMS..." : "RENDERING...", true);
-    if (render_.repaint) render_.repaint();          // …so the message is on screen before we block
+    paint_progress();   // …so the message is on screen before we block
 
     const auto progress = [this](float p) {
         s_.renderProgress = p;
-        if (render_.repaint) render_.repaint();      // the EXPORT row's "43%" — a readout, not a decoration
+        paint_progress();   // the EXPORT row's "43%" — a readout, not a decoration
     };
 
     // The panel's rows, with AUTO resolved against the project as it stands right now.
@@ -125,11 +132,11 @@ void InputDispatcher::collect_song(const std::string& folder) {
     s_.isCollecting    = true;
     s_.collectProgress = 0.0f;
     set_status(s_, "COLLECTING...", true);
-    if (render_.repaint) render_.repaint();
+    paint_progress();
 
     const auto progress = [this](float p) {
         s_.collectProgress = p;
-        if (render_.repaint) render_.repaint();
+        paint_progress();
     };
     const ActionResult r = collect_project(host_, fs_, folder, progress);
 
@@ -156,11 +163,11 @@ void InputDispatcher::resample_selection(const std::string& customBaseName) {
     s_.isRendering    = true;
     s_.renderProgress = 0.0f;
     set_status(s_, "RESAMPLING...", true);
-    if (render_.repaint) render_.repaint();
+    paint_progress();
 
     const auto progress = [this](float p) {
         s_.renderProgress = p;
-        if (render_.repaint) render_.repaint();
+        paint_progress();
     };
 
     std::string        outPath;

@@ -731,6 +731,7 @@ class InputDispatcher {
 
     // EXPORT, synchronously; the render hook repaints the progress from inside it.
     void export_song(bool stems);
+    void paint_progress();
 
     // COLLECT into Songs/<folder>, its percentage on the PROJECT screen while it copies.
     void collect_song(const std::string& folder);
