@@ -193,7 +193,7 @@ and its media have been separated.
 |---|---|
 | `POCKETTRACKER_HOME` | the app root (`Projects/`, `Samples/`…). Overrides the platform default on every platform; a PortMaster launch script exports it to point at the SD card. |
 | `POCKETTRACKER_LOG` | **`=1` turns the engine's `LOGD` chatter back on.** Off by default. |
-| `POCKETTRACKER_AUDIO_PROFILE` | the audio-callback profiler (`sdl-audio-engine.cpp`). |
+| `POCKETTRACKER_AUDIO_PROFILE` | the audio-callback profiler (`console/audio-profile.h`), a line a second. |
 
 ⚠️ **`POCKETTRACKER_LOG` is off by default**, because off Android there is no logcat and the same 35
 `LOGD` call sites go straight to stderr — which fills a shipped desktop console with

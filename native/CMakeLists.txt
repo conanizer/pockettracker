@@ -611,6 +611,8 @@ if(ANDROID)
             "${PT_SHELL_DIR}/midi/midi-sender.cpp"         # ⚠️ SDL_CreateThread, so SDL attaches it to
                                                            # the JVM — midi-out-android.cpp makes JNI
                                                            # calls FROM this thread
+            "${PT_SHELL_DIR}/console/midi-in-console.cpp"
+            "${PT_SHELL_DIR}/console/midi-jitter.cpp"
             "${PT_SHELL_DIR}/skin/image.cpp"
             "${PT_SHELL_DIR}/skin/assets.cpp"
             "${PT_SHELL_DIR}/skin/skin.cpp"

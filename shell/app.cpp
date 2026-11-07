@@ -28,7 +28,11 @@
 #include "skin/font.h"
 #include "skin/portrait2.h"
 
-#include "latency_probe.h"   // POCKETTRACKER_LATENCY=1
+#include "console/audio-profile.h"
+#include "console/latency-probe.h"
+#include "console/midi-in-console.h"
+#include "console/midi-jitter.h"
+#include "console/status-line.h"
 #include "midi/midi-in.h"      // the platform's IMidiIn, or nothing
 #include "midi/midi-sender.h"
 #include "sdl/sdl-input.h"
@@ -44,81 +48,6 @@ namespace ui = pt::ui;
 namespace ptshell {
 
 namespace {
-
-// ─── The MIDI-in console ─────────────────────────────────────────────────────────────────────────
-//
-// Counts what MIDI input delivered, printed at exit — inside the app a working input and a dead one
-// look the same. Runs on the frame loop's thread, so it may print.
-struct MidiInConsole : songcore::IMidiInObserver {
-    bool     trace    = false;   // POCKETTRACKER_MIDI_IN_TRACE=1
-    uint64_t messages = 0;
-    uint64_t records  = 0;
-    uint64_t silent   = 0;       // messages that produced no bus record at all
-
-    // CC arrival rates while a knob turns: per poll, per 16 ms frame, peak per second. ⚠️ Every
-    // controller number counts, so two knobs read as one stream; one poll shares one timestamp.
-    uint64_t ccTotal   = 0;
-    uint64_t ccFirstMs = 0;      // wall clock of the first and last CC — the span the rate is over
-    uint64_t ccLastMs  = 0;
-    uint64_t ccDrains  = 0;      // drains that carried at least one CC
-    uint64_t ccMaxPerDrain = 0;
-    uint64_t drain     = 0;      // the poll that took the messages back: bumped above host.poll()
-
-    // Most CCs inside one fixed `width`-ms window; a burst across a boundary counts twice, so a floor.
-    struct Window {
-        uint64_t width;
-        uint64_t id  = ~0ull;    // a value no window index can have, so the first CC opens one
-        uint64_t n   = 0;
-        uint64_t max = 0;
-
-        void add(uint64_t nowMs) {
-            const uint64_t w = nowMs / width;
-            if (w != id) { id = w; n = 0; }
-            if (++n > max) max = n;
-        }
-    };
-    Window w16{16}, w100{100}, w1000{1000};
-
-    void count_cc(uint64_t nowMs) {
-        if (ccTotal++ == 0) ccFirstMs = nowMs;
-        ccLastMs = nowMs;
-
-        if (drain != ccDrain_) { ccDrain_ = drain; ccInDrain_ = 0; ++ccDrains; }
-        ++ccInDrain_;
-        if (ccInDrain_ > ccMaxPerDrain) ccMaxPerDrain = ccInDrain_;
-
-        w16.add(nowMs);
-        w100.add(nowMs);
-        w1000.add(nowMs);
-    }
-
-    void on_midi_in(const songcore::MidiInMessage& m, const songcore::Event* ev, int n) override {
-        ++messages;
-        records += static_cast<uint64_t>(n < 0 ? 0 : n);
-        if (n <= 0) ++silent;
-        if (m.status == songcore::EV_CC) count_cc(static_cast<uint64_t>(SDL_GetTicks64()));
-        if (!trace) return;
-
-        // Rebuilt from the parsed message, so a line that disagrees with the cable is a parser bug.
-        const unsigned status = m.is_channel() ? (m.status | m.channel) : m.status;
-        if (m.status == songcore::MIDI_SYSEX) {
-            std::printf("midi ->  note command ch %d note %02X id %d value %02X %s -> %d event(s)", m.channel + 1,
-                        m.data1, m.id, m.data2, m.kind == songcore::NOTE_COMMAND_WITH_NOTE ? "(with the note)" : "(now)", n);
-        } else {
-            std::printf("midi ->  %02X", status);
-            if (m.len > 1) std::printf(" %02X", m.data1);
-            if (m.len > 2) std::printf(" %02X", m.data2);
-            std::printf("%*s-> %d event(s)", (m.len > 2 ? 3 : (m.len > 1 ? 6 : 9)), "", n);
-        }
-        for (int i = 0; i < n; ++i)
-            std::printf("  [track %d inst %d]", ev[i].track, static_cast<int>(ev[i].instrument));
-        std::printf("\n");
-        std::fflush(stdout);
-    }
-
-  private:
-    uint64_t ccDrain_ = ~0ull, ccInDrain_ = 0;
-};
 
 // ─── The background watcher ──────────────────────────────────────────────────────────────────────
 //
@@ -636,8 +565,7 @@ class FrameLoop {
     bool timedWorkEdge = false;
     bool drewOnce      = false;
 
-    // The status line's frame counts — a working idle skip and a broken one look the same on screen.
-    long long drawn = 0, presented = 0, skipped = 0, polls = 0;
+    LoopCounts counts;   // for the status line
 
     Uint64 nextFrameMs = 0;   // 0 so the first tick draws
     Uint64 lastPollMs  = 0;   // what pace_tick measures against
@@ -668,10 +596,11 @@ void FrameLoop::run() {
 }
 
 void FrameLoop::tick() {
-    ++polls;
+    ++counts.polls;
 
     // First, so it times the whole iteration including the wait. Off unless POCKETTRACKER_LATENCY=1.
     latency::poll_tick(state.isPlaying);
+    audio_profile::print_due();
 
     const Uint64 now = SDL_GetTicks64();
 
@@ -1211,10 +1140,10 @@ void FrameLoop::draw_frame(Uint64 now) {
     if (audible || audibleEdge || sawInput || !drewOnce || settling || metersFalling ||
         timedWork || timedWorkEdge) {
         layout.draw(screen.canvas, state);
-        ++drawn;
+        ++counts.drawn;
 
         const bool didPresent = screen.present(state, input);
-        if (didPresent) ++presented;
+        if (didPresent) ++counts.presented;
         drewOnce = true;
 
         // ⚠️ Anchored on the present's return (a vblank, with vsync). A frame not presented blocked on
@@ -1225,7 +1154,7 @@ void FrameLoop::draw_frame(Uint64 now) {
             nextFrameMs = SDL_GetTicks64() + period - period / 2;
         }
     } else {
-        ++skipped;
+        ++counts.skipped;
     }
 
     // The plain deadline, re-anchored only once a whole frame behind: a stall costs one late frame,
@@ -1239,26 +1168,10 @@ void FrameLoop::draw_frame(Uint64 now) {
     print_status(now);
 }
 
-// Once a second on the console: frame counter (the device calls back), playhead (the sequencer
-// advances), voices (notes reach the engine) — whichever is stuck names the broken link on a box with
-// no screen. `cpu`/`max` are the last second's mean and worst block; `late` counts every overrun
-// block since launch, each one an audible dropout.
 void FrameLoop::print_status(Uint64 now) {
     if (!cfg.console || now - lastStatus < 1000) return;
-
     lastStatus = now;
-    const ui::TrackPlayhead& t0 = state.playheads[0];
-    const AudioEngine::BlockTiming bt = engineRef.getBlockTiming();
-    std::printf(
-        "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
-        "   drew %lld skip %lld same %lld poll %lld   cpu %d.%d%% max %d.%d%% late %lld\n",
-        host.is_playing() ? "play" : "stop",
-        static_cast<long long>(engineRef.getCurrentFrame()), t0.songRow, t0.chainRow,
-        t0.step, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
-        state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented, polls,
-        bt.meanLoad / 10, bt.meanLoad % 10, bt.worstLoad / 10, bt.worstLoad % 10,
-        static_cast<long long>(bt.lateBlocks));
-    std::fflush(stdout);  // block-buffered to a pipe otherwise
+    print_status_line(host, engineRef, state, counts);
 }
 
 // ⚠️ The only place the loop sleeps, so every tick must reach it. Measured from the last tick, so a
@@ -1276,58 +1189,6 @@ void FrameLoop::pace_tick() {
     else if (nextFrameMs < due) due = nextFrameMs;
     if (due > t) SDL_Delay(static_cast<Uint32>(due - t));
     lastPollMs = SDL_GetTicks64();
-}
-
-// ─── Leaving ─────────────────────────────────────────────────────────────────────────────────────
-
-// The MIDI-in report: a count per stage, so a break can be located.
-void print_midi_in_report(MidiInBase* base, SongcoreHost& host, const MidiInConsole& midiInConsole) {
-    const songcore::MidiInputRouter& r = host.midi_in_router();
-    std::printf("midi in: %llu bytes at the port (%llu callbacks, %llu port errors), %llu drained, "
-                "%llu messages\n"
-                "         routed %llu, dropped: %llu non-channel, %llu no-instrument, "
-                "%llu unsupported\n"
-                "         queue overflow %llu bytes, parser orphans %llu, messages with no record %llu\n"
-                "         dropped during an export %llu bytes, handled messages the UI never saw %llu\n"
-                // What the engine and the cable were handed; differs from `routed` by the thru suppression.
-                "         injected %llu into the engine; thru %s: %llu to the cable, %llu suppressed\n",
-                static_cast<unsigned long long>(base->bytes_received()),
-                static_cast<unsigned long long>(base->callbacks()),
-                static_cast<unsigned long long>(base->port_errors()),
-                static_cast<unsigned long long>(host.midi_in_bytes()),
-                static_cast<unsigned long long>(host.midi_in_messages()),
-                static_cast<unsigned long long>(r.routed()),
-                static_cast<unsigned long long>(r.nonChannel()),
-                static_cast<unsigned long long>(r.noInstrument()),
-                static_cast<unsigned long long>(r.unsupported()),
-                static_cast<unsigned long long>(host.midi_in_sink().dropped()),
-                static_cast<unsigned long long>(host.midi_in_parser().orphan_bytes()),
-                static_cast<unsigned long long>(midiInConsole.silent),
-                static_cast<unsigned long long>(host.midi_in_pipeline().discarded()),
-                static_cast<unsigned long long>(host.midi_in_pipeline().seen_dropped()),
-                static_cast<unsigned long long>(host.midi_in_injected()),
-                host.midi_in_thru() ? "on" : "OFF (loopback)",
-                static_cast<unsigned long long>(host.midi_in_thru_sent()),
-                static_cast<unsigned long long>(host.midi_in_thru_suppressed()));
-
-    // SYNC IN's clock: the ticks never reach the router or the trace.
-    std::printf("         clock: %llu ticks, %llu transport events lost\n",
-                static_cast<unsigned long long>(host.midi_in_pipeline().sync().clocks()),
-                static_cast<unsigned long long>(host.midi_in_pipeline().sync().events_dropped()));
-
-    if (midiInConsole.ccTotal > 0) {
-        const uint64_t spanMs = midiInConsole.ccLastMs - midiInConsole.ccFirstMs;
-        std::printf("         CC: %llu in %.2f s = %.0f/s mean; PEAK %llu/s (busiest second), "
-                    "%llu per 100 ms, %llu per 16 ms, %llu per drain; %llu drains carried one\n",
-                    static_cast<unsigned long long>(midiInConsole.ccTotal),
-                    spanMs / 1000.0,
-                    spanMs > 0 ? midiInConsole.ccTotal * 1000.0 / spanMs : 0.0,
-                    static_cast<unsigned long long>(midiInConsole.w1000.max),
-                    static_cast<unsigned long long>(midiInConsole.w100.max),
-                    static_cast<unsigned long long>(midiInConsole.w16.max),
-                    static_cast<unsigned long long>(midiInConsole.ccMaxPerDrain),
-                    static_cast<unsigned long long>(midiInConsole.ccDrains));
-    }
 }
 
 }  // namespace

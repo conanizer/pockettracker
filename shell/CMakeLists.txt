@@ -145,6 +145,8 @@ add_executable(pockettracker-sdl
         midi/midi-out-base.cpp          # the platform-free half of a MIDI output: list, TEST, trace
         midi/midi-in-base.cpp           # the platform-free half of a MIDI input: list, sink, counters
         midi/midi-sender.cpp            # the just-in-time MIDI sender thread
+        console/midi-in-console.cpp     # the measuring instruments, off unless an env var asks
+        console/midi-jitter.cpp
         linux/alsa-rawmidi.cpp          # the one libasound loader + device walk; empty TU elsewhere
         linux/alsa-route.cpp            # what stands between ALSA's default and the chip; empty elsewhere
         linux/midi-out-alsa.cpp         # empty TU off Linux, as are the rest of linux/ and windows/

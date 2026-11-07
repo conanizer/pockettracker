@@ -1,7 +1,8 @@
 #include "sdl/sdl-audio-engine.h"
 
 #include "audio-engine.h"
-#include "latency_probe.h"
+#include "console/audio-profile.h"
+#include "console/latency-probe.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -172,37 +173,11 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
     latency::audio_callback(numFrames, self->sampleRate_);
 
     // processLiveBlock clears the buffer (SDL's is not zeroed), sets flush-to-zero and chunks.
-    // POCKETTRACKER_AUDIO_PROFILE=1: block time against the budget and the gap between callbacks, once
-    // a second (block > budget = compute underrun; a big gap with a fast block = preempted).
-    static const bool prof = (std::getenv("POCKETTRACKER_AUDIO_PROFILE") != nullptr);
-    if (!prof) {
-        self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
-                                      float(self->sampleRate_));
-        return;
-    }
-    static uint64_t lastNs = 0, printNs = 0, maxBlk = 0, maxGap = 0, sumBlk = 0, cnt = 0, over = 0;
-    uint64_t t0 = latency::now_ns();
-    if (lastNs != 0) { uint64_t g = t0 - lastNs; if (g > maxGap) maxGap = g; }
-    lastNs = t0;
-
+    const bool     profile = audio_profile::enabled();
+    const uint64_t startNs = profile ? latency::now_ns() : 0;
     self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
                                   float(self->sampleRate_));
-
-    uint64_t t1 = latency::now_ns();
-    uint64_t blk = t1 - t0;
-    if (blk > maxBlk) maxBlk = blk;
-    sumBlk += blk; ++cnt;
-    uint64_t budgetNs = uint64_t(numFrames) * 1000000000ull / uint64_t(self->sampleRate_ ? self->sampleRate_ : 44100);
-    if (blk > budgetNs) ++over;
-    if (printNs == 0) printNs = t1;
-    if (t1 - printNs >= 1000000000ull) {
-        std::printf("PROF: n=%llu avgBlk=%.2fms maxBlk=%.2fms over=%llu maxGap=%.2fms budget=%.2fms frames=%d\n",
-                    (unsigned long long)cnt, cnt ? double(sumBlk) / double(cnt) / 1e6 : 0.0,
-                    double(maxBlk) / 1e6, (unsigned long long)over, double(maxGap) / 1e6,
-                    double(budgetNs) / 1e6, numFrames);
-        std::fflush(stdout);
-        printNs = t1; maxBlk = 0; maxGap = 0; sumBlk = 0; cnt = 0; over = 0;
-    }
+    if (profile) audio_profile::block(startNs, latency::now_ns(), numFrames, self->sampleRate_);
 }
 
 bool SdlAudioEngine::openStream() {
