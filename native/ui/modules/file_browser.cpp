@@ -53,7 +53,6 @@ bool ext_matches(const std::string& ext, const std::vector<std::string>& allowed
 constexpr int NAME_COLS   = 20;
 constexpr int ROOT_COLS   = 32;
 constexpr int PATH_COLS   = 36;
-constexpr int STATUS_COLS = 31;
 
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
@@ -288,21 +287,25 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
 
     std::string hint;
     Argb        hintColor;
+    // A question: the name gets what the sentence around it leaves of the bar.
+    const auto ask = [](const std::string& before, const std::string& name, const std::string& after) {
+        const int room = (WIDTH - 20 + CHAR_SPACING) / CHAR_W - Canvas::glyph_count(before + after);
+        return before + Canvas::clip_text(name, room) + after;
+    };
     if (s.mode == BrowserMode::DELETE) {
         const std::vector<const BrowserItem*> doomed = s.delete_targets();
-        const std::string what = doomed.size() == 1 ? Canvas::clip_text(doomed[0]->displayName, 16)
-                                                    : std::to_string(doomed.size()) + " FILES";
-        hint = "DELETE " + what + "? A=YES B=NO";
+        hint = doomed.size() == 1 ? ask("DELETE ", doomed[0]->displayName, "? A=YES B=NO")
+                                  : "DELETE " + std::to_string(doomed.size()) + " FILES? A=YES B=NO";
         hintColor = 0xFFFF0000;
     } else if (s.mode == BrowserMode::SET_HOME) {
         const BrowserItem* item = s.current();
         // Not red: nothing is destroyed. Still a confirm — it moves where every app folder is.
-        hint = "HOME FOLDER? " + Canvas::clip_text(item ? item->displayName : "", 14) + " A=YES B=NO";
+        hint = ask("HOME FOLDER? ", item ? item->displayName : "", " A=YES B=NO");
         hintColor = t.textTitle;
     } else if (s.mode == BrowserMode::FORGET_ROOT) {
         const BrowserItem* item = s.current();
         // ⚠️ FORGET, never DELETE: it hands back a permission; every file stays.
-        hint = "FORGET " + Canvas::clip_text(item ? item->displayName : "", 15) + "? A=YES B=NO";
+        hint = ask("FORGET ", item ? item->displayName : "", "? A=YES B=NO");
         hintColor = t.textTitle;
     } else if (s.selectionMode) {
         hint      = "B=COPY L+A=CUT L+B=ALL L+R=CANCEL";
@@ -381,9 +384,14 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     const int bottomY = y + HEIGHT - ROW_HEIGHT;
     c.fill_rect(x, bottomY, WIDTH, ROW_HEIGHT, t.meterBackground);
 
-    // A status message takes the left half when there is one.
+    // Right-aligned, so the count grows leftward; `text_width` because the trailing gap is not ink.
+    const std::string count  = total > 0 ? std::to_string(s.cursor + 1) + "/" + std::to_string(total) : "";
+    const int         countW = Canvas::text_width(count, CHAR_SPACING, FONT_SCALE);
+
+    // A status message takes what the count leaves, a glyph of air between.
     if (!s.statusMessage.empty()) {
-        c.draw_text(Canvas::clip_text(s.statusMessage, STATUS_COLS), x + 10, bottomY + TEXT_PADDING,
+        const int cols = (WIDTH - 20 - countW - CHAR_W + CHAR_SPACING) / CHAR_W;
+        c.draw_text(Canvas::clip_text(s.statusMessage, cols), x + 10, bottomY + TEXT_PADDING,
                     s.statusSuccess ? t.textTitle : 0xFFFF4444, CHAR_SPACING, FONT_SCALE);
     } else {
         // Real arrows (the font has them; '^' draws blank). 28 code points leave the counter room.
@@ -391,13 +399,9 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
                     bottomY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
-    if (total > 0) {
-        // Right-aligned, so the count grows leftward; `text_width` because the trailing gap is not ink.
-        const std::string count  = std::to_string(s.cursor + 1) + "/" + std::to_string(total);
-        const int         countW = Canvas::text_width(count, CHAR_SPACING, FONT_SCALE);
+    if (!count.empty())
         c.draw_text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam,
                     CHAR_SPACING, FONT_SCALE);
-    }
 }
 
 }  // namespace pt::ui
