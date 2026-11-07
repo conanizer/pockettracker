@@ -152,18 +152,14 @@ jobs:
               echo "FAIL  pt-ui did not compile for $ABI"; FAIL=1; continue
             fi
 
-            # 29 = the source count of the pt-ui target (8 top-level + 21 ui/modules). ⚠️ It is NOT
-            # 30: ninja's last edge, "[30/30] Linking CXX static library", is the ARCHIVE, not a
-            # translation unit — which is where the A5 note's "all 30 TUs" came from. The first
-            # draft of this check asserted >= 30 and would therefore have failed a perfectly good
-            # build; it printed "objects=29" beside its own verdict, which is the only reason that
-            # was caught rather than debugged later as an Android regression.
+            # Every translation unit of the target, counted from its own ninja file, has an object.
             AR="$DIR/libpt-ui.a"
+            WANT=$("$NINJA" -C "$DIR" -t targets all | grep -c '^CMakeFiles/pt-ui\.dir/.*\.o:')
             OBJS=$(find "$DIR/CMakeFiles/pt-ui.dir" -name '*.o' 2>/dev/null | wc -l)
-            if [ -f "$AR" ] && [ "$OBJS" -ge 29 ]; then
-              echo "ok    $ABI: libpt-ui.a $(stat -c%s "$AR") bytes, from $OBJS objects"
+            if [ -f "$AR" ] && [ "$WANT" -gt 0 ] && [ "$OBJS" -eq "$WANT" ]; then
+              echo "ok    $ABI: libpt-ui.a $(stat -c%s "$AR") bytes, from $OBJS of $WANT objects"
             else
-              echo "FAIL  $ABI: libpt-ui.a exists=$([ -f "$AR" ] && echo yes || echo no), objects=$OBJS (expected >= 29)"
+              echo "FAIL  $ABI: libpt-ui.a exists=$([ -f "$AR" ] && echo yes || echo no), objects=$OBJS (want $WANT)"
               FAIL=1
             fi
           done
