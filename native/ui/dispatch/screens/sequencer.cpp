@@ -58,6 +58,25 @@ std::set<int> used_chain_ids(const Project& p) {
     return used;
 }
 
+/** A FREE chain from `from` on, wrapping: blank and referenced nowhere — a blank one the song plays
+ *  is somebody's, a chain typed but not filled yet. −1 when the pool is full. */
+int first_free_chain(const Project& p, int from) {
+    const std::set<int> used = used_chain_ids(p);
+    return first_from_wrapping(from, 256, [&](int i) {
+        return used.count(i) == 0 && chain_is_blank(p.chains[static_cast<size_t>(i)]);
+    });
+}
+
+/** As `first_free_chain` for a phrase (a blank one can be a silent spacer in a pad chain), skipping
+ *  `reserved`. */
+int first_free_phrase(const Project& p, int from, const std::set<int>& reserved = {}) {
+    const std::set<int> used = used_phrase_ids(p);
+    return first_from_wrapping(from, 256, [&](int i) {
+        return used.count(i) == 0 && reserved.count(i) == 0 &&
+               phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
+    });
+}
+
 }  // namespace
 
 // ─── The buttons ─────────────────────────────────────────────────────────────────────────────────
@@ -415,9 +434,7 @@ void InputDispatcher::song_insert_next() {
     Project&         p     = host_.edit_project();
     songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
 
-    const int next = first_from_wrapping(s_.lastEditedChain + 1, 256, [&](int i) {
-        return chain_is_blank(p.chains[static_cast<size_t>(i)]);
-    });
+    const int next = first_free_chain(p, s_.lastEditedChain + 1);
     if (next < 0) return;
 
     while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow) track.chainRefs.push_back(-1);
@@ -437,9 +454,7 @@ void InputDispatcher::chain_insert_next() {
     Project& p     = host_.edit_project();
     Chain&   chain = p.chains[static_cast<size_t>(s_.currentChain)];
 
-    const int next = first_from_wrapping(s_.lastEditedPhrase + 1, 256, [&](int i) {
-        return phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-    });
+    const int next = first_free_phrase(p, s_.lastEditedPhrase + 1);
     if (next < 0) return;
 
     chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = next;
@@ -553,14 +568,8 @@ void InputDispatcher::song_clone_chain() {
                                    : -1;
     if (currentChainId == -1) return;
 
-    const Chain&        src         = p.chains[static_cast<size_t>(currentChainId)];
-    const std::set<int> usedChains  = used_chain_ids(p);
-    const std::set<int> usedPhrases = used_phrase_ids(p);
-
-    // The destination must be a FREE chain: blank AND unreferenced.
-    const int dstChainId = first_from_wrapping(currentChainId + 1, 256, [&](int i) {
-        return usedChains.count(i) == 0 && chain_is_blank(p.chains[static_cast<size_t>(i)]);
-    });
+    const Chain& src        = p.chains[static_cast<size_t>(currentChainId)];
+    const int    dstChainId = first_free_chain(p, currentChainId + 1);
 
     // A deep clone: each referenced phrase gets its own free slot. Duplicate refs map to the same
     // clone, so a chain playing phrase 5 twice still plays one phrase twice.
@@ -573,10 +582,7 @@ void InputDispatcher::song_clone_chain() {
     std::map<int, int> phraseMap;
     bool               enoughPhrases = true;
     for (const int pid : srcPhraseIds) {
-        const int slot = first_from_wrapping(0, 256, [&](int i) {
-            return reserved.count(i) == 0 && usedPhrases.count(i) == 0 &&
-                   phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-        });
+        const int slot = first_free_phrase(p, 0, reserved);
         if (slot < 0) { enoughPhrases = false; break; }
         reserved.insert(slot);
         phraseMap[pid] = slot;
@@ -614,10 +620,7 @@ void InputDispatcher::chain_clone_phrase() {
     const int currentPhraseId = chain.phraseRefs[static_cast<size_t>(s_.cursorRow)];
     if (currentPhraseId == -1) return;
 
-    const std::set<int> usedPhrases = used_phrase_ids(p);
-    const int next = first_from_wrapping(currentPhraseId + 1, 256, [&](int i) {
-        return usedPhrases.count(i) == 0 && phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-    });
+    const int next = first_free_phrase(p, currentPhraseId + 1);
     if (next < 0) return;
 
     p.phrases[static_cast<size_t>(next)].steps = p.phrases[static_cast<size_t>(currentPhraseId)].steps;
@@ -629,15 +632,18 @@ void InputDispatcher::chain_clone_phrase() {
 void InputDispatcher::phrase_clone() {
     Project&            p           = host_.edit_project();
     const int           srcPhraseId = s_.currentPhrase;
-    const std::set<int> usedPhrases = used_phrase_ids(p);
-    const int next = first_from_wrapping(srcPhraseId + 1, 256, [&](int i) {
-        return i != srcPhraseId && usedPhrases.count(i) == 0 &&
-               phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-    });
+    const int next = first_free_phrase(p, srcPhraseId + 1, {srcPhraseId});
     if (next < 0) return;
 
     p.phrases[static_cast<size_t>(next)].steps = p.phrases[static_cast<size_t>(srcPhraseId)].steps;
-    s_.currentPhrase = next;   // …and follow the clone, so you are editing the copy
+    // …and follow the clone, so you are editing the copy. The chain row it came from plays the copy
+    // too, as CHAIN's clone does — or leaving PHRASE comes back to the original.
+    std::vector<int>& refs = p.chains[static_cast<size_t>(s_.currentChain)].phraseRefs;
+    const int         row  = pointer_chain_row(s_);
+    if (row >= 0 && row < static_cast<int>(refs.size()) && refs[static_cast<size_t>(row)] == srcPhraseId)
+        refs[static_cast<size_t>(row)] = next;
+    s_.currentPhrase    = next;
+    s_.lastEditedPhrase = next;
     mark_modified();
 }
 
