@@ -491,8 +491,10 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
             const int cx  = wfLeft + static_cast<int>(static_cast<float>(i) *
                                                       static_cast<float>(WAVEFORM_W) /
                                                       static_cast<float>(bins));
-            const int top = midY - static_cast<int>(maxVal * halfH);
-            const int bot = midY - static_cast<int>(minVal * halfH);
+            // A float file can run past full scale: kept inside the panel.
+            const int last = y + WAVEFORM_H - 1;
+            const int top  = std::clamp(midY - static_cast<int>(maxVal * halfH), y, last);
+            const int bot  = std::clamp(midY - static_cast<int>(minVal * halfH), top, last);
 
             // Bins inside the selection are lit: that is the selection; S/E only mark its edges.
             const int64_t binFrame = viewStart + (static_cast<int64_t>(i) * viewLen) / bins;
