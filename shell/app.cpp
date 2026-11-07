@@ -644,6 +644,7 @@ class FrameLoop {
     Uint64 lastInputMs = 0;
 
     Uint64   audioReopenMs = 0;  // when the next reopen attempt may run; 0 = at once
+    bool     reopenFailing = false;
     uint64_t midiSeen      = 0;  // messages the audio thread had handled at the last tick
     Uint64   midiClockPrintMs = 0;   // the trace's once-a-second clock line
     uint64_t midiClockTicks   = 0;
@@ -1059,9 +1060,20 @@ void FrameLoop::reopen_audio_if_lost(Uint64 now) {
             derive_midi_auto_offset(audio, engineRef, state);
             host.set_midi_offset_ms(ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs));
             std::printf("audio:   device reopened\n");
+            if (reopenFailing) {
+                state.statusMessage = "AUDIO OUTPUT OPENED";
+                state.statusSuccess = true;
+            }
+            reopenFailing = false;
         } else {
             audioReopenMs = now + 500;
-            std::printf("audio:   reopen FAILED - retrying\n");
+            // Said once per outage: with no device at all this retries for the whole session.
+            if (!reopenFailing) {
+                std::printf("audio:   reopen FAILED - retrying every 500 ms\n");
+                state.statusMessage = "NO AUDIO OUTPUT";
+                state.statusSuccess = false;
+            }
+            reopenFailing = true;
         }
         std::fflush(stdout);
     }
@@ -1423,6 +1435,7 @@ int run(const AppConfig& cfg) {
     const bool midiInPortWasOpen = cfg.midiIn && cfg.midiIn->is_open();
 
     BackgroundContext bg{&host, &dispatch, &filesystem, &state, &audio, cfg.console, &cfg.background};
+    bg.audioClosed = !cfg.audioOpen;
 
     FrameLoop loop(cfg, host, midiInConsole, state, dispatch, input, screen, bg);
 

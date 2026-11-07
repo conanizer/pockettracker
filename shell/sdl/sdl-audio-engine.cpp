@@ -3,6 +3,7 @@
 #include "audio-engine.h"
 #include "latency_probe.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -28,6 +29,16 @@ constexpr int SMALL_FRAMES = 256;
 
 // Every platform opens at the engine's one rate; SDL converts where the device runs another.
 constexpr int PREFERRED_RATE = AudioEngine::SAMPLE_RATE;
+
+// An open that keeps failing is retried every 500 ms for as long as there is no device: it says
+// what it tried and why it failed once, not on every try.
+void say(bool quiet, const char* fmt, ...) {
+    if (quiet) return;
+    va_list args;
+    va_start(args, fmt);
+    std::vprintf(fmt, args);
+    va_end(args);
+}
 
 // Printed on the boot line, so a reading stays attributable.
 enum class RateSource { FIXED, ENV, PINNED };
@@ -78,18 +89,18 @@ int requested_rate(RateSource& source) {
 // Device and buffer size from what stands between the app and the chip (alsa-route.h): a sound server
 // gets the small size; a plain ALSA mixer chain is opened at its chip directly, on a handheld build
 // only (that open is exclusive); anything else is left alone. AUDIODEV or AUDIO_FRAMES win.
-void choose_linux_route(int& frames) {
+void choose_linux_route(int& frames, bool quiet) {
     const bool framesPinned = std::getenv("POCKETTRACKER_AUDIO_FRAMES") != nullptr;
     if (const char* dev = std::getenv("AUDIODEV")) {
-        std::printf("audio:   route: AUDIODEV=%s given, not inspected\n", dev);
+        say(quiet, "audio:   route: AUDIODEV=%s given, not inspected\n", dev);
         return;
     }
 
     const char* driver = SDL_GetCurrentAudioDriver();
     if (driver && (std::strcmp(driver, "pipewire") == 0 || std::strcmp(driver, "pulseaudio") == 0)) {
         if (!framesPinned) frames = SMALL_FRAMES;
-        std::printf("audio:   route: SDL talks to %s itself - a sound server, asking %d frames\n", driver,
-                    frames);
+        say(quiet, "audio:   route: SDL talks to %s itself - a sound server, asking %d frames\n", driver,
+            frames);
         return;
     }
     if (!driver || std::strcmp(driver, "alsa") != 0) return;
@@ -100,18 +111,18 @@ void choose_linux_route(int& frames) {
 #ifdef PT_HANDHELD
             setenv("AUDIODEV", r.hw.c_str(), 1);
             if (!framesPinned) frames = SMALL_FRAMES;
-            std::printf("audio:   route: %s - opening %s directly, asking %d frames\n", r.chain.c_str(),
+            say(quiet, "audio:   route: %s - opening %s directly, asking %d frames\n", r.chain.c_str(),
                         r.hw.c_str(), frames);
 #else
-            std::printf("audio:   route: %s - left shared (not a handheld build)\n", r.chain.c_str());
+            say(quiet, "audio:   route: %s - left shared (not a handheld build)\n", r.chain.c_str());
 #endif
             break;
         case ptshell::AlsaRoute::SERVER:
             if (!framesPinned) frames = SMALL_FRAMES;
-            std::printf("audio:   route: %s - a sound server, asking %d frames\n", r.chain.c_str(), frames);
+            say(quiet, "audio:   route: %s - a sound server, asking %d frames\n", r.chain.c_str(), frames);
             break;
         case ptshell::AlsaRoute::LEAVE:
-            std::printf("audio:   route: %s - left as is\n", r.chain.c_str());
+            say(quiet, "audio:   route: %s - left as is\n", r.chain.c_str());
             break;
     }
 }
@@ -134,7 +145,13 @@ void raise_audio_thread_priority() {
 
 }  // namespace
 
-SdlAudioEngine::SdlAudioEngine(AudioEngine* core) : core_(core) {}
+// The rate before any device opens is the one it will be asked for (SDL converts whatever the device
+// runs), so the app can start without one.
+SdlAudioEngine::SdlAudioEngine(AudioEngine* core) : core_(core) {
+    RateSource source;
+    sampleRate_ = requested_rate(source);
+    if (core_) core_->setDeviceSampleRate(sampleRate_);
+}
 
 SdlAudioEngine::~SdlAudioEngine() { closeStream(); }
 
@@ -189,14 +206,17 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
 }
 
 bool SdlAudioEngine::openStream() {
+    const bool quiet = lastOpenFailed_;
+    lastOpenFailed_  = true;   // until the open below succeeds
+
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-        std::fprintf(stderr, "SDL_InitSubSystem(AUDIO) failed: %s\n", SDL_GetError());
+        say(quiet, "SDL_InitSubSystem(AUDIO) failed: %s\n", SDL_GetError());
         return false;
     }
 
     int askedFrames = requested_frames();
 #if defined(__linux__) && !defined(__ANDROID__)
-    choose_linux_route(askedFrames);
+    choose_linux_route(askedFrames, quiet);
 #endif
     RateSource rateSource  = RateSource::FIXED;
     const int  askedRate   = pinnedRate_ > 0 ? pinnedRate_ : requested_rate(rateSource);
@@ -229,7 +249,7 @@ bool SdlAudioEngine::openStream() {
 #endif
 
     if (device_ == 0) {
-        std::fprintf(stderr, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        say(quiet, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
         return false;
     }
     if (got.format != AUDIO_F32SYS || got.channels != 2) {
@@ -247,6 +267,7 @@ bool SdlAudioEngine::openStream() {
     if (core_) core_->setDeviceSampleRate(sampleRate_);
 
     SDL_PauseAudioDevice(device_, 0);
+    lastOpenFailed_ = false;
 
     // From the stored fields, so this and `outputLatency()` agree. Asked beside got: a device that
     // rounded the request vs one that ignored it.

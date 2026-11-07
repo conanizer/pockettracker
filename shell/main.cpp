@@ -216,17 +216,17 @@ int main(int argc, char** argv) {
     // ⚠️ Heap, not a local: AudioEngine's scratch buffers blow a 1 MB stack.
     auto engine = std::make_unique<AudioEngine>();
 
+    // No output device is no reason not to start: the loop keeps trying to open one.
     SdlAudioEngine audio(engine.get());
-    if (!audio.openStream()) {
-        SDL_Quit();
-        return 1;
-    }
+    const bool audioOpen = audio.openStream();
+    if (!audioOpen) std::printf("audio:   NO OUTPUT DEVICE - starting silent\n");
 
     ui::StdFileSystem filesystem(appRoot);
 
     ptshell::AppConfig cfg;
     cfg.engine      = engine.get();
     cfg.audio       = &audio;
+    cfg.audioOpen   = audioOpen;
     cfg.appRoot     = appRoot;
     cfg.filesystem  = &filesystem;
     cfg.projectBlob = blob;

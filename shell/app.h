@@ -36,10 +36,11 @@ class AudioOutputSelector {
 
 // What the shared shell is given rather than decides; filled by the platform's `main` before `run()`.
 struct AppConfig {
-    // Both borrowed; `audio->openStream()` has already succeeded. ⚠️ `AudioEngine` must be
-    // heap-allocated — its scratch buffers blow a 1 MB stack.
+    // Both borrowed. ⚠️ `AudioEngine` must be heap-allocated — its scratch buffers blow a 1 MB stack.
     AudioEngine*  engine = nullptr;
     AudioBackend* audio  = nullptr;
+    // `main` tried `audio->openStream()`; false = no device yet, and the loop keeps trying.
+    bool audioOpen = true;
     // Null where the platform has only one output; when set, it is the same object as `audio`.
     AudioOutputSelector* audioOutputs = nullptr;
 

@@ -45,12 +45,13 @@ class SdlAudioEngine : public AudioBackend {
   private:
     static void SDLCALL audioCallback(void* userdata, Uint8* out, int lenBytes);
 
-    AudioEngine*      core_         = nullptr;
-    SDL_AudioDeviceID device_       = 0;
-    int               sampleRate_   = 0;
-    int               channels_     = 0;
-    int               bufferFrames_ = 0;  // what the device chose
-    int               pinnedRate_   = 0;
+    AudioEngine*      core_           = nullptr;
+    SDL_AudioDeviceID device_         = 0;
+    int               sampleRate_     = 0;
+    int               channels_       = 0;
+    int               bufferFrames_   = 0;  // what the device chose
+    int               pinnedRate_     = 0;
+    bool              lastOpenFailed_ = false;  // the next open's report stays quiet
 };
 
 #endif  // POCKETTRACKER_SDL_AUDIO_ENGINE_H
