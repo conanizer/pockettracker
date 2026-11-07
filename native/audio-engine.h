@@ -351,10 +351,6 @@ public:
     // Route the preview lane through a track's fader (0..7), or -1 for unity.
     void setPreviewTrack(int trackId);
 
-    // The same writes without a log line, for the VTR/VMV arms on the audio thread.
-    void applyTrackVolume(int trackId, float volume);
-    void applyMasterVolume(float volume);
-
     // ===================================
     // EQ METHODS
     // ===================================
@@ -432,10 +428,6 @@ public:
     // 0 = unity, 255 = 4× into the limiter.
     void setLimiterPreGain(int depth);
 
-
-    // SoundFont voice first.
-    IAudioVoice* findActiveVoiceForTrack(int trackId);
-
     // PBN on an empty step; ~0 stops the bend.
     void schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo);
 
@@ -450,6 +442,52 @@ public:
                                  int attackSamples, int holdSamples, int decaySamples,
                                  float sustainLevel, float lfoHz, int oscShape,
                                  int releaseSamples = 0, int lfoTrigMode = 1);
+    void clearInstrumentModulation(int sampleId);
+
+    // ===================================
+    // OFFLINE RENDER
+    // ===================================
+    void renderOffline(int numFrames, float* output, int sampleRate);
+
+    void resetFrameCounter();
+
+    // Clear every chain's internal state, so a render depends only on the project.
+    // ⚠️ The modules also go back to factory defaults — the caller re-pushes the project. Never from
+    // the audio thread.
+    void resetEffectState();
+
+    // While set, processLiveBlock outputs silence.
+    void setOfflineRendering(bool offline);
+
+    // The song BPM the table tic is locked to. Set before any note fires.
+    void setTempo(int tempo);
+
+    // 0 = full mix, 1-8 = track N-1, 9 = reverb return, 10 = delay return. Non-zero bypasses OTT,
+    // DUST and the master EQ.
+    void setStemsMode(int mode) { stemsMode = mode; }
+
+    // ── The metronome ────────────────────────────────────────────────────────────────────────────
+    // Not part of the song: summed after the master chain, silent in an export. Quarter notes from
+    // the transport's start frame (epoch + k·framesPerBeat, so nothing drifts); a groove does not move it.
+
+    // `gain` is the click's peak; 0 silences it.
+    void setMetronome(bool enabled, float gain);
+
+    // Pin beat 0, the accented one, to the transport's start.
+    void startMetronome(int64_t startFrame, int64_t framesPerBeat);
+
+    // A tempo change respaces the grid from the next beat.
+    void setMetronomeBeat(int64_t framesPerBeat);
+
+    void stopMetronome();
+
+private:
+    // The same writes without a log line, for the VTR/VMV arms on the audio thread.
+    void applyTrackVolume(int trackId, float volume);
+    void applyMasterVolume(float volume);
+
+    // SoundFont voice first.
+    IAudioVoice* findActiveVoiceForTrack(int trackId);
 
     // At a trigger: copy the instrument's mod slots onto the voice, seed RND/DRNK, set the LFO phase.
     void initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate);
@@ -551,7 +589,6 @@ public:
                                                const double (&rowFraction)[TABLE_LANES],
                                                float sampleRate);
 
-    void clearInstrumentModulation(int sampleId);
 
     // Once per block per voice.
     void updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate = 44100.0f);
@@ -561,44 +598,6 @@ public:
     // Playback rate with pitch offset, vibrato and mod-slot pitch.
     float getModulatedPlaybackRate(Voice& voice);
 
-    // ===================================
-    // OFFLINE RENDER
-    // ===================================
-    void renderOffline(int numFrames, float* output, int sampleRate);
-
-    void resetFrameCounter();
-
-    // Clear every chain's internal state, so a render depends only on the project.
-    // ⚠️ The modules also go back to factory defaults — the caller re-pushes the project. Never from
-    // the audio thread.
-    void resetEffectState();
-
-    // While set, processLiveBlock outputs silence.
-    void setOfflineRendering(bool offline);
-
-    // The song BPM the table tic is locked to. Set before any note fires.
-    void setTempo(int tempo);
-
-    // 0 = full mix, 1-8 = track N-1, 9 = reverb return, 10 = delay return. Non-zero bypasses OTT,
-    // DUST and the master EQ.
-    void setStemsMode(int mode) { stemsMode = mode; }
-
-    // ── The metronome ────────────────────────────────────────────────────────────────────────────
-    // Not part of the song: summed after the master chain, silent in an export. Quarter notes from
-    // the transport's start frame (epoch + k·framesPerBeat, so nothing drifts); a groove does not move it.
-
-    // `gain` is the click's peak; 0 silences it.
-    void setMetronome(bool enabled, float gain);
-
-    // Pin beat 0, the accented one, to the transport's start.
-    void startMetronome(int64_t startFrame, int64_t framesPerBeat);
-
-    // A tempo change respaces the grid from the next beat.
-    void setMetronomeBeat(int64_t framesPerBeat);
-
-    void stopMetronome();
-
-private:
     LoadFailure lastLoadFailure_ = LoadFailure::NONE;
 
     // The engine's denormal protection. ⚠️ Per thread, so every entry point that runs DSP calls it,
