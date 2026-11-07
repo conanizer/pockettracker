@@ -535,7 +535,7 @@ class FrameLoop {
         screen.present(state, input);
     }
 
-    bool load_pump();
+    bool pump_events();
 
   private:
     void tick();
@@ -577,8 +577,11 @@ class FrameLoop {
     ui::MapperState   mapper;
     bool              questionWasUp = false;   // `modal_question_up` last frame
 
-    // Cleared by a quit; also by load_pump, so a quit during a load is not swallowed.
+    // Cleared by a quit, also one seen by pump_events, so a quit during a load is not swallowed.
     bool running = true;
+
+    // Back from the background: the browser re-lists on the next tick, never inside a load's pump.
+    bool browserRefreshOwed = false;
 
     // THRU as last printed; picking a loopback port mid-session changes it.
     bool midiThru;
@@ -686,31 +689,20 @@ void FrameLoop::tick() {
     pace_tick();
 }
 
-// Runs instead of the loop during a load: keeps SDL pumping so the background watcher can fire, presses
-// are consumed rather than replayed afterwards, and B cancels. ⚠️ It does not dispatch them (that would
-// re-enter the dispatcher mid-load); SDL_QUIT cancels too.
-bool FrameLoop::load_pump() {
-    bool cancel = false;
+// Runs instead of the loop during a load or a render: the loop's own event handling, so the trip to
+// the background and back is seen, but presses are consumed rather than replayed afterwards. ⚠️ They
+// are not dispatched (that would re-enter the dispatcher mid-load). True: a fresh B or a quit.
+bool FrameLoop::pump_events() {
     const Uint64 now = SDL_GetTicks64();
 
     // The load refills the sequencer at this cadence, so to the latency probe this is a poll.
     latency::poll_tick(state.isPlaying);
 
     SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_QUIT) {
-            running = false;
-            cancel  = true;
-        } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP ||
-                   e.type == SDL_FINGERMOTION) {
-            screen.touch.handle_finger(e, input, sticky, now);
-        } else {
-            input.handle_event(e, now);
-        }
-    }
+    while (SDL_PollEvent(&e)) handle_sdl_event(e, now);
     input.tick(now);
 
-    // ⚠️ Drained, or a press would fire on the screen underneath afterwards. Only a fresh B cancels.
+    bool cancel = !running;
     ui::ButtonEvent be;
     while (input.poll(be))
         if (be.button == ui::Button::B && be.action == ui::ButtonAction::PRESSED) cancel = true;
@@ -948,6 +940,11 @@ void FrameLoop::handle_input(Uint64 now) {
     while (SDL_PollEvent(&e)) handle_sdl_event(e, now);
     input.tick(now);
 
+    if (browserRefreshOwed) {
+        browserRefreshOwed = false;
+        dispatch.refresh_browser_on_foreground();
+    }
+
     dispatch.set_now(static_cast<long long>(now));
 
     const auto to_mapper    = [&](const ui::ButtonEvent& ev) { ui::handle_button(ev, dispatch, mapper, now); };
@@ -1023,7 +1020,7 @@ void FrameLoop::handle_sdl_event(const SDL_Event& e, Uint64 now) {
 
     // The folder on screen may have changed while away (Android's ADD FOLDER… returns this way).
     if (e.type == SDL_APP_DIDENTERFOREGROUND) {
-        dispatch.refresh_browser_on_foreground();
+        browserRefreshOwed = true;
         // Back on screen; a song that played on no longer needs the service.
         bg.backgrounded = false;
         if (bg.playingInBackground) {
@@ -1434,7 +1431,7 @@ int run(const AppConfig& cfg) {
     ui::InputDispatcher::RenderHooks hooks;
     hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
     hooks.repaint       = [&loop] { loop.repaint(); };
-    hooks.load_pump     = [&loop] { return loop.load_pump(); };
+    hooks.pump          = [&loop] { return loop.pump_events(); };
     dispatch.set_render_hooks(std::move(hooks));
 
     // ⚠️ Installed once. Decoders report load progress through it (nothing installed = tools, offline

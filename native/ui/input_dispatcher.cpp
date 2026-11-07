@@ -74,7 +74,7 @@ bool InputDispatcher::load_tick(long long now_ms, float fraction) {
         lastLoadPaintMs_ = now_ms;
 
         // The pump also keeps the app's lifecycle events flowing during a load.
-        if (render_.load_pump && render_.load_pump()) s_.loading.cancelRequested = true;
+        if (render_.pump && render_.pump()) s_.loading.cancelRequested = true;
 
         before_long_operation();   // keep a playing song fed
 

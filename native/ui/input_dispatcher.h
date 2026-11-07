@@ -268,10 +268,10 @@ class InputDispatcher {
         std::function<void(bool)> suspend_audio;
         std::function<void()>     repaint;   // draws the progress
 
-        // A load's pump: drain the platform's events; did the user cancel?
-        // ⚠️ Every press but the cancel is consumed, or SDL would replay them onto the next screen.
-        // It is also how the background event (the autosave flush) is seen during a load.
-        std::function<bool()> load_pump;
+        // Drains the platform's events during a load or a render; true when the user cancelled.
+        // ⚠️ Every press is consumed, or SDL would replay them onto the next screen. It is also how
+        // the window stays answering and the trip to the background and back is seen.
+        std::function<bool()> pump;
     };
     void set_render_hooks(RenderHooks hooks) { render_ = std::move(hooks); }
 
