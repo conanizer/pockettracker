@@ -66,7 +66,8 @@ Everything a user sees is drawn by `pt-ui` into a software framebuffer.
 
 ```
 native/                            The portable program
-├── audio-engine.cpp / .h          The engine: lifecycle, scheduling, modulation, meters, buses
+├── audio-engine.cpp / .h          The engine: lifecycle, scheduling, modulation, meters
+├── engine-params.cpp              What the UI sets: instrument rows, EQ presets, the mixer, the buses
 ├── engine-mix.cpp                 processAudioBlock: the queue drain, the triggers, every voice's mix
 ├── engine-tables.cpp              The table walk, the INS chain, the TABLE screen's row readout
 ├── engine-samples.cpp             The sample pool: loading, clearing, the memory count

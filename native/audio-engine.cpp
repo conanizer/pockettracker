@@ -1,6 +1,6 @@
 // The engine's lifecycle, the schedule calls the control thread makes, the per-note modulation, the
-// EQ, meters and scopes, the bus setters, the offline render and the metronome. The sample pool,
-// the SoundFont bank, the table walk and the block itself are in the engine-*.cpp files beside it.
+// meters and scopes, the offline render and the metronome. What the control thread sets, the sample
+// pool, the SoundFont bank, the table walk and the block itself are in the engine-*.cpp files beside it.
 #include "audio-engine.h"
 #include "kissfft/kiss_fftr.h"
 #include "mods/mod-runner.h"
@@ -353,37 +353,6 @@ void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& b
     paramUpdateQueue.schedule({ targetFrame, -1, 0, 0.0f, PARAM_UPDATE_MASTER_EQ_BANDS, 0.0f, bands });
 }
 
-// Authored hex → Hz/dB/Q. ⚠️ setEqBand's curves too: a morph must land exactly on its end presets.
-static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
-    EqBandData b;
-    b.type   = type;
-    b.freqHz = eqFreqHzFromHex(freqHex);
-    b.gainDb = eqGainDbFromHex(gainHex);
-    b.q      = eqQFromHex(qHex);
-    return b;
-}
-
-void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
-    for (int i = 0; i < 3; i++) {
-        EqBandData d = eqBandFromHex(bands.type[i], bands.freq[i], bands.gain[i], bands.q[i]);
-        eq.setBand(i, d.type, d.freqHz, d.gainDb, d.q);
-    }
-}
-
-// The module was initialised by its owner; only the band params are set. A slot out of range turns
-// every band off.
-void AudioEngine::applyEqPresetToModule(EqModule& eq, int slot) {
-    if (slot < 0 || slot >= 128) {
-        for (int i = 0; i < 3; i++) eq.setBand(i, 0, 0.f, 0.f, 0.f);
-        return;
-    }
-    const EqPresetBank& preset = eqPresets[slot];
-    for (int i = 0; i < 3; i++) {
-        eq.setBand(i, preset.bands[i].type, preset.bands[i].freqHz, preset.bands[i].gainDb,
-                   preset.bands[i].q);
-    }
-}
-
 static const int SPECTRUM_FFT_SIZE = 2048;
 
 // Hann window + FFT → numBins log-spaced magnitudes in [0,1].
@@ -550,44 +519,6 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
     }
 }
 
-// The apply* forms carry no log line, so VTR/VMV can call them on the audio thread.
-void AudioEngine::applyTrackVolume(int trackId, float volume) {
-    if (trackId < 0 || trackId >= 8) return;
-    trackVolumes[trackId].store(volume, std::memory_order_relaxed);
-}
-
-void AudioEngine::applyMasterVolume(float volume) {
-    masterVolume.store(volume, std::memory_order_relaxed);
-}
-
-void AudioEngine::setTrackVolume(int trackId, float volume) {
-    if (trackId < 0 || trackId >= 8) return;
-    applyTrackVolume(trackId, volume);
-    LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
-}
-
-void AudioEngine::setTrackMuted(int trackId, bool muted) {
-    if (trackId < 0 || trackId >= 8) return;
-    trackMuted[trackId].store(muted, std::memory_order_relaxed);
-    // The mix ramps the gate over MUTE_GATE_SAMPLES; the voices keep running underneath.
-    LOGD("🔇 Track %d %s", trackId, muted ? "muted" : "unmuted");
-}
-
-void AudioEngine::setBusMutes(bool revMuted, bool dlyMuted, bool dryBusMuted) {
-    revReturnMuted.store(revMuted, std::memory_order_relaxed);
-    delayReturnMuted.store(dlyMuted, std::memory_order_relaxed);
-    dryMuted.store(dryBusMuted, std::memory_order_relaxed);
-}
-
-void AudioEngine::setMasterVolume(float volume) {
-    applyMasterVolume(volume);
-    LOGD("🔊 Master volume set to %.2f", volume);
-}
-
-void AudioEngine::setPreviewTrack(int trackId) {
-    previewLaneTrack.store((trackId >= 0 && trackId < 8) ? trackId : -1, std::memory_order_relaxed);
-}
-
 // VTR / VMV. A global update carries trackId -1.
 void AudioEngine::scheduleTrackVolume(int64_t targetFrame, int trackId, float volume) {
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, volume, PARAM_UPDATE_TRACK_VOL, 0.0f });
@@ -610,36 +541,6 @@ void AudioEngine::refreshSoundingInstrument(int instrumentId) {
     update.action      = PARAM_UPDATE_INSTRUMENT;
     update.instrId     = instrumentId;
     paramUpdateQueue.schedule(update);
-}
-
-void AudioEngine::setOttDepth(int depth) {
-    busSettings.ottDepth = depth; busSettings.ottForRender = false;
-    recordBus(BUS_OTT);
-}
-
-void AudioEngine::setOttDepthForRender(int depth) {
-    busSettings.ottDepth = depth; busSettings.ottForRender = true;
-    recordBus(BUS_OTT);
-}
-
-void AudioEngine::setMasterFx(int fx) {
-    busSettings.masterFx = fx;
-    recordBus(BUS_MASTER_FX);
-}
-
-void AudioEngine::setDustDepth(int depth) {
-    busSettings.dustDepth = depth; busSettings.dustForRender = false;
-    recordBus(BUS_DUST);
-}
-
-void AudioEngine::setDustDepthForRender(int depth) {
-    busSettings.dustDepth = depth; busSettings.dustForRender = true;
-    recordBus(BUS_DUST);
-}
-
-void AudioEngine::setLimiterPreGain(int depth) {
-    busSettings.limiterPreGain = depth;
-    recordBus(BUS_LIMITER);
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
@@ -798,47 +699,6 @@ void AudioEngine::resetEffectState() {
     masterChain.reset(sr);
     // Not replayed here: a render must depend on the project alone.
     LOGD("🎬 Effect chains reset to clean state");
-}
-
-// Control thread, before the record is published, so the block applying ALGO or SIZE finds it ready.
-void AudioEngine::prepareReverb() {
-    const BusSettings& s = busSettings;
-    reverbSend.dragonfly.prepare(s.reverbAlgo, s.reverbDecay, s.reverbSize, s.reverbDamp, s.reverbMod,
-                                 static_cast<float>(getSampleRate()));
-}
-
-// Audio thread, top of the block: every group that changed, or all after a rate change.
-void AudioEngine::applyBusSettings() {
-    busPublisher.read(busLive, busSeen);
-    const bool all = busReplayRequested.exchange(false, std::memory_order_acquire) && busLive.pushed;
-    const BusSettings& s = busLive;
-    const auto due = [&](BusGroup g) {
-        if (!all && s.seq[g] == busApplied[g]) return false;
-        busApplied[g] = s.seq[g];
-        return true;
-    };
-    if (due(BUS_REVERB_PARAMS)) reverbSend.setParams(s.reverbDecay, s.reverbDamp, s.reverbSize);
-    if (due(BUS_REVERB_ALGO))   reverbSend.setAlgo(s.reverbAlgo);
-    if (due(BUS_REVERB_CHAR))   reverbSend.setCharacter(s.reverbPre, s.reverbWidth, s.reverbMod);
-    if (due(BUS_REVERB_INEQ))   applyEqPresetToModule(reverbSend.inputEq, s.reverbInputEq);
-    if (due(BUS_DELAY_TIME)) {
-        if (s.delaySync) delaySend.setTimeSync(s.delayTime, s.delayBpm);
-        else             delaySend.setTimeFree(s.delayTime);
-    }
-    if (due(BUS_DELAY_FEEDBACK)) delaySend.feedback = s.delayFeedback / 255.0f;
-    if (due(BUS_DELAY_CHAR))     delaySend.setCharacter(s.delayPong, s.delayTone, s.delayWobble);
-    if (due(BUS_DELAY_INEQ))     applyEqPresetToModule(delaySend.inputEq, s.delayInputEq);
-    if (due(BUS_MASTER_EQ))      applyEqPresetToModule(masterChain.masterEq, s.masterEqSlot);
-    if (due(BUS_OTT)) {
-        if (s.ottForRender) masterChain.setOttDepthForRender(s.ottDepth / 255.0f);
-        else                masterChain.ott.setDepth(s.ottDepth / 255.0f);
-    }
-    if (due(BUS_MASTER_FX)) masterChain.setMasterFx(s.masterFx);
-    if (due(BUS_DUST)) {
-        if (s.dustForRender) masterChain.setDustDepthForRender(s.dustDepth / 255.0f);
-        else                 masterChain.setDustDepth(s.dustDepth / 255.0f);
-    }
-    if (due(BUS_LIMITER)) masterChain.setLimiterPreGain(1.0f + (s.limiterPreGain / 255.0f) * 3.0f);
 }
 
 void AudioEngine::setOfflineRendering(bool offline) {

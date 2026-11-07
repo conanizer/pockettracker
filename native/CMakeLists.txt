@@ -208,9 +208,10 @@ set(ENGINE_CORE_SOURCES
         # it. Pure file-format handling over a FILE* — no tsf, no engine. See the header.
         soundfont-trim.cpp
         sample-editor.cpp
-        # One class, AudioEngine, over five files: the core, the sample pool, the SoundFont bank, the
-        # table walk, and the block itself (engine-mix.cpp — processAudioBlock).
+        # One class, AudioEngine, over six files: the core, what the control thread sets, the sample
+        # pool, the SoundFont bank, the table walk, and the block itself (engine-mix.cpp).
         audio-engine.cpp
+        engine-params.cpp
         engine-samples.cpp
         engine-soundfont.cpp
         engine-tables.cpp
