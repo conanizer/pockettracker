@@ -142,19 +142,12 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
                 track.chainRefs[static_cast<size_t>(cursor_row)] = -1;
             break;
 
-        case ActionType::INSERT_DEFAULT:
-            grow_to_cursor();
-            track.chainRefs[static_cast<size_t>(cursor_row)] = 0;
-            r.hasChain        = true;
-            r.lastEditedChain = 0;
-            break;
 
         default:
             break;
     }
 
-    // ⚠️ `modified` compares before and after: A+B on an empty ref writes −1 over −1, and counting
-    // that is a phantom unsaved-work prompt.
+    // A press that changes nothing is no edit: counting it is a phantom unsaved-work prompt.
     r.modified = (ref_at_cursor() != before);
     return r;
 }

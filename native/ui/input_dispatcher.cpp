@@ -371,18 +371,31 @@ void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&
         generic_input(fn);
         return;
     }
-    // Every row through the same path, the cursor walked down and put back.
-    const SelectionBounds b        = s_.selection.bounds();
-    int&                  row      = s_.*g->row;
-    const int             savedRow = row;
-    bool                  any      = false;
+    const SelectionBounds b     = s_.selection.bounds();
+    int&                  row   = s_.*g->row;
+    int&                  col   = s_.*g->column;
+    const CursorPosition  saved = {row, col};
+    const int             c0    = g->stepsAllColumns ? b.topLeftColumn : col;
+    const int             c1    = g->stepsAllColumns ? b.bottomRightColumn : col;
 
-    for (int r = b.topLeftRow; r <= b.bottomRightRow; ++r) {
-        row = r;
+    // Every editable cell the step covers, through the same path as one cell; the cursor put back.
+    const auto each_cell = [&](auto visit) {
+        for (row = b.topLeftRow; row <= b.bottomRightRow; ++row)
+            for (col = c0; col <= c1; ++col)
+                if (cursor_context().is_editable()) visit();
+        row = saved.row;
+        col = saved.column;
+    };
+
+    bool allEmpty = true, any = false;
+    each_cell([&] { allEmpty = allEmpty && cursor_cell_empty(); });
+    // ⚠️ All laid before any steps: a step updates the last-edited value the next lay would copy.
+    if (allEmpty) each_cell([&] { any |= lay_last_at_cursor(); });
+    each_cell([&] {
+        if (!allEmpty && cursor_cell_empty()) return;
         const InputAction action = fn(cursor_context());
-        if (action.type != ActionType::NONE && apply_edit(action)) any = true;
-    }
-    row = savedRow;
+        any |= action.type != ActionType::NONE && apply_edit(action);
+    });
     if (any) mark_modified();
 }
 

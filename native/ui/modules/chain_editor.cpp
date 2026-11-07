@@ -107,23 +107,11 @@ ChainInputResult ChainEditorModule::handle_input(songcore::Chain& chain, int cur
             }
             break;
 
-        case ActionType::INSERT_DEFAULT:
-            if (cursor_column == 1) {
-                chain.phraseRefs[row]      = 0;
-                chain.transposeValues[row] = 0x00;
-                r.hasPhrase                = true;
-                r.lastEditedPhrase         = 0;
-                r.hasTranspose             = true;
-                r.lastEditedTranspose      = 0;
-            }
-            break;
-
         default:
             break;
     }
 
-    // ⚠️ A before/after answer: a phrase-ref cell sends DELETE while already empty, and a phantom
-    // dirty flag means a phantom RECOVER WORK?.
+    // A press that changes nothing is no edit: a phantom dirty flag means a phantom RECOVER WORK?.
     r.modified = (chain.phraseRefs[row] != beforeRef) ||
                  (chain.transposeValues[row] != beforeTranspose);
     return r;

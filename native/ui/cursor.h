@@ -134,18 +134,18 @@ inline CursorContext eq_slot(int slot) {
                     /*can_insert=*/true);
 }
 
-// Phrase reference (-1 = empty); an empty cell cycles from 0.
+// Phrase reference (-1 = empty). A on an empty one lays the last phrase (the dispatcher's insert).
 inline CursorContext phrase_ref(int current, bool can_create = true) {
-    CursorContext c = hex_byte(current == -1 ? 0 : current, 0, 255, /*empty_value=*/-1,
-                               /*can_delete=*/true, /*can_insert=*/true, can_create);
+    CursorContext c = hex_byte(current, 0, 255, /*empty_value=*/-1, /*can_delete=*/true,
+                               /*can_insert=*/false, can_create);
     c.valueType     = CursorValueType::PHRASE_REF;
     return c;
 }
 
-// Chain reference (-1 = empty).
+// Chain reference (-1 = empty), as `phrase_ref`.
 inline CursorContext chain_ref(int current, bool can_create = true) {
-    CursorContext c = hex_byte(current == -1 ? 0 : current, 0, 255, /*empty_value=*/-1,
-                               /*can_delete=*/true, /*can_insert=*/true, can_create);
+    CursorContext c = hex_byte(current, 0, 255, /*empty_value=*/-1, /*can_delete=*/true,
+                               /*can_insert=*/false, can_create);
     c.valueType     = CursorValueType::CHAIN_REF;
     return c;
 }
@@ -492,7 +492,7 @@ inline InputAction increment(const CursorContext& c) {
 }
 
 inline InputAction decrement(const CursorContext& c) {
-    if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
+    if (!c.is_editable()) return InputAction::none();
     if (c.capabilities.canDecrement)
         return InputAction::set_value(step_value(c.currentValue, -c.smallStep, c));
     return InputAction::none();
@@ -500,7 +500,7 @@ inline InputAction decrement(const CursorContext& c) {
 
 // The fast pair falls back to the small step on a cell with no fast step (a short cycle).
 inline InputAction increment_fast(const CursorContext& c) {
-    if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
+    if (!c.is_editable()) return InputAction::none();
     if (c.capabilities.canIncrementFast)
         return InputAction::set_value(step_value(c.currentValue, c.largeStep, c));
     if (c.capabilities.canIncrement)
@@ -509,7 +509,7 @@ inline InputAction increment_fast(const CursorContext& c) {
 }
 
 inline InputAction decrement_fast(const CursorContext& c) {
-    if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
+    if (!c.is_editable()) return InputAction::none();
     if (c.capabilities.canDecrementFast)
         return InputAction::set_value(step_value(c.currentValue, -c.largeStep, c));
     if (c.capabilities.canDecrement)

@@ -357,7 +357,10 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 | L + B + A | Deep-clone the chain or phrase under the cursor into the next free slot |
 | L + R | Leave selection mode (nothing copied) |
 
-**Selection increment:** In selection mode, **A + LEFT/RIGHT** increments or decrements all selected values simultaneously.
+**Selection increment:** In selection mode, **A + D-pad** steps the selected values — LEFT/RIGHT by one,
+UP/DOWN by the large step. On SONG that is the whole selection; on CHAIN, PHRASE and TABLE, the cursor's
+column on every selected row. Empty cells stay empty; if every one of those cells is empty, each gets
+what A would put there, and they step together.
 
 **Clearing the clipboard:** the copy buffer deliberately survives leaving a selection — you can select
 again by accident without losing what you copied. Press **L + R** when you are *not* selecting to clear
@@ -3082,7 +3085,7 @@ exports and sample-editor saves keep their own folders.
 | L + A *(in selection)* | Cut (copy + clear), exit selection |
 | L + A *(outside selection)* | Paste at cursor |
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
-| A + LEFT / RIGHT *(in selection)* | Increment / decrement all selected values |
+| A + D-pad *(in selection)* | Step the selected values (SONG: all; elsewhere the cursor's column); empty cells stay empty |
 | L + B + A | Deep-clone the chain / phrase under the cursor |
 | L + D-pad | Fill rows from one cell (PHRASE) |
 | L + R *(in selection)* | Leave selection mode; the copy buffer survives |

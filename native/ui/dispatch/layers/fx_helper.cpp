@@ -101,8 +101,8 @@ void InputDispatcher::remember_fx_at_cursor() {
     s_.lastEditedFxValue = value;
 }
 
-bool InputDispatcher::fx_insert_last(bool peek) {
-    if (!on_fx_type_column() || s_.selection.active) return false;
+bool InputDispatcher::lay_last_fx(bool peek) {
+    if (!on_fx_type_column()) return false;
     if (s_.lastEditedFxType == songcore::FX_NONE || current_fx_type_code() != songcore::FX_NONE) return false;
     if (peek) return true;
 
@@ -111,8 +111,26 @@ bool InputDispatcher::fx_insert_last(bool peek) {
         fx_type_of(r, slot)  = s_.lastEditedFxType;
         fx_value_of(r, slot) = s_.lastEditedFxValue;
     });
-    mark_modified(/*table_touched=*/s_.currentScreen == ScreenType::TABLE);
     return true;
+}
+
+bool InputDispatcher::fx_insert_last(bool peek) {
+    if (s_.selection.active || !lay_last_fx(peek)) return false;
+    if (!peek) mark_modified(/*table_touched=*/s_.currentScreen == ScreenType::TABLE);
+    return true;
+}
+
+bool InputDispatcher::cursor_cell_empty() const {
+    if (cursor_context().capabilities.isEmpty) return true;
+    // PHRASE's V and I play nothing without a note, and are drawn dimmed.
+    if (s_.currentScreen == ScreenType::PHRASE && (s_.cursorColumn == 2 || s_.cursorColumn == 3))
+        return !songcore::step_has_note(s_.project->phrases[static_cast<size_t>(s_.currentPhrase)]
+                                            .steps[static_cast<size_t>(s_.cursorRow)]);
+    const int slot = fx_slot_at_cursor();
+    if (slot < 0) return false;
+    int type = songcore::FX_NONE;
+    with_fx_row(s_, *s_.project, [&](const auto& r) { type = fx_type_of(r, slot); });
+    return type == songcore::FX_NONE;
 }
 
 }  // namespace pt::ui

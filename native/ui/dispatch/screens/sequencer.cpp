@@ -374,15 +374,44 @@ bool InputDispatcher::take_double_tap() {
     return armed;
 }
 
+bool InputDispatcher::lay_last_at_cursor() {
+    Project&     p   = host_.edit_project();
+    const size_t row = static_cast<size_t>(s_.cursorRow);
+    switch (s_.currentScreen) {
+        case ScreenType::SONG: {
+            if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return false;
+            std::vector<int>& refs = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)].chainRefs;
+            if (row < refs.size() && refs[row] != -1) return false;
+            if (refs.size() <= row) refs.resize(row + 1, -1);
+            refs[row] = s_.lastEditedChain;
+            return true;
+        }
+        case ScreenType::CHAIN: {
+            Chain& chain = p.chains[static_cast<size_t>(s_.currentChain)];
+            if (chain.phraseRefs[row] != -1) return false;
+            chain.phraseRefs[row]      = s_.lastEditedPhrase;
+            chain.transposeValues[row] = s_.lastEditedTranspose;
+            return true;
+        }
+        case ScreenType::PHRASE: {
+            if (s_.cursorColumn != 1) return lay_last_fx(/*peek=*/false);
+            songcore::PhraseStep& step = p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[row];
+            if (step.note != Note::EMPTY()) return false;
+            step.note       = s_.lastEditedNote;
+            step.instrument = s_.lastEditedInstrument;
+            step.volume     = s_.lastEditedVolume;
+            return true;
+        }
+        case ScreenType::TABLE:
+            return lay_last_fx(/*peek=*/false);
+        default:
+            return false;
+    }
+}
+
 void InputDispatcher::song_insert() {
     hasInsertPos_ = false;
-    if (s_.selection.active) return;
-    if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
-    songcore::Track& track = host_.edit_project().tracks[static_cast<size_t>(s_.cursorColumn - 1)];
-    while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow) track.chainRefs.push_back(-1);
-
-    if (track.chainRefs[static_cast<size_t>(s_.cursorRow)] != -1) return;
-    track.chainRefs[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedChain;
+    if (s_.selection.active || !lay_last_at_cursor()) return;
     mark_modified();
     arm_double_tap();   // a second press inserts the next UNUSED chain
 }
@@ -405,10 +434,7 @@ void InputDispatcher::song_insert_next() {
 
 void InputDispatcher::chain_insert() {
     hasInsertPos_ = false;
-    Chain& chain = host_.edit_project().chains[static_cast<size_t>(s_.currentChain)];
-    if (chain.phraseRefs[static_cast<size_t>(s_.cursorRow)] != -1) return;
-    chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = s_.lastEditedPhrase;
-    chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
+    if (s_.selection.active || !lay_last_at_cursor()) return;
     mark_modified();
     arm_double_tap();   // a second press inserts the next UNUSED phrase
 }
@@ -432,16 +458,8 @@ void InputDispatcher::phrase_insert() {
     hasInsertPos_ = false;
     if (s_.cursorColumn != 1 || s_.selection.active) return;   // the NOTE column only
 
-    Phrase& ph = host_.edit_project().phrases[static_cast<size_t>(s_.currentPhrase)];
-    PhraseEditorState ps{ph};
-    ps.cursorRow    = s_.cursorRow;
-    ps.cursorColumn = s_.cursorColumn;
     // A on an existing note inserts nothing, but holding it is how you listen.
-    if (phrase_.cursor_context(ps).capabilities.isEmpty) {
-        songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
-        step.note       = s_.lastEditedNote;
-        step.instrument = s_.lastEditedInstrument;
-        step.volume     = s_.lastEditedVolume;
+    if (lay_last_at_cursor()) {
         mark_modified();
         arm_double_tap();   // a second press keeps the note and re-points it at the next FREE instrument
         insertHeld_ = true;

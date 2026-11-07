@@ -30,7 +30,7 @@ const InputDispatcher::Layer* InputDispatcher::top_layer() const {
 }
 
 // The grids: SONG, CHAIN and PHRASE share one cursor; TABLE keeps its own.
-constexpr GridCursor SONG_GRID{&AppState::cursorRow, &AppState::cursorColumn, 255, 8};
+constexpr GridCursor SONG_GRID{&AppState::cursorRow, &AppState::cursorColumn, 255, 8, true};
 constexpr GridCursor CHAIN_GRID{&AppState::cursorRow, &AppState::cursorColumn, 15, 2};
 constexpr GridCursor PHRASE_GRID{&AppState::cursorRow, &AppState::cursorColumn, 15, 9};
 constexpr GridCursor TABLE_GRID{&AppState::tableCursorRow, &AppState::tableCursorColumn, 15, 8};

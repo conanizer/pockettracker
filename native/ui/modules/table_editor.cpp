@@ -141,9 +141,13 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
             return ctx;
         }
 
-        case 2: return cc::hex_byte(row.volume == -1 ? 0 : row.volume, /*min=*/0, /*max=*/255,
-                                    /*empty_value=*/-1, /*can_delete=*/row.volume != -1,
-                                    /*can_insert=*/true);
+        case 2: {
+            // Empty (−1) is no volume change, and steps from 00: A+RIGHT gives 01, A+LEFT FF.
+            CursorContext ctx = cc::hex_byte(row.volume, 0, 255, /*empty_value=*/-1, /*can_delete=*/true);
+            cc::allow_steps(ctx.capabilities, true);
+            ctx.currentValue = std::max(row.volume, 0);
+            return ctx;
+        }
 
         case 3: return cc::effect_type(row.fx1Type, 1, s.effectTypeCount);
         case 4: return fx_value(row.fx1Value, row.fx1Type);

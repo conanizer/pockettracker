@@ -55,6 +55,9 @@ struct GridCursor {
     int AppState::*column;
     int maxRow;     // 255 on SONG: a selection spans the arrangement, not the 16 rows shown
     int maxColumn;  // the rightmost selectable column — a ROW-scope selection ends there
+    // A+D-pad over a selection steps every selected column, not just the cursor's: on SONG each column
+    // is a track of the same chain numbers; elsewhere each column is a different parameter.
+    bool stepsAllColumns = false;
 };
 
 class InputDispatcher {
@@ -489,7 +492,9 @@ class InputDispatcher {
     // Context → action → mutate → echo to the engine; `fn` is one of the generic handlers.
     void generic_input(InputAction (*fn)(const CursorContext&));
 
-    // The same over every row of a selection when one is up.
+    // The same over a selection when one is up: the cursor's column, or every selected one where the
+    // grid says so. Only filled cells step; when every covered cell is empty, each gets what A and the
+    // step give one empty cell, so the run starts equal.
     void selection_or_single(InputAction (*fn)(const CursorContext&));
 
     // Move the cursor, or drag the selection's active edge.
@@ -539,6 +544,11 @@ class InputDispatcher {
     // A on an empty FX command cell: lay down the last command entered. `peek`: would it? (The mapper
     // holds this A for the release, so A+UP/DOWN still opens the list.)
     bool fx_insert_last(bool peek);
+    // The write alone, under a selection too; marks nothing.
+    bool lay_last_fx(bool peek);
+    // Holds nothing: an empty cell, a command's cell with no command in its slot, PHRASE's V or I
+    // with no note.
+    bool cursor_cell_empty() const;
 
     // ── The mapping destination picker (ui/dispatch/layers/map_picker.cpp) ──────────────────────
     GestureResult map_picker_layer(Gesture g);
@@ -888,6 +898,9 @@ class InputDispatcher {
     void song_insert();
     void chain_insert();
     void phrase_insert();
+    // What that A writes into the cursor's empty cell (PHRASE: a note, or a command), under a selection
+    // too; marks nothing. False where A lays nothing or the cell is filled.
+    bool lay_last_at_cursor();
     // A+B on an empty note cell: put an OFF there. True if it did.
     // ⚠️ The chord's A has already inserted a note, so "empty" means `insertHeld_` too.
     bool phrase_put_note_off();
