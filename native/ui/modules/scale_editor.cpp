@@ -60,7 +60,10 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     const bool marked = songcore::scale_differs_from_its_name(scale);
     if (marked) c.draw_text("*", x + SCALE_STAR_X, nameY, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
 
-    draw_cell(c, shown, x + SCALE_NAME_X + (marked ? CHAR_W : 0), nameY,
+    // A saved name can be any length: cut to the room before SAVE, a glyph of air kept.
+    const int nameX = SCALE_NAME_X + (marked ? CHAR_W : 0);
+    shown           = Canvas::clip_text(shown, (SCALE_SAVE_X - nameX) / CHAR_W - 1);
+    draw_cell(c, shown, x + nameX, nameY,
               /*is_cursor=*/onName && s.cursorColumn == SCALE_NAME_COL_NAME,
               /*is_selected=*/false, /*is_empty=*/!named, t.textValue, t);
     draw_cursor_cell(c, "SAVE", x + SCALE_SAVE_X, nameY, onName && s.cursorColumn == SCALE_NAME_COL_SAVE,
