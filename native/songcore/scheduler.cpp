@@ -1403,17 +1403,18 @@ void Sequencer::emit_step_fx(StepPlay& s) {
         router_.cc(voiceFxFrame, trackId, CC_DELAY_SEND, *params.delaySendValue / 255.0f);
     if (params.bckValue.has_value())
         router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
-    if (params.filterCutValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
-    if (params.filterResValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
     // LPF / HPF / BPF: one record, the type in the CC ID and the cutoff in the value, so the
-    // two cannot land a block apart (event.h).
+    // two cannot land a block apart (event.h). With a CUT on the row it carries the CUT's cutoff,
+    // as reapply_voice does: two records on one frame would land in either order.
     if (params.filterModeValue.has_value())
         router_.cc(voiceFxFrame, trackId,
                    params.filterModeType == 1 ? CC_FILTER_LP :
                    params.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
-                   *params.filterModeValue / 255.0f);
+                   params.filterCutValue.value_or(*params.filterModeValue) / 255.0f);
+    else if (params.filterCutValue.has_value())
+        router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
+    if (params.filterResValue.has_value())
+        router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
     // CRU's byte goes over whole; the engine splits it.
     if (params.driveValue.has_value())
         router_.cc(voiceFxFrame, trackId, CC_DRIVE, *params.driveValue / 255.0f);
