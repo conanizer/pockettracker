@@ -74,7 +74,9 @@ bool SdlTouch::hit_window(int px, int py, Button& out) const {
 
 void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, const pt::ui::StickyButtons& sticky,
                              uint64_t now_ms) {
-    if (!active_) return;
+    // ⚠️ Only a press waits for the buttons: a finger already on one when they go away (a pad plugged
+    // in, a rotation) still lets go, or the button stays held.
+    if (!active_ && e.type == SDL_FINGERDOWN) return;
 
     // SDL normalises fingers to [0,1] over the window — the output's pixel space on Android.
     const SDL_TouchFingerEvent& t  = e.tfinger;
@@ -105,7 +107,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, const pt::ui::
         auto it = finger_.find(t.fingerId);
         if (it != finger_.end()) {
             Button b{};
-            const bool still = hit_window(px, py, b) && b == it->second;
+            const bool still = active_ && hit_window(px, py, b) && b == it->second;
             if (!still) {
                 input.touch_release(it->second);
                 if (lift_clicks(it->second, sticky, now_ms)) emit_feedback(it->second, /*down=*/false);
