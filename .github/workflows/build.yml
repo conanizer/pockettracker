@@ -316,10 +316,14 @@ jobs:
 
           # THE CONTROL, and without it "13 of 13 present" is equally true of a DEX R8 never touched.
           # These five are private members of the same class with no keep rule; R8 must have renamed
-          # every one of them.
+          # every one of them. ⚠️ A name gone from the source is absent from any DEX: each must still
+          # be in MainActivity.kt, or its absence proves nothing.
+          KT=app/src/main/java/com/conanizer/pockettracker/MainActivity.kt
           survived=0
-          for n in appRoot hideSystemBars importLegacySettings visualizerIndex requestAllFilesAccess; do
-            if cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
+          for n in hideSystemBars askForNotificationsOnce watchScreenRecording onScreenRecording visualizerIndex; do
+            if ! grep -q -E "private fun $n\b" "$KT"; then
+              echo "FAIL  (control) $n is no longer a private fun of MainActivity.kt - pick another"; FAIL=1
+            elif cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
               echo "FAIL  (control) non-kept private member survived R8: $n"; survived=$((survived+1)); FAIL=1
             fi
           done
