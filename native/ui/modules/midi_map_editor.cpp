@@ -75,7 +75,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
     c.draw_text("VAL", colX(COL_VAL), headerY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
     header("MIN",  COL_MIN,   MapCol::MIN,   MapCol::MIN);
     header("MAX",  COL_MAX,   MapCol::MAX,   MapCol::MAX);
-    header("DEST", COL_GROUP, MapCol::GROUP, MapCol::SCOPE);
+    header("DEST", COL_GROUP, MapCol::GROUP, MapCol::PARAM);
 
     // ── Scroll, derived from the cursor row every frame ──────────────────────────────────────────
     const int firstRowY = headerY + ROW_HEIGHT;
@@ -134,7 +134,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
     // ── The footer: why a dimmed row is dimmed ───────────────────────────────────────────────────
     std::string footer;
     if (const MidiMapping* m = mapping_at(p, s.cursorRow)) {
-        if (!songcore::map_dest(m->dest))              footer = "PARAMETER UNKNOWN TO THIS VERSION";
+        if (!songcore::map_dest(m->dest))              footer = "UNKNOWN TO THIS VERSION";
         else if (!songcore::map_dest_present(p, *m))   footer = "PARAMETER MISSING";
     } else if (p.midiMappings.empty()) {
         footer = "NO MAPPINGS YET";
