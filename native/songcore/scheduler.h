@@ -591,9 +591,10 @@ class Sequencer {
         bool triggers() const { return hasNote && !skipNote; }
     };
 
-    ScheduleStepResult scheduleStepWithEffects(const PhraseStep& step, int64_t targetFrame, int64_t stepDuration,
-                                               int trackId, int transposeSemitones, TrackState& trackState,
-                                               int /*stepIndex*/);
+    // `effective`: the row after CHA/RND/RNL, drawn by the walk, which needs its GRV first.
+    ScheduleStepResult scheduleStepWithEffects(const PhraseStep& step, const PhraseStep& effective, bool skipNote,
+                                               int64_t targetFrame, int64_t stepDuration, int trackId,
+                                               int transposeSemitones, TrackState& trackState);
 
     static Note transposed(const Note& note, int semitones);
 
@@ -606,7 +607,7 @@ class Sequencer {
     // STEP 1: a KIL, a new note or any command in its column ends a running REPEAT / ARPEGGIO.
     static void end_repeat_and_arpeggio(StepPlay& s);
 
-    // STEP 2: CHA/RND/RNL, then the step's resolved parameters.
+    // STEP 2: the step's resolved parameters, from the row CHA/RND/RNL left.
     void resolve_step(StepPlay& s);
 
     // ⚠️ A row that HOPs is never heard: no note, no effects, no time (as on a table's steering row).

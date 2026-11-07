@@ -911,10 +911,12 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
         const PhraseStep played = as_played(phrase.steps[stepIndex]);
         const PhraseStep step   = step_plays_on_pass(played, w.pass) ? played : PhraseStep{};
 
-        // Pre-scan GRV so a new groove takes effect on its own step; the last GRV wins.
+        // CHA/RND/RNL first: a GRV is the one the row plays, and it times its own row. The last GRV wins.
+        bool skipNote = false;
+        const PhraseStep effective = applyChanceAndRandomize(step, trackState, skipNote);
         for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
-            if (step_fx_type(step, fxSlot) == FX_GRV) {
-                trackState.grooveId = step_fx_value(step, fxSlot);
+            if (step_fx_type(effective, fxSlot) == FX_GRV) {
+                trackState.grooveId = step_fx_value(effective, fxSlot);
                 w.localGrooveStep = 0;
                 trackState.grooveCarry = 0;
             }
@@ -939,8 +941,8 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
 
         stepRamps_ = w.ramps.empty() ? nullptr : &w.ramps;
         stepIndex_ = stepIndex;
-        ScheduleStepResult stepResult = scheduleStepWithEffects(step, targetFrame, stepDuration, trackId,
-                                                                w.transpose, trackState, stepIndex);
+        ScheduleStepResult stepResult = scheduleStepWithEffects(step, effective, skipNote, targetFrame,
+                                                                stepDuration, trackId, w.transpose, trackState);
         stepRamps_ = nullptr;
 
         // ⚠️ A HOP row costs nothing — no time, marker or ramp tic; the groove step carries over.
@@ -1160,11 +1162,14 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
     return effectiveStep;
 }
 
-Sequencer::ScheduleStepResult Sequencer::scheduleStepWithEffects(const PhraseStep& step, int64_t targetFrame, int64_t stepDuration,
-                                                                 int trackId, int transposeSemitones, TrackState& trackState,
-                                                                 int /*stepIndex*/) {
+Sequencer::ScheduleStepResult Sequencer::scheduleStepWithEffects(const PhraseStep& step, const PhraseStep& effective,
+                                                                 bool skipNote, int64_t targetFrame,
+                                                                 int64_t stepDuration, int trackId,
+                                                                 int transposeSemitones, TrackState& trackState) {
     StepPlay s(step, trackState, targetFrame, stepDuration, trackId, transposeSemitones);
     end_repeat_and_arpeggio(s);
+    s.effectiveStep = effective;
+    s.skipNote      = skipNote;
     resolve_step(s);
     if (s.params.hopValue.has_value()) return take_hop(s);
     place_step(s);
@@ -1220,8 +1225,6 @@ void Sequencer::end_repeat_and_arpeggio(StepPlay& s) {
 
 void Sequencer::resolve_step(StepPlay& s) {
     const Project& project = *project_;
-    s.effectiveStep = applyChanceAndRandomize(s.step, s.ts, s.skipNote);
-
     const Instrument& instrument = project.instruments[clampi(s.effectiveStep.instrument, 0,
                                                               static_cast<int>(project.instruments.size()) - 1)];
     s.velocityByte = clampi(s.effectiveStep.volume, 0, 127);
@@ -1268,11 +1271,6 @@ void Sequencer::apply_step_state(StepPlay& s) {
         ts.lastTableStartRow = targetRow;
         if (!s.hasNote) router_.ext_table_row(s.effectiveTargetFrame, s.trackId, targetRow);
         s.tableRow = targetRow;
-    }
-
-    if (params.grooveId.has_value()) {
-        ts.grooveId = *params.grooveId;
-        ts.grooveStep = 0;
     }
 
     // SCG writes all eight TrackStates; on the same step SCA is applied second and wins.
