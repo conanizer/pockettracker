@@ -9,10 +9,9 @@ namespace {
 // Two app rows: the words, then the bar.
 constexpr int TEXT_Y   = TEXT_PADDING;                    // row 1
 constexpr int ROW2_Y   = ROW_HEIGHT;                      // row 2
-constexpr int GLYPH_W  = (5 + CHAR_SPACING) * FONT_SCALE; // one column's advance
 
 constexpr int INSET = 10;   // the left/right margin every bar in the app uses
-constexpr int GAP   = GLYPH_W;
+constexpr int GAP   = CHAR_W;
 
 // The bar sits inside row 2's text band.
 constexpr int BAR_H = 9;
@@ -38,7 +37,7 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
 
     // The name's budget is what the rest of the row leaves.
     const int nameCols = (DESIGN_W - INSET * 2 - cancelW - GAP -
-                          Canvas::text_width(PREFIX, CHAR_SPACING, FONT_SCALE)) / GLYPH_W;
+                          Canvas::text_width(PREFIX, CHAR_SPACING, FONT_SCALE)) / CHAR_W;
     const std::string line = PREFIX + Canvas::clip_text(s.detail, nameCols > 0 ? nameCols : 0);
     c.draw_text(line, INSET, TEXT_Y, t.textValue, CHAR_SPACING, FONT_SCALE);
 
