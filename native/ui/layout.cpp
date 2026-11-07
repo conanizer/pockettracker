@@ -22,7 +22,7 @@ constexpr int STATUS_MAX_CHARS = 34;   // one line
 // Is an overlay drawn in the editor's place? ⚠️ Mirrors `draw_editor`'s ifs: a new overlay there goes
 // here too, or `has_falling_meters` holds the redraw open for ever.
 bool editor_overlay_up(const AppState& s) {
-    return s.eq.isOpen || s.themeEditor.isOpen;
+    return s.eq.isOpen || theme_editor_up(s);
 }
 }  // namespace
 
@@ -344,7 +344,7 @@ void TrackerLayout::draw_editor(Canvas& c, const AppState& s) {
         eq_.draw(c, x, y, eq_state(s));
         return;
     }
-    if (s.themeEditor.isOpen) {
+    if (theme_editor_up(s)) {
         themeEditor_.draw(c, x, y, theme_state(s));
         return;
     }

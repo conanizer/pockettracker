@@ -651,7 +651,7 @@ class InputDispatcher {
     // ── The theme editor (ui/dispatch/layers/theme.cpp), over SETTINGS ──
     // ⚠️ SAVE raises the keyboard on top of it, so QWERTY sits above THEME in the layer stack.
 
-    bool theme_open() const { return s_.themeEditor.isOpen; }
+    bool theme_open() const { return theme_editor_up(s_); }
     GestureResult theme_layer(Gesture g);
 
     // The roll's seed starts from the clock, so each opening walks a different sequence.

@@ -334,9 +334,8 @@ void InputDispatcher::browser_confirm() {
                 set_status(b, "LOAD FAILED", false);
                 return;
             }
-            // Back to the editor that raised the browser (`theme_row_action` closed it on the way out).
+            // Back to the editor that raised the browser, open under it all along.
             close_file_browser();
-            open_theme_editor();
             set_status(s_, "THEME LOADED", true);
             return;
 

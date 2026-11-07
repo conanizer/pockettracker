@@ -275,7 +275,8 @@ struct AppState {
     SendEditorState sendEditor{};
 
     // The theme editor, over SETTINGS; START passes through, so the scope colours can be set against
-    // a moving wave. Edits the live Theme.
+    // a moving wave. Edits the live Theme. ⚠️ It stays open under the browser its LOAD raises — ask
+    // `theme_editor_up`, not `isOpen`.
     ThemeEditorState themeEditor{};
 
     // ── SETTINGS: what the screen edits, and what settings.json holds ────────────────────────────
@@ -368,6 +369,11 @@ inline bool send_editor_up(const AppState& s) {
 
 // …and is its box drawn? Not under the EQ editor its INP EQ raises.
 inline bool send_editor_drawn(const AppState& s) { return send_editor_up(s) && !s.eq.isOpen; }
+
+// Does the theme editor hold the buttons and the screen? Not under the file browser its LOAD raises.
+inline bool theme_editor_up(const AppState& s) {
+    return s.themeEditor.isOpen && s.currentScreen != ScreenType::FILE_BROWSER;
+}
 
 inline bool stretch_editor_up(const AppState& s) {
     return s.currentScreen == ScreenType::SAMPLE_EDITOR && s.sampleEditor.stretchOpen;

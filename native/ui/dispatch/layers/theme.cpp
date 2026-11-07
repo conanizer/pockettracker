@@ -137,9 +137,8 @@ void InputDispatcher::theme_row_action() {
             break;
         }
         case 2: {   // LOAD — browse the Themes folder for a .ptt
-            // ⚠️ Closes the editor first: the browser is a screen, and a modal on top would swallow its
-            // D-pad. browser_confirm re-opens it.
-            close_theme_editor();
+            // The editor stays open under the browser (`theme_editor_up`), so B or a load comes back to
+            // it with its locks, scheme and cursor.
             open_file_browser(AppState::BrowserPurpose::LOAD_THEME, browser_dir(BrowserDir::THEMES),
                               {"ptt"});
             break;
@@ -163,8 +162,6 @@ void InputDispatcher::save_theme_as(const std::string& dir, const std::string& t
 
     // ⚠️ A full card or a read-only mount must not report success.
     set_status(s_, ok ? "THEME SAVED" : "SAVE FAILED", ok);
-
-    open_theme_editor();
 }
 
 }  // namespace pt::ui

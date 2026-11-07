@@ -2949,7 +2949,7 @@ inline HelpTopic help_topic(const AppState& s) {
         const HelpTopic eq = detail::eq_cell_topic(s.eq.cursorRow);
         return (eq == HelpTopic::NONE) ? HelpTopic::SCREEN_EQ : eq;
     }
-    if (s.themeEditor.isOpen) {
+    if (theme_editor_up(s)) {
         const HelpTopic th =
             detail::theme_cell_topic(s.themeEditor.cursorRow, s.themeEditor.cursorChannel);
         return (th == HelpTopic::NONE) ? HelpTopic::SCREEN_THEME : th;
