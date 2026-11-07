@@ -178,11 +178,18 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
     return roots_;
 }
 
-bool SafFileSystem::has_grant() { return !roots().empty(); }
+bool SafFileSystem::has_grant() {
+    const Lock lock(mu_);
+    return !roots().empty();
+}
 
-int SafFileSystem::root_count() { return static_cast<int>(roots().size()); }
+int SafFileSystem::root_count() {
+    const Lock lock(mu_);
+    return static_cast<int>(roots().size());
+}
 
 std::string SafFileSystem::home_root_path() {
+    const Lock lock(mu_);
     const auto& r = roots();
     // ⚠️ `pt://roots`, not "", when nothing is granted: "" opens an empty browser with no way out;
     // the roots directory offers ADD FOLDER…. Every mutation refuses the roots path.
@@ -216,6 +223,7 @@ std::string SafFileSystem::home_root_path() {
 // ─── path arithmetic ─────────────────────────────────────────────────────────────────────────────
 
 std::string SafFileSystem::parent_path(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.parent_path(path);
     if (path == kRootsPath) return std::string();          // the top; the browser's ".." stops here
 
@@ -337,6 +345,7 @@ void SafFileSystem::invalidate(const std::string& dirPath) {
 // ─── the seven app folders ───────────────────────────────────────────────────────────────────────
 
 std::string SafFileSystem::ensure_dir(const char* sub) {
+    const Lock lock(mu_);
     const std::string home = home_root_path();
     // Nothing granted: every accessor answers the roots directory, where a folder can be added.
     if (home == kRootsPath) return home;
@@ -381,6 +390,7 @@ std::string SafFileSystem::delays_directory()      { return ensure_dir("Presets/
 std::string SafFileSystem::songs_directory()       { return ensure_dir(songcore::SONGS_FOLDER); }
 
 bool SafFileSystem::activate(const std::string& path) {
+    const Lock lock(mu_);
     if (path != kAddRootPath) return false;
 
     Env e;
@@ -397,6 +407,7 @@ bool SafFileSystem::activate(const std::string& path) {
 }
 
 bool SafFileSystem::set_home_directory(const std::string& path) {
+    const Lock lock(mu_);
     // Only a granted tree can be home: not the roots, not a folder inside a tree.
     if (!is_granted_tree(path)) return false;
 
@@ -423,6 +434,7 @@ bool SafFileSystem::set_home_directory(const std::string& path) {
 }
 
 bool SafFileSystem::revoke_access(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_granted_tree(path)) return false;
 
     const std::string id = path.substr(kSchemeLen);
@@ -448,6 +460,7 @@ bool SafFileSystem::revoke_access(const std::string& path) {
 }
 
 std::string SafFileSystem::config_path() {
+    const Lock lock(mu_);
     const std::string home = home_root_path();
     // ⚠️ "" with nothing granted — `load_folder_config` reads that as "no config", its common case.
     // Tested against the roots path, which is what `home_root_path` answers then.
@@ -457,6 +470,7 @@ std::string SafFileSystem::config_path() {
 // ─── reading ─────────────────────────────────────────────────────────────────────────────────────
 
 bool SafFileSystem::read_file(const std::string& path, std::string& out) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.read_file(path, out);
 
     const std::string uri = resolve(path);
@@ -481,22 +495,26 @@ bool SafFileSystem::read_file(const std::string& path, std::string& out) {
 }
 
 std::vector<pt::ui::FileInfo> SafFileSystem::list_files(const std::string& directory) {
+    const Lock lock(mu_);
     if (!is_pt_path(directory)) return priv_.list_files(directory);
     const std::vector<pt::ui::FileInfo>* l = listing(directory);
     return l ? *l : std::vector<pt::ui::FileInfo>();
 }
 
 void SafFileSystem::forget_listing(const std::string& directory) {
+    const Lock lock(mu_);
     if (is_pt_path(directory)) forget(directory);
 }
 
 bool SafFileSystem::file_exists(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.file_exists(path);
     if (path == kRootsPath) return true;
     return !resolve(path).empty();
 }
 
 bool SafFileSystem::is_directory(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.is_directory(path);
     if (path == kRootsPath) return true;
     if (parent_path(path) == kRootsPath) return !resolve(path).empty();   // a granted tree
@@ -591,6 +609,7 @@ bool SafFileSystem::write_uri(const std::string& uri, const void* data, size_t l
 // ─── the open hook ───────────────────────────────────────────────────────────────────────────────
 
 int SafFileSystem::open_fd(const std::string& path, const char* mode) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return -1;   // a plain path never reaches here — pt_fopen took the fopen branch
 
     const bool append = mode && std::strchr(mode, 'a');
@@ -615,11 +634,13 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
 // ─── the remove and rename hooks ─────────────────────────────────────────────────────────────────
 
 int SafFileSystem::hook_remove(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return -1;   // a plain path never reaches here — pt_remove took libc's branch
     return delete_path(path) ? 0 : -1;
 }
 
 int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
+    const Lock lock(mu_);
     // `pt_rename` refuses a mixed pair, so both ends are `pt://` by the time this is called.
     if (!is_pt_path(from) || !is_pt_path(to)) return -1;
 
@@ -677,10 +698,12 @@ bool SafFileSystem::replace(const std::string& from, const std::string& fromUri,
 // ─── writing ─────────────────────────────────────────────────────────────────────────────────────
 
 bool SafFileSystem::write_file(const std::string& path, const std::string& content) {
+    const Lock lock(mu_);
     return write_bytes(path, content.data(), content.size());
 }
 
 bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_t len) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.write_bytes(path, data, len);
 
     const std::string name = leaf_name(path);
@@ -706,6 +729,7 @@ bool SafFileSystem::is_granted_tree(const std::string& path) {
 }
 
 bool SafFileSystem::delete_path(const std::string& path) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.delete_path(path);
 
     // ⚠️ A granted tree is not the app's to delete: `pt://<id>` is the user's whole folder. The browser
@@ -720,6 +744,7 @@ bool SafFileSystem::delete_path(const std::string& path) {
 }
 
 bool SafFileSystem::rename_file(const std::string& path, const std::string& new_base_name) {
+    const Lock lock(mu_);
     if (!is_pt_path(path)) return priv_.rename_file(path, new_base_name);
     if (is_granted_tree(path)) return false;   // see delete_path — the tree itself is the user's
 
@@ -757,6 +782,7 @@ bool SafFileSystem::rename_file(const std::string& path, const std::string& new_
 }
 
 std::string SafFileSystem::create_folder(const std::string& parent, const std::string& folder_name) {
+    const Lock lock(mu_);
     if (!is_pt_path(parent)) return priv_.create_folder(parent, folder_name);
 
     const std::string safe = pt::ui::path_sanitize(folder_name, /*allow_dot=*/false);
@@ -792,6 +818,7 @@ bool SafFileSystem::copy_tree(const std::string& from, const std::string& to) {
 }
 
 bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
+    const Lock lock(mu_);
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.move_file(from, to);
     if (is_granted_tree(from)) return false;   // see delete_path — and a move ends in a delete
 
@@ -834,6 +861,7 @@ bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
 }
 
 bool SafFileSystem::copy_file(const std::string& from, const std::string& to) {
+    const Lock lock(mu_);
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.copy_file(from, to);
     if (file_exists(to)) return false;   // the caller has already de-duplicated the name
     return copy_tree(from, to);

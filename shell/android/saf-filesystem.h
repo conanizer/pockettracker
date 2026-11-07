@@ -21,6 +21,7 @@
 #include "ui/filesystem.h"
 #include "ui/std_filesystem.h"
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -176,6 +177,11 @@ class SafFileSystem : public pt::ui::FileSystem {
     void invalidate(const std::string& dirPath);
 
     pt::ui::StdFileSystem priv_;   // the app-private files, and every plain path that reaches here
+
+    // ⚠️ The SoundFont worker reaches the caches too (its `pt_fopen` is the open hook): every way in
+    // takes this. Recursive, because the ways in call each other.
+    using Lock = std::lock_guard<std::recursive_mutex>;
+    std::recursive_mutex mu_;
 
     std::vector<Root> roots_;
     std::string       homeId_;        // filled with roots_, from Java; "" = nothing granted
