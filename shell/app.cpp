@@ -394,7 +394,7 @@ void print_key_help() {
     std::printf("L+B select (tap again to widen)   B copies   L+A cut/paste   L+R deselect   L+B+A clone\n");
     std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
     std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
-    std::printf("                             GROOVE MIXER EFFECTS PROJECT SETTINGS\n");
+    std::printf("                             GROOVE SCALE MIXER EFFECTS PROJECT SETTINGS\n");
     std::printf("PROJECT: A on SAVE/LOAD/NEW, on EXPORT MIX/STEMS, on COMPACT SEQ/INST, on SETTINGS>, on EXIT\n");
     std::printf("         A on NAME opens the keyboard; A+LEFT/RIGHT edits one character in place\n");
     std::printf("         a confirm asks A=YES B=NO before anything destructive\n");

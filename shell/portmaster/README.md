@@ -10,7 +10,7 @@ the audio device and the input come from SDL.
 |---|---|
 | D-pad | Move the cursor |
 | A | Edit / confirm / open the thing under the cursor |
-| A + D-pad | Change the value under the cursor (up/down = fine, left/right = coarse) |
+| A + D-pad | Change the value under the cursor (left/right = fine, up/down = coarse) |
 | B | Back / close |
 | A + B | Delete the value under the cursor |
 | B + D-pad | Cycle the item under the cursor (chain, phrase, instrument…) |

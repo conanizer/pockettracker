@@ -14,10 +14,9 @@ Windows 10 or later, 64-bit. If SmartScreen puts up a blue "Windows protected yo
 box, that is because this download is not code-signed, not because anything is wrong
 with it: click "More info", then "Run anyway".
 
-A console window opens behind the tracker and stays there. That is deliberate, not a
-bug - it prints what the audio device and display actually did, which folders it is
-using, and whether your samples loaded. If something goes wrong, the text in that
-window is the most useful thing you can send us. Closing it closes the app.
+Each session writes a log, Documents\PocketTracker\pockettracker-log.txt: what the audio
+device and display actually did, which folders it is using, and whether your samples
+loaded. If something goes wrong, that file is the most useful thing you can send us.
 
 
 YOUR FILES
@@ -55,19 +54,19 @@ plugged in. On the keyboard those buttons are:
 
 And the tracker itself:
 
-    A+UP/DOWN            edit the value under the cursor
-    A+LEFT/RIGHT         edit it in bigger steps
+    A+LEFT/RIGHT         edit the value under the cursor
+    A+UP/DOWN            edit it in bigger steps
     A+B                  clear it
     A,A                  insert the next unused phrase/chain/instrument
     B+LEFT/RIGHT         change WHICH phrase/chain/table you are looking at
     B+UP/DOWN            page through the song
     R+D-pad              move between screens - SONG CHAIN PHRASE INSTRUMENT TABLE
-                         MODS INST.POOL GROOVE MIXER EFFECTS PROJECT SETTINGS
+                         MODS INST.POOL GROOVE SCALE MIXER EFFECTS PROJECT SETTINGS
     L+B                  start a selection (tap again to widen)
     B                    copy      L+A  cut / paste      L+R  deselect
     START                play / stop
 
-The full list is printed in the console window every time the app starts.
+The full list is in the log file, and in the manual.
 
 
 SAVING
@@ -103,8 +102,8 @@ are yours.
 SOMETHING WRONG?
 ----------------
 
-https://github.com/conanizer/pockettracker/issues - and please paste the text from the
-console window, it usually says what happened.
+https://github.com/conanizer/pockettracker/issues - and please attach the log file
+(see RUNNING IT), it usually says what happened.
 
 For a report about sound - a note that will not stop, a sample that will not load -
 there is a verbose mode. Open a Command Prompt in this folder and run:
@@ -112,5 +111,5 @@ there is a verbose mode. Open a Command Prompt in this folder and run:
     set POCKETTRACKER_LOG=1
     PocketTracker.exe
 
-The console then also prints what the audio engine is doing internally. It is off by
+The log file then also records what the audio engine is doing internally. It is off by
 default because it is noisy and none of it means anything is wrong.
