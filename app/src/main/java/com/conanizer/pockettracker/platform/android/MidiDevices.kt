@@ -32,14 +32,27 @@ internal fun openMidiDevice(m: MidiManager, info: MidiDeviceInfo): MidiDevice? {
         return null
     }
 
-    // The latch publishes `opened`: countDown() happens-before a returning await().
+    // ⚠️ A device that answers after the wait gave up is closed by the callback, or it stays held
+    // from every other app until the process dies.
+    val lock = Any()
     var opened: MidiDevice? = null
+    var gaveUp = false
     val latch = CountDownLatch(1)
-    m.openDevice(info, { d -> opened = d; latch.countDown() }, Handler(Looper.getMainLooper()))
+    m.openDevice(info, { d ->
+        val late = synchronized(lock) {
+            if (!gaveUp) opened = d
+            gaveUp
+        }
+        if (late) runCatching { d?.close() }
+        latch.countDown()
+    }, Handler(Looper.getMainLooper()))
 
     val arrived = latch.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-    val d = opened
-    if (!arrived || d == null) {
+    val d = synchronized(lock) {
+        gaveUp = true
+        opened
+    }
+    if (d == null) {
         Log.w(TAG, "openDevice(${info.id}) ${if (arrived) "returned null" else "timed out"}")
         return null
     }
