@@ -1436,8 +1436,8 @@ int run(const AppConfig& cfg) {
     hooks.pump          = [&loop] { return loop.pump_events(); };
     dispatch.set_render_hooks(std::move(hooks));
 
-    // ⚠️ Installed once. Decoders report load progress through it (nothing installed = tools, offline
-    // render). The clock is passed in: set_now() also runs due work, and an autosave mid-load would
+    // Decoders report load progress through it (nothing installed = tools, offline render). ⚠️ Removed
+    // on the way out: Android can run `SDL_main` again in the same process. The clock is passed in: set_now() also runs due work, and an autosave mid-load would
     // save a half-loaded document.
     pt::set_load_tick([&dispatch](float fraction) {
         return dispatch.load_tick(static_cast<long long>(SDL_GetTicks64()), fraction);
@@ -1510,6 +1510,7 @@ int run(const AppConfig& cfg) {
     // ⚠️ Before closeStream(), which takes away the frame count the measured latency needs.
     latency::report(audio.sampleRate(), cfg.midiIn && cfg.midiIn->polled(), audio.outputLatency());
 
+    pt::set_load_tick(nullptr);
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
     input.close_controllers();
