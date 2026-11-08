@@ -56,7 +56,7 @@ jobs:
       # ⚠️ IN THE CONTAINER, NOT ON THE RUNNER. The binary needs the glibc of the system that built
       # it or newer; `ubuntu-latest` moves, and its build runs there and fails to start on older distros.
       - name: Build the container
-        run: docker build -t pockettracker-linux -f shell/Dockerfile.linux shell/
+        run: docker build --target linux -t pockettracker-linux -f shell/Dockerfile shell/
 
       # The script builds, checks the artifact, stages, tars and reads the tarball back out.
       - name: Build and package
@@ -89,7 +89,7 @@ jobs:
       # CFW is at or above; the runner's own aarch64 cross compiler would produce a perfectly good
       # ELF that no handheld can load, and nothing about the build would say so.
       - name: Build the cross-compilation container
-        run: docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+        run: docker build --target portmaster -t pockettracker-build -f shell/Dockerfile shell/
 
       - name: Build and package
         run: docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh

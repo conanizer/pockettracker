@@ -283,7 +283,7 @@ jobs:
 
   # ─── The SDL shell ─────────────────────────────────────────────────────────────────────────────
   # The desktop app on Linux and Windows. The two runners also take both branches of
-  # shell/CMakeLists.txt's SDL2 lookup: Linux the system's (as on every CFW), Windows FetchContent.
+  # shell/CMakeLists.txt's SDL2 lookup: Linux the system's (as on every CFW), Windows the vendored copy.
   shell:
     name: SDL shell (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -297,7 +297,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Linux only: Windows takes the FetchContent branch.
+      # Linux only: Windows builds native/vendor/SDL2 into the exe.
       - name: Install SDL2 (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev

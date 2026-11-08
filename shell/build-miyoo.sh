@@ -47,6 +47,7 @@ BOXART=$PORTROOT/Imgs/PocketTracker.png
 BIN=$GAMEDIR/pockettracker
 
 cd "$SRC"
+. "$SRC/shell/package-licenses.sh"
 
 echo
 echo "############ 1/5  fetch the device toolchain and the SDL2 fork ############"
@@ -173,14 +174,7 @@ cp "$SDL2_LIBDIR/libSDL2-2.0.so.0"   "$GAMEDIR/libs/"
 cp "$NEON_SO"                        "$GAMEDIR/libs/"
 
 # The statically linked components' notices ship with the binary (THIRD-PARTY-NOTICES.md; check 8).
-cp "$SRC/LICENSE"                                    "$GAMEDIR/licenses/LICENSE"
-cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"       "$GAMEDIR/licenses/"
-cp "$SRC/CREDITS.md"                                 "$GAMEDIR/licenses/CREDITS.md"
-cp "$SRC/native/vendor/ogg/COPYING"                  "$GAMEDIR/licenses/libogg-COPYING"
-cp "$SRC/native/vendor/opus/COPYING"                 "$GAMEDIR/licenses/libopus-COPYING"
-cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt" "$GAMEDIR/licenses/libopus-LICENSE_PLEASE_READ.txt"
-cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"   "$GAMEDIR/licenses/OFL-1.1-LiberationSans.txt"
-cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"      "$GAMEDIR/licenses/OFL-1.1-QuinqueFive.txt"
+copy_licences "$GAMEDIR/licenses"
 
 # ⚠️ Only this package ships SDL2, so only it carries SDL's zlib text and the fork's GPL-3.0 text,
 # from the fork's own tree.
@@ -341,25 +335,8 @@ echo "bound twice        : ${DUPES:-none}"
 [ -z "$DUPES" ] || { echo "FAIL: those Miyoo buttons are bound to more than one app button."; exit 1; }
 
 # --- 8. every statically linked component must have a notice -----------------------------------
-# ⚠️ The vendor directory is the list; a hand-kept one would be forgotten by the same commit.
-NOTICES="$GAMEDIR/licenses/THIRD-PARTY-NOTICES.md"
 echo
-echo "licence notices:"
-MISSING=""
-VENDORED=""
-for D in "$SRC"/native/vendor/*/; do VENDORED="$VENDORED $(basename "$D")"; done
-for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
-    if grep -qi -- "$COMPONENT" "$NOTICES"; then
-        echo "  ok      $COMPONENT"
-    else
-        echo "  MISSING $COMPONENT"
-        MISSING="$MISSING $COMPONENT"
-    fi
-done
-if [ -n "$MISSING" ]; then
-    echo "FAIL: statically linked but not named in THIRD-PARTY-NOTICES.md:$MISSING"
-    exit 1
-fi
+check_notices "$GAMEDIR/licenses/THIRD-PARTY-NOTICES.md"
 
 # --- 9. our libneonarmmiyoo.so defines every symbol the shipped libSDL2 needs from it ----------
 # ⚠️ The wanted list is read out of the libSDL2 that ships, so a bumped fork that calls one more
@@ -518,16 +495,9 @@ MEMBERS=( Roms/PORTS/Shortcuts/PocketTracker.port
           $G/README.md
           $G/libs/libSDL2-2.0.so.0
           $G/libs/libneonarmmiyoo.so
-          $G/licenses/LICENSE
-          $G/licenses/THIRD-PARTY-NOTICES.md
-          $G/licenses/CREDITS.md
-          $G/licenses/libogg-COPYING
-          $G/licenses/libopus-COPYING
-          $G/licenses/libopus-LICENSE_PLEASE_READ.txt
-          $G/licenses/OFL-1.1-LiberationSans.txt
-          $G/licenses/OFL-1.1-QuinqueFive.txt
           $G/licenses/libSDL2-zlib-LICENSE.txt
           $G/licenses/libSDL2-miyoo-fork-GPL-3.0.txt )
+while IFS= read -r L; do MEMBERS+=("$G/licenses/$L"); done < <(licence_names)
 # An array, with the demo's members appended from the staging tree: their names carry spaces, and
 # nothing else reads the demo back out of the zip.
 if [ -d "$GAMEDIR/demo" ]; then

@@ -60,11 +60,11 @@ else()
     target_compile_options(faad2 PRIVATE -w)
 endif()
 
-# ─── Vendored SDL2 — Android only ──────────────────────────────────────────────────────────────
+# ─── Vendored SDL2, as the APK's shared library ────────────────────────────────────────────────
 # F-Droid builds offline and from source, so Android carries SDL in-tree; the desktop shells take the
-# system's or fetch it (shell/CMakeLists.txt). ⚠️ Two versions on purpose: the handhelds link the
-# device's SDL against a 2.0.18 floor, Android bundles a current 2.x. vendor/SDL2 is regenerated only
-# by vendor/revendor-sdl2.sh, never edited by hand.
+# system's, and this copy where there is none (shell/CMakeLists.txt). ⚠️ Two versions on purpose: the
+# handhelds link the device's SDL against a 2.0.18 floor, Android bundles a current 2.x. vendor/SDL2
+# is regenerated only by vendor/revendor-sdl2.sh, never edited by hand.
 if(ANDROID)
     # ⚠️ SDL's C and Java halves must be one version — SDLActivity refuses to start otherwise. Checked
     # here, at configure time, instead of on a phone. C calls the third number PATCHLEVEL, Java MICRO_VERSION.

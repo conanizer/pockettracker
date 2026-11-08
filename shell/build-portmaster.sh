@@ -4,28 +4,20 @@
 #
 # Run from the repo root, on a box with docker:
 #
-#     docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+#     docker build --target portmaster -t pockettracker-build -f shell/Dockerfile shell/
 #     docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 #
 # ⚠️ Never on the host's own cross compiler: it builds an ELF no handheld can load. The container is
-# the glibc floor (Dockerfile.portmaster).
+# the glibc floor, and holds the SDL2 this links against (shell/Dockerfile).
 # ⚠️ Nothing is filtered: a step that fails quietly leaves a stale artifact for the next to "verify".
 set -euo pipefail
 
 SRC=${SRC:-/src}
 
-# ⚠️ This SDL2 is only linked against, never shipped: the port runs on the device's own, patched by its
-# CFW for the display and audio. Its version is the floor the app supports — 2.0.18, the first with
-# SDL_GetTicks64() — so a newer API fails the link here, not on a handheld. Raise it only together with
-# shell/portmaster/README.md and SDL2_TAG in Dockerfile.linux.
-SDL2_TAG=${SDL2_TAG:-release-2.0.18}
-
 # Every Tier-1 CFW has at least Ubuntu 20.04's glibc. Checked on the artifact below.
 GLIBC_MAX_ALLOWED=${GLIBC_MAX_ALLOWED:-2.31}
 
 SYSROOT=/usr/aarch64-linux-gnu
-SDL2_SRC=/tmp/sdl2-src
-SDL2_BUILD=/tmp/sdl2-build
 BUILD=$SRC/build/aarch64
 OUT=$SRC/build/portmaster
 STAGE=$OUT/stage
@@ -34,26 +26,10 @@ BIN=$STAGE/pockettracker/pockettracker.aarch64
 
 cd "$SRC"
 git config --global --add safe.directory '*'
+. "$SRC/shell/package-licenses.sh"
 
 echo
-echo "############ 1/5  cross-build SDL2 $SDL2_TAG (link SDK only, NOT shipped) ############"
-rm -rf "$SDL2_SRC" "$SDL2_BUILD"
-git clone --depth 1 --branch "$SDL2_TAG" https://github.com/libsdl-org/SDL.git "$SDL2_SRC"
-cmake -S "$SDL2_SRC" -B "$SDL2_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-    -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-    -DCMAKE_SYSTEM_NAME=Linux \
-    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-    -DCMAKE_INSTALL_PREFIX="$SYSROOT" \
-    -DSDL_SHARED=ON \
-    -DSDL_STATIC=OFF \
-    -DSDL_TEST=OFF
-cmake --build "$SDL2_BUILD"
-cmake --install "$SDL2_BUILD"
-
-echo
-echo "############ 2/5  cross-build PocketTracker ############"
+echo "############ 1/4  cross-build PocketTracker ############"
 rm -rf "$BUILD"
 cmake -S "$SRC/shell" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -63,7 +39,7 @@ cmake -S "$SRC/shell" -B "$BUILD" -G Ninja \
 cmake --build "$BUILD"
 
 echo
-echo "############ 3/5  stage the package ############"
+echo "############ 2/4  stage the package ############"
 # Two layouts. $STAGE is the catalog's: what is copied into PortMaster-New's `ports/pockettracker/`,
 # with the five root files its `tools/build_release.py` wants there (a screenshot one level down reads
 # to it as none).
@@ -78,7 +54,7 @@ echo "############ 3/5  stage the package ############"
 #      |- pockettracker.aarch64
 #      `- licenses/
 #
-# The zip is upstream's shape (step 5), so a tester installs what the catalog will hand a user.
+# The zip is upstream's shape (step 4), so a tester installs what the catalog will hand a user.
 # ⚠️ The port directory and the binary's stem are both `pockettracker` (lowercase, the catalog's rule);
 # the launch script is capitalised.
 rm -rf "$OUT"
@@ -90,7 +66,7 @@ cp "$SRC/shell/portmaster/gameinfo.xml"     "$STAGE/"
 cp "$SRC/shell/portmaster/README.md"        "$STAGE/"
 chmod +x "$STAGE/PocketTracker.sh"
 
-# At the root for the catalog's checker; step 5 moves it where gameinfo.xml points the CFW's game list.
+# At the root for the catalog's checker; step 4 moves it where gameinfo.xml points the CFW's game list.
 # port.json names no image — the catalog finds it by name. Any platform's capture shows what the
 # handheld draws; it must be 4:3 and at least 640x480.
 cp "$SRC/docs/images/screenshot.png" "$STAGE/screenshot.png"
@@ -100,23 +76,12 @@ chmod +x "$BIN"
 aarch64-linux-gnu-strip "$BIN"
 
 # The statically linked components' notices ship with the binary that contains them.
-# ⚠️ THIRD-PARTY-NOTICES.md is the one source: it carries the text inline where upstream ships no file
-# (KissFFT, opusfile). Add a component there with the commit that vendors it; step 4 checks.
-cp "$SRC/LICENSE"                                       "$STAGE/pockettracker/licenses/LICENSE"
-cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"          "$STAGE/pockettracker/licenses/"
-cp "$SRC/CREDITS.md"                                    "$STAGE/pockettracker/licenses/CREDITS.md"
-cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/licenses/libogg-COPYING"
-cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
-cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
-
-# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
-# UI font compiled into the binary is adapted from QuinqueFive.
-cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"      "$STAGE/pockettracker/licenses/OFL-1.1-LiberationSans.txt"
-cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"         "$STAGE/pockettracker/licenses/OFL-1.1-QuinqueFive.txt"
+# ⚠️ THIRD-PARTY-NOTICES.md carries the text inline where upstream ships no file (KissFFT, opusfile).
+copy_licences "$STAGE/pockettracker/licenses"
 ls -1 "$STAGE/pockettracker/licenses/"
 
 echo
-echo "############ 4/5  verify the ARTIFACT (not the build log) ############"
+echo "############ 3/4  verify the ARTIFACT (not the build log) ############"
 file "$BIN"
 echo
 
@@ -158,38 +123,16 @@ if strings "$BIN" | grep -q 'KILDBG'; then
     exit 1
 fi
 echo "debug instr.       : none"
-echo "SDL2 link floor    : $SDL2_TAG"
+echo "SDL2 link floor    : ${PT_SDL2_TAG:-unknown (not shell/Dockerfile)}"
 
 # --- every statically linked component must have a notice -------------------------------------
-# ⚠️ The vendor directory is the list: add `native/vendor/foo/` and this fails until
-# THIRD-PARTY-NOTICES.md names `foo`. A hand-kept list would be forgotten by the same commit.
-NOTICES="$STAGE/pockettracker/licenses/THIRD-PARTY-NOTICES.md"
+# SDL2 included though this zip does not ship it: the question is whether every vendored component is
+# documented. The notices' table says which artifact carries what.
 echo
-echo "licence notices:"
-MISSING=""
-# ⚠️ `basename`, not `ls -1`: a trailing slash makes `dr_flac/` match a path in the notices' prose
-# instead of the component's name, and the check passes on nothing.
-VENDORED=""
-for D in "$SRC"/native/vendor/*/; do VENDORED="$VENDORED $(basename "$D")"; done
-# The vendored tree and the three components outside it — SDL2 included though this zip does not
-# ship it: the question is whether every vendored component is documented. The notices' table says
-# which artifact carries what.
-for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
-    if grep -qi -- "$COMPONENT" "$NOTICES"; then
-        echo "  ok      $COMPONENT"
-    else
-        echo "  MISSING $COMPONENT"
-        MISSING="$MISSING $COMPONENT"
-    fi
-done
-if [ -n "$MISSING" ]; then
-    echo "FAIL: statically linked but not named in THIRD-PARTY-NOTICES.md:$MISSING"
-    echo "      The artifact is the only thing a user receives. Document it there, then rebuild."
-    exit 1
-fi
+check_notices "$STAGE/pockettracker/licenses/THIRD-PARTY-NOTICES.md"
 
 echo
-echo "############ 5/5  zip (upstream's transform, not one of ours) ############"
+echo "############ 4/4  zip (upstream's transform, not one of ours) ############"
 # `build_port_zip()` in PortMaster-New/tools/build_release.py: the four root metadata files move INTO
 # the port directory, README.md becomes `<portname>.md`, only the launch script stays at the root.
 rm -rf "$ZIPROOT"
@@ -226,8 +169,7 @@ fi
 # ⚠️ Out of the zip, not the staging folder: the zip is what ships.
 echo
 echo "licences, read back out of the zip:"
-for L in LICENSE THIRD-PARTY-NOTICES.md CREDITS.md libogg-COPYING libopus-COPYING \
-         libopus-LICENSE_PLEASE_READ.txt OFL-1.1-LiberationSans.txt OFL-1.1-QuinqueFive.txt; do
+for L in $(licence_names); do
     # ⚠️ `|| BYTES=0`, for the same reason: the FAIL line must name the file.
     BYTES=$(unzip -p "$OUT/pockettracker.zip" "pockettracker/licenses/$L" | wc -c) || BYTES=0
     echo "  $BYTES bytes   $L"

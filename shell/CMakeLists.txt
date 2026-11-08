@@ -19,11 +19,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # The version: the Windows resource stamps it into the exe, build-windows.ps1 names the zip after it,
 # app.cpp prints it at boot. One parse, shared with the Android build.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/cmake/pt_version.cmake")
+# The Linux package script names the tarball after it.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version.txt" "${PT_VERSION}\n")
 
 # ─── A self-contained exe: the MSVC runtime goes IN ────────────────────────────────────────────
 # Without it the exe needs VCRUNTIME140.dll and friends, which a machine without Visual Studio lacks —
 # and no machine that builds it shows the failure. The UCRT is part of Windows 10, the floor.
-# ⚠️ Set BEFORE add_subdirectory and FetchContent below, or the engine and SDL get another CRT and the
+# ⚠️ Set BEFORE the add_subdirectory calls below, or the engine and SDL get another CRT and the
 # link mixes two heaps. SDL honours the variable itself; its SDL_FORCE_STATIC_VCRT sets the same one.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -46,20 +48,24 @@ add_subdirectory(../native native)
 
 # ─── SDL2 ──────────────────────────────────────────────────────────────────────────────────────
 # The system's SDL2 first — required on a handheld: the PortMaster CFWs ship their own, patched for
-# their display, audio and input. Fetched where there is none (a Windows box).
+# their display, audio and input. Where there is none (a Windows box), the APK's vendored copy, linked
+# statically.
 find_package(SDL2 QUIET)
 if(NOT SDL2_FOUND)
-    message(STATUS "SDL2 not found on the system — fetching it (first configure only)")
-    include(FetchContent)
+    message(STATUS "SDL2 not found on the system — building native/vendor/SDL2 into the exe")
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON  CACHE BOOL "" FORCE)
     set(SDL_TEST   OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(SDL2
-            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-            GIT_TAG        release-2.30.9
-            GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(SDL2)
+    # ⚠️ The vendored copy has no wayland-protocols/, and SDL's Wayland backend fails to compile
+    # without it. A Linux box that wants Wayland installs the system SDL2.
+    set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
+    # Its PipeWire backend fails on gcc 14+ against current PipeWire headers; PulseAudio and ALSA
+    # still reach a PipeWire server.
+    set(SDL_PIPEWIRE OFF CACHE BOOL "" FORCE)
+    # SDL asks for CMake 3.0, which a CMake 4 refuses without this.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(../native/vendor/SDL2 sdl2)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 
 # ─── The Windows resource: the icon, the manifest, the version stamp ───────────────────────────

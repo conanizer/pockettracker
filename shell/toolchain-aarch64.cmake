@@ -7,8 +7,8 @@
 #   cmake --build build/aarch64
 #   file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
 #
-# With no arm64 SDL2 on the find root, SDL is fetched and linked statically: a self-contained binary for
-# CI and qemu-user, not for a device.
+# With no arm64 SDL2 on the find root, native/vendor/SDL2 is linked statically: a self-contained binary
+# for CI and qemu-user, not for a device.
 # ⚠️ A device build (build-portmaster.sh) differs in two ways, neither in this file: it builds on
 # PortMaster's Ubuntu 20.04 base for the glibc floor, and links the device's own SDL2 dynamically.
 set(CMAKE_SYSTEM_NAME Linux)

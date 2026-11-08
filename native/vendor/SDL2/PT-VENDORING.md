@@ -1,4 +1,4 @@
-# SDL2 — vendored for the Android build
+# SDL2 — vendored for the APK and the Windows exe
 
 **Do not edit anything in this directory.** It is a pruned but otherwise **verbatim** copy of
 upstream SDL2, produced by `native/vendor/revendor-sdl2.sh`. To change the version, run that
@@ -13,10 +13,10 @@ script with a new tag; to change what is copied, edit the script.
 
 ## Why this exists at all
 
-The SDL shell on desktop and on the handhelds does **not** use this copy: `shell/CMakeLists.txt`
-links the *system* SDL2 where there is one (mandatory on PortMaster CFWs) and FetchContent's it
-otherwise. Only the APK needs SDL in-tree, because F-Droid builds offline, from source, with no
-prebuilt binaries — see convergence plan C1.
+The APK needs SDL in-tree: F-Droid builds offline, from source, with no prebuilt binaries. The
+desktop shell links the *system* SDL2 where there is one (mandatory on PortMaster CFWs) and builds
+this copy statically into the exe where there is none (Windows) — with the Wayland backend off,
+since `wayland-protocols/` is dropped below.
 
 ## What was dropped
 

@@ -388,13 +388,13 @@ the source tree.
 | artifact | how SDL2 is linked | ships an SDL2 binary? |
 |---|---|---|
 | **PortMaster zip** (`shell/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
-| **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
+| **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` builds the vendored source (`native/vendor/SDL2/`) into it | **yes — inside the exe** |
 | **APK** | **dynamically, against a `libSDL2.so` built from the vendored source** (`native/vendor/SDL2/`) and packaged in the APK — F-Droid builds offline from source and rejects prebuilts, so Android is the one target that carries SDL in-tree | **yes — `lib/<abi>/libSDL2.so`, one per ABI** |
 | **Miyoo/OnionOS zip** (`shell/build-miyoo.sh`) | dynamically, against a **prebuilt `mmiyoo` fork we bundle** — this device has no system SDL2 at all, so the PortMaster row's rule inverts and the build asserts `libs/` is **present** | **yes — `libs/libSDL2-2.0.so.0`**, and see the fork's own section below |
 
 So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
-source tree that was actually compiled (`_deps/sdl2-src/LICENSE.txt`) rather than from a stale copy
-in this repo — the licence that ships is then the licence of the code that shipped, by construction.
+source tree that was actually compiled (`native/vendor/SDL2/LICENSE.txt`) — the licence that ships is
+then the licence of the code that shipped, by construction.
 
 ⚠️ **On the APK's obligation specifically:** zlib's three conditions bind *source* distributions
 (clause 3 is "may not be removed or altered from any **source** distribution"); unlike the
@@ -404,13 +404,9 @@ this file, `LICENSE`, `CREDITS.md` and the OFL texts as `assets/licenses/`; no i
 them. Stated rather than assumed, because "we now ship one more library" is the kind of change that
 looks like it must have made a compliance problem worse.
 
-⚠️ **The vendor-directory guard covers SDL2 on one side only.** `build-portmaster.sh` derives its
-component list from `native/vendor/*/` precisely so that vendoring a library and forgetting its
-notice fails the build, and `native/vendor/SDL2/` is in the tree, so the derived guard covers it —
-including, over-inclusively, in the PortMaster zip, which links SDL rather than shipping it (see the
-note at that loop). **The Windows build is the exception**: it takes its SDL from FetchContent, not
-from `native/vendor/`, so the derived guard is structurally blind there and `build-windows.ps1`
-checks for the SDL notice **by name**.
+The package scripts derive their component list from `native/vendor/*/`, so vendoring a library and
+forgetting its notice fails the build; `native/vendor/SDL2/` is in the tree, so the guard covers it —
+including, over-inclusively, in the PortMaster zip, which links SDL rather than shipping it.
 
 Used for: window, renderer, audio output, gamepad and keyboard input — the whole of `shell/`, on
 every platform including Android. **Two versions, deliberately** — different linkage models get
@@ -419,7 +415,7 @@ different version policies:
 | | version | why |
 |---|---|---|
 | Android (vendored, `native/vendor/SDL2/`) | **2.30.9** (`release-2.30.9`, commit `c98c4fbf`) | the APK bundles its own, so it should carry a current 2.x |
-| Windows (FetchContent pin, `shell/CMakeLists.txt`) | **2.30.9** | built from source into the exe |
+| Windows (the same vendored copy) | **2.30.9** | built from source into the exe |
 | PortMaster (`SDL2_TAG`, the *link floor*) | **2.0.18** | ports are expected to link the CFW's own libSDL2; this is the compatibility floor they are built against, not a copy we ship |
 | Miyoo/OnionOS (`SDL2_TAG`, the *shipped binary*) | **2.0.20**, the `mmiyoo` fork — see below | not a floor but the exact build that ships, so it is pinned to one tag |
 

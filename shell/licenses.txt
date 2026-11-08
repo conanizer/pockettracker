@@ -1,0 +1,28 @@
+# What every package carries in its licenses/ folder, and the APK in assets/licenses/. Read by
+# build-linux.sh, build-portmaster.sh and build-miyoo.sh (through package-licenses.sh), by
+# build-windows.ps1 and by app/build.gradle.kts.
+#
+#   file    <source, from the repo root>    <name in licenses/>
+#   notice  <component>                     compiled in from outside native/vendor/
+#
+# The notices check wants every native/vendor/ directory and every `notice` named in
+# THIRD-PARTY-NOTICES.md. A package's SDL licence is not here: the two that ship SDL take it from the
+# source they built.
+
+file    LICENSE                                         LICENSE
+file    docs/licenses/THIRD-PARTY-NOTICES.md            THIRD-PARTY-NOTICES.md
+file    CREDITS.md                                      CREDITS.md
+# BSD-3-Clause: their notices travel with the binary.
+file    native/vendor/ogg/COPYING                       libogg-COPYING
+file    native/vendor/opus/COPYING                      libopus-COPYING
+file    native/vendor/opus/LICENSE_PLEASE_READ.txt      libopus-LICENSE_PLEASE_READ.txt
+# No font file ships, but THIRD-PARTY-NOTICES.md cites these by path, and the 5×5 UI font compiled
+# into the binary is adapted from QuinqueFive.
+file    docs/licenses/OFL-1.1-LiberationSans.txt        OFL-1.1-LiberationSans.txt
+file    docs/licenses/OFL-1.1-QuinqueFive.txt           OFL-1.1-QuinqueFive.txt
+
+notice  kissfft
+notice  daisysp
+notice  soundpipe
+notice  dragonfly
+notice  skoomaDust

@@ -27,8 +27,8 @@ Debug builds need no signing setup — release builds fall back to the debug key
 
 ## Linux / Windows desktop
 
-Needs CMake and a C++17 compiler. SDL2 is used from the system if present, and fetched and built if
-not.
+Needs CMake and a C++17 compiler. SDL2 is used from the system if present, and built from the copy in
+`native/vendor/SDL2` if not (on Linux without Wayland — install the system's SDL2 for that).
 
 ```bash
 cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
@@ -47,7 +47,7 @@ Cross-compiled inside a container. The container image is the glibc floor every 
 above — a host cross compiler produces a binary no handheld can load.
 
 ```bash
-docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+docker build --target portmaster -t pockettracker-build -f shell/Dockerfile shell/
 docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 ```
 

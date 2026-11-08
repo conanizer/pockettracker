@@ -7,7 +7,9 @@
 miyoo/*.port text eol=lf
 
 # Read by docker on Linux: a CR in a RUN line ends up inside the command.
-Dockerfile.* text eol=lf
+Dockerfile text eol=lf
+# Read by the bash package scripts: a CR would end up in a file name.
+licenses.txt text eol=lf
 
 # The rest of the handheld packages. They parse either way today; pinned so they stay the same bytes.
 portmaster/*.json text eol=lf

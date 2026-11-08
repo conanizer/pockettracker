@@ -160,7 +160,7 @@ shell/                             The only SDL in the tree
 ├── linux/                         ALSA MIDI (libasound loaded at runtime, no link-time dependency)
 ├── windows/                       ASIO output, winmm MIDI, the exe's icon and manifest
 ├── miyoo/, portmaster/            Handheld launch scripts and metadata
-└── build-*.sh, build-windows.ps1, Dockerfile.*, toolchain-*.cmake
+└── build-*.sh, build-windows.ps1, Dockerfile, licenses.txt, toolchain-*.cmake
 
 app/                               Android: manifest, resources, and a seven-file Kotlin shim
 docs/                              The manual, this document, and the licence notices
@@ -928,7 +928,7 @@ cmake --build shell/build
 |---|---|---|
 | Windows | `shell/build-windows.ps1` | `build/windows/PocketTracker-<v>-windows-x64.zip` |
 | Linux | `shell/build-linux.sh` | `build/linux/PocketTracker-<v>-linux-x64.tar.gz` |
-| PortMaster | `shell/build-portmaster.sh` (in `Dockerfile.portmaster`) | `build/portmaster/pockettracker.zip` |
+| PortMaster | `shell/build-portmaster.sh` (in `shell/Dockerfile`) | `build/portmaster/pockettracker.zip` |
 | Miyoo Mini | `shell/build-miyoo.sh` (no container — the device toolchain carries its own sysroot) | `build/miyoo/pockettracker-miyoo.zip` |
 
 Each one verifies the *artifact* — that it is newer than every source file, links what it claims to,

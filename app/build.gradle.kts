@@ -160,19 +160,12 @@ abstract class StageLicenseAssets : DefaultTask() {
     }
 }
 
-// The set every artifact ships — the three desktop packaging scripts stage the same, keep them in
-// step. All after the first three are cited by path in THIRD-PARTY-NOTICES.md; the `COPYING` files
-// come from the vendored source that was compiled.
-val licensePayload = mapOf(
-    "LICENSE"                         to "LICENSE",                                    // GPL-3.0-or-later — PocketTracker's own
-    "THIRD-PARTY-NOTICES.md"          to "docs/licenses/THIRD-PARTY-NOTICES.md",       // every statically linked component
-    "CREDITS.md"                      to "CREDITS.md",                                 // the Gradle-resolved Android dependencies
-    "OFL-1.1-LiberationSans.txt"      to "docs/licenses/OFL-1.1-LiberationSans.txt",   // Liberation Sans font
-    "OFL-1.1-QuinqueFive.txt"         to "docs/licenses/OFL-1.1-QuinqueFive.txt",      // the 5×5 UI font's source
-    "libogg-COPYING"                  to "native/vendor/ogg/COPYING",                  // BSD-3-Clause
-    "libopus-COPYING"                 to "native/vendor/opus/COPYING",                 // BSD-3-Clause
-    "libopus-LICENSE_PLEASE_READ.txt" to "native/vendor/opus/LICENSE_PLEASE_READ.txt", // upstream's patent note
-)
+// The set every artifact ships, from the list the desktop packaging scripts read too: its `file`
+// lines, as name in the artifact → repo-relative source.
+val licensePayload = rootProject.file("shell/licenses.txt").readLines()
+    .map { it.trim().split(Regex("\\s+")) }
+    .filter { it.size >= 3 && it[0] == "file" }
+    .associate { it[2] to it[1] }
 
 val stageLicenseAssets = tasks.register<StageLicenseAssets>("stageLicenseAssets") {
     payload.set(licensePayload)

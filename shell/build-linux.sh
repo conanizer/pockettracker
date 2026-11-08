@@ -6,7 +6,7 @@
 #
 #     bash shell/build-linux.sh
 #
-# ⚠️ A package for other people comes out of shell/Dockerfile.linux (the release workflow does);
+# ⚠️ A package for other people comes out of shell/Dockerfile, `--target linux` (the release workflow does);
 # a host build runs only on distros at least as new as the host.
 #
 # The handheld package is shell/build-portmaster.sh: it links the device's patched SDL2, this one the
@@ -20,26 +20,14 @@ BUILD=$SRC/shell/build-release-linux
 OUT=$SRC/build/linux
 
 cd "$SRC"
+. "$SRC/shell/package-licenses.sh"
 
-# The APK's version, read from the one place that holds it.
-VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\(\.[0-9]*\)\{0,1\}\)".*/\1/p' app/build.gradle.kts | head -1)
-if [ -z "$VERSION" ]; then
-    echo "FAIL: could not read versionName from app/build.gradle.kts"
-    exit 1
-fi
-echo "version = $VERSION"
-
-STAGE=$OUT/stage/PocketTracker-$VERSION
 rm -rf "$OUT"
-mkdir -p "$STAGE"
 
 echo
 echo "############ 1/4  build ############"
-# Release stated: an empty build type is not Release. `tee`, so the output shows in full and the log
-# is still there for the version check below.
-CONFIGURE_LOG=$BUILD/configure.log
-mkdir -p "$BUILD"
-cmake -S shell -B "$BUILD" -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$CONFIGURE_LOG"
+# Release stated: an empty build type is not Release.
+cmake -S shell -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD" -j"$(nproc)"
 
 BIN=$BUILD/pockettracker-sdl
@@ -47,6 +35,16 @@ if [ ! -x "$BIN" ]; then
     echo "FAIL: $BIN was not produced"
     exit 1
 fi
+
+# The version this configure read (native/cmake/pt_version.cmake), so the name cannot differ from it.
+VERSION=$(cat "$BUILD/version.txt")
+if [ -z "$VERSION" ]; then
+    echo "FAIL: $BUILD/version.txt is empty — the configure did not write the version"
+    exit 1
+fi
+echo "version = $VERSION"
+STAGE=$OUT/stage/PocketTracker-$VERSION
+mkdir -p "$STAGE"
 
 echo
 echo "############ 2/4  check the ARTIFACT ############"
@@ -84,19 +82,6 @@ if ! ldd "$BIN" | grep -q 'libSDL2'; then
     exit 1
 fi
 
-# (c) CMake and this script read the same version: CMake's own parse announces it at configure.
-CMAKE_VERSION_LINE=$(grep -F 'PocketTracker' "$CONFIGURE_LOG" | grep -F 'from app/build.gradle.kts' | head -1)
-if [ -z "$CMAKE_VERSION_LINE" ]; then
-    echo "FAIL: shell/CMakeLists.txt did not announce a version — its parser or its message changed,"
-    echo "      and this check would otherwise pass by finding nothing."
-    exit 1
-fi
-echo "cmake said: $CMAKE_VERSION_LINE"
-if ! echo "$CMAKE_VERSION_LINE" | grep -qF "PocketTracker $VERSION "; then
-    echo "FAIL: cmake read a different version than this script did (script: $VERSION)"
-    exit 1
-fi
-
 echo
 echo "############ 3/4  stage ############"
 # One top-level folder, so the tarball does not scatter files into a home directory.
@@ -106,20 +91,8 @@ install -m 755 "$SRC/shell/linux/install-desktop.sh" "$STAGE/install-desktop.sh"
 cp "$SRC/docs/images/logo-app.png"                 "$STAGE/pockettracker.png"
 
 mkdir -p "$STAGE/licenses"
-cp "$SRC/LICENSE"                                  "$STAGE/licenses/LICENSE"
-cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"     "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
-cp "$SRC/CREDITS.md"                               "$STAGE/licenses/CREDITS.md"
-
-# libogg and libopus are BSD-3-Clause: their notices travel with the binary. Taken from the vendored
-# source that was compiled, as build-windows.ps1 and build-portmaster.sh do.
-cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/licenses/libogg-COPYING"
-cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/licenses/libopus-COPYING"
-cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/licenses/libopus-LICENSE_PLEASE_READ.txt"
-
-# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
-# UI font compiled into the binary is adapted from QuinqueFive.
-cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"       "$STAGE/licenses/OFL-1.1-LiberationSans.txt"
-cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"          "$STAGE/licenses/OFL-1.1-QuinqueFive.txt"
+copy_licences "$STAGE/licenses"
+check_notices "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
 
 cat > "$STAGE/README.txt" <<EOF
 PocketTracker $VERSION — Linux (x86-64)
@@ -163,10 +136,7 @@ tar tzf "$TARBALL"
 # included — an empty member extracts cleanly too.
 echo
 echo "read back out of the tarball:"
-for NEEDED in "PocketTracker" "README.txt" "install-desktop.sh" "pockettracker.png" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
-              "licenses/CREDITS.md" "licenses/OFL-1.1-LiberationSans.txt" "licenses/OFL-1.1-QuinqueFive.txt" \
-              "licenses/libogg-COPYING" "licenses/libopus-COPYING" \
-              "licenses/libopus-LICENSE_PLEASE_READ.txt"; do
+for NEEDED in PocketTracker README.txt install-desktop.sh pockettracker.png $(licence_names | sed 's:^:licenses/:'); do
     # ⚠️ `|| BYTES=0`: a missing member makes tar exit 2, and pipefail would end the script before the
     # FAIL line names it.
     BYTES=$(tar xzOf "$TARBALL" "PocketTracker-$VERSION/$NEEDED" 2>/dev/null | wc -c) || BYTES=0

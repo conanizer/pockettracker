@@ -9,8 +9,8 @@
 # It packages, it does not build: the compiler sits behind whatever Visual Studio the machine has. It
 # fails if the exe is missing or older than the sources.
 # ⚠️ Every check prints what it found, not just a verdict.
-# ⚠️ SDL2 is inside the exe: Windows has no system SDL, so it is fetched and linked statically, and
-# its notice ships in the zip.
+# ⚠️ SDL2 is inside the exe: Windows has no system SDL, so native/vendor/SDL2 is linked statically,
+# and its notice ships in the zip.
 
 $ErrorActionPreference = 'Stop'
 # Both: ZipFile/ZipFileExtensions are in the FileSystem assembly, ZipArchive/ZipArchiveMode in the other.
@@ -38,11 +38,13 @@ if (-not $exe) {
 Write-Output "exe: $exe"
 Write-Output ("     {0:N0} bytes, built {1}" -f (Get-Item $exe).Length, (Get-Item $exe).LastWriteTime)
 
-# ⚠️ A stale exe is a hard failure: it would ship. Sources only, so a README edit does not trip it.
-$newest = Get-ChildItem -Recurse -File `
-              (Join-Path $repo 'shell'), (Join-Path $repo 'native') `
-              -Include *.cpp, *.h, *.hpp, *.c, *.rc, *.rc.in, CMakeLists.txt |
-          Where-Object { $_.FullName -notlike "*\build\*" } |
+# ⚠️ A stale exe is a hard failure: it would ship. Sources only, so a README edit does not trip it —
+# and the Gradle file, which holds the version the exe is stamped with.
+$newest = @(Get-ChildItem -Recurse -File `
+                (Join-Path $repo 'shell'), (Join-Path $repo 'native') `
+                -Include *.cpp, *.h, *.hpp, *.c, *.rc, *.rc.in, CMakeLists.txt |
+            Where-Object { $_.FullName -notlike "*\build\*" }) +
+          (Get-Item (Join-Path $repo 'app\build.gradle.kts')) |
           Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($newest -and $newest.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
     Write-Output ""
@@ -52,13 +54,12 @@ if ($newest -and $newest.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
 }
 Write-Output "not stale: no source newer than the exe"
 
-# The version, from where shell/CMakeLists.txt reads it.
-$gradle = Get-Content (Join-Path $repo 'app\build.gradle.kts') -Raw
-if ($gradle -notmatch 'versionName[ \t]*=[ \t]*"([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)"') {
-    throw "could not find versionName in app/build.gradle.kts"
+# The version the exe is stamped with (native/cmake/pt_version.cmake), so the zip's name cannot differ.
+$version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$') {
+    throw "the exe's version resource reads '$version' - check shell/windows/pockettracker.rc.in"
 }
-$version = $Matches[1]
-Write-Output "version: $version (from app/build.gradle.kts)"
+Write-Output "version: $version (the exe's version resource)"
 
 # ─── 2/5  stage ─────────────────────────────────────────────────────────────────────────────────
 Write-Output ""
@@ -78,28 +79,18 @@ New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
 Copy-Item $exe (Join-Path $app 'PocketTracker.exe')
 Copy-Item (Join-Path $PSScriptRoot 'windows\README.txt') (Join-Path $app 'README.txt')
 
-# The statically linked components' notices ship with the binary that contains them.
+# The statically linked components' notices ship with the binary that contains them: the shared list
+# (shell/licenses.txt, as the other packages), then SDL's, since only this package links it in.
 $lic = Join-Path $app 'licenses'
-Copy-Item (Join-Path $repo 'LICENSE')                                    (Join-Path $lic 'LICENSE')
-Copy-Item (Join-Path $repo 'docs\licenses\THIRD-PARTY-NOTICES.md')       $lic
-Copy-Item (Join-Path $repo 'CREDITS.md')                                 (Join-Path $lic 'CREDITS.md')
-Copy-Item (Join-Path $repo 'native\vendor\ogg\COPYING')                  (Join-Path $lic 'libogg-COPYING')
-Copy-Item (Join-Path $repo 'native\vendor\opus\COPYING')                 (Join-Path $lic 'libopus-COPYING')
-Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-Path $lic 'libopus-LICENSE_PLEASE_READ.txt')
-
-# The OFL texts ship though no font file does: THIRD-PARTY-NOTICES.md cites them by path, and the 5×5
-# UI font compiled into the binary is adapted from QuinqueFive.
-Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-LiberationSans.txt')   (Join-Path $lic 'OFL-1.1-LiberationSans.txt')
-Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-QuinqueFive.txt')      (Join-Path $lic 'OFL-1.1-QuinqueFive.txt')
-
-# ⚠️ SDL's licence from the source that was compiled (FetchContent's tree), so it follows the pin.
-$sdlLicense = Join-Path $build '_deps\sdl2-src\LICENSE.txt'
-if (-not (Test-Path $sdlLicense)) {
-    throw ("SDL2's LICENSE.txt is not at $sdlLicense. This package links SDL2 STATICALLY into the " +
-           "exe, so shipping without its notice is a licence breach - not a missing nicety. If SDL " +
-           "came from somewhere other than FetchContent, copy that build's LICENSE.txt here.")
+$manifest = Get-Content (Join-Path $PSScriptRoot 'licenses.txt') |
+            ForEach-Object { , ($_.Trim() -split '\s+') } | Where-Object { $_.Count -ge 2 }
+$licenceNames = @()
+foreach ($f in $manifest | Where-Object { $_[0] -eq 'file' }) {
+    Copy-Item (Join-Path $repo $f[1]) (Join-Path $lic $f[2])
+    $licenceNames += $f[2]
 }
-Copy-Item $sdlLicense (Join-Path $lic 'SDL2-LICENSE.txt')
+Copy-Item (Join-Path $repo 'native\vendor\SDL2\LICENSE.txt') (Join-Path $lic 'SDL2-LICENSE.txt')
+$licenceNames += 'SDL2-LICENSE.txt'
 Get-ChildItem $lic | ForEach-Object { Write-Output ("  {0,10:N0}  {1}" -f $_.Length, $_.Name) }
 
 # ─── 3/5  verify the ARTIFACT, not the build log ────────────────────────────────────────────────
@@ -146,10 +137,6 @@ Write-Output "SDL2               : linked statically, no DLLs beside the exe"
 # --- the resources: what Explorer and the window will show --------------------------------------
 $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($staged)
 Write-Output ("version resource   : {0} {1}" -f $v.ProductName, $v.FileVersion)
-if ($v.FileVersion -ne $version) {
-    throw ("the exe says version $($v.FileVersion) but app/build.gradle.kts says $version - this " +
-           "exe was not built from this tree")
-}
 # ⚠️ This icon, not "an icon": Windows finds a default for any exe. The linker embeds each RT_ICON's
 # bytes verbatim, so a slice of the 128x128 frame must appear in the exe.
 $icoBytes = [System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'windows\PocketTracker.ico'))
@@ -169,14 +156,15 @@ if ($text -match 'KILDBG') {
 Write-Output "debug instr.       : none"
 
 # --- every statically linked component must have a notice ---------------------------------------
-# ⚠️ `native/vendor/` is the list; a hand-kept one would be forgotten by the same commit.
-# ⚠️ SDL2 is named by hand as well: this exe's SDL is FetchContent's, not native/vendor/SDL2 (the APK's).
+# ⚠️ `native/vendor/` is the list, plus licenses.txt's `notice` lines; package-licenses.sh is the
+# same check for the other packages.
 $notices  = Get-Content (Join-Path $lic 'THIRD-PARTY-NOTICES.md') -Raw
 $vendored = Get-ChildItem (Join-Path $repo 'native\vendor') -Directory | ForEach-Object { $_.Name }
+$outside  = $manifest | Where-Object { $_[0] -eq 'notice' } | ForEach-Object { $_[1] }
 $missing  = @()
 Write-Output ""
 Write-Output "licence notices:"
-foreach ($c in @($vendored + @('kissfft', 'daisysp', 'soundpipe', 'SDL2'))) {
+foreach ($c in @($vendored + $outside)) {
     if ($notices -match [regex]::Escape($c)) { Write-Output "  ok      $c" }
     else { Write-Output "  MISSING $c"; $missing += $c }
 }
@@ -215,17 +203,8 @@ try {
         Write-Output ("  {0,10:N0}  {1}" -f $e.Length, $e.FullName)
         if ($e.FullName -match '\\') { throw "entry '$($e.FullName)' has a backslash separator" }
     }
-    foreach ($needed in @('PocketTracker/PocketTracker.exe',
-                          'PocketTracker/README.txt',
-                          'PocketTracker/licenses/LICENSE',
-                          'PocketTracker/licenses/THIRD-PARTY-NOTICES.md',
-                          'PocketTracker/licenses/CREDITS.md',
-                          'PocketTracker/licenses/SDL2-LICENSE.txt',
-                          'PocketTracker/licenses/libogg-COPYING',
-                          'PocketTracker/licenses/libopus-COPYING',
-                          'PocketTracker/licenses/libopus-LICENSE_PLEASE_READ.txt',
-                          'PocketTracker/licenses/OFL-1.1-LiberationSans.txt',
-                          'PocketTracker/licenses/OFL-1.1-QuinqueFive.txt')) {
+    foreach ($needed in @('PocketTracker/PocketTracker.exe', 'PocketTracker/README.txt') +
+                        @($licenceNames | ForEach-Object { "PocketTracker/licenses/$_" })) {
         $e = $archive.GetEntry($needed)
         if (-not $e)            { throw "$needed is MISSING from the zip" }
         if ($e.Length -lt 100)  { throw "$needed is only $($e.Length) bytes inside the zip" }

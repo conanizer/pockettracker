@@ -48,10 +48,10 @@ made, and there is no second copy to desync.
 
 ## Build
 
-SDL2 is taken **from the system if it is there**, and fetched only if it isn't. On a handheld that
-is a requirement rather than a preference: the PortMaster CFWs (muOS, ROCKNIX, ArkOS, Knulli,
-AmberELEC…) ship their own `libSDL2`, and a port links the one the OS provides. The FetchContent
-fallback exists so a Windows dev box needs no setup at all.
+SDL2 is taken **from the system if it is there**, and built from `native/vendor/SDL2` (the APK's
+copy) only if it isn't. On a handheld that is a requirement rather than a preference: the PortMaster
+CFWs (muOS, ROCKNIX, ArkOS, Knulli, AmberELEC…) ship their own `libSDL2`, and a port links the one the
+OS provides. The vendored fallback is what a Windows box builds, offline and with no setup.
 
 ```sh
 cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
@@ -72,7 +72,8 @@ cmake -S shell -B shell\build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build shell\build
 ```
 
-Linux needs SDL2's dev package (`apt install libsdl2-dev`) to use the system one, or it will fetch.
+Linux needs SDL2's dev package (`apt install libsdl2-dev`) to use the system one; without it the
+vendored copy is built, with no Wayland backend (the vendored tree drops its protocol files).
 
 ### Cross-compiling for aarch64 (the PortMaster target)
 
@@ -87,7 +88,7 @@ cmake --build build/aarch64
 file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
 ```
 
-With no arm64 SDL2 on the host this FetchContent-builds SDL2 static, giving a self-contained binary
+With no arm64 SDL2 on the host this builds the vendored SDL2 static, giving a self-contained binary
 proven to boot, decode media, run the frame loop and exit on SIGTERM under `qemu-aarch64` emulation —
 a build/CI validation, **not a device artifact**. For one of those, use the packaging build below; it
 is the same toolchain file with the two things the header warns about actually done.
@@ -95,7 +96,7 @@ is the same toolchain file with the two things the header warns about actually d
 ### The PortMaster package
 
 ```sh
-docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+docker build --target portmaster -t pockettracker-build -f shell/Dockerfile shell/
 docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 # -> build/portmaster/pockettracker.zip
 ```
@@ -157,9 +158,7 @@ Three decisions worth knowing:
 - **SDL2 is linked statically, INTO the exe** — the exact opposite of the PortMaster package, and
   correct for the same reason: a handheld has a CFW-patched `libSDL2` that knows its display, and a
   Windows box has no system SDL2 at all. ⚠️ That makes this zip a *binary distribution of SDL2*, so
-  it ships SDL's licence — copied out of the source tree that was actually compiled. The
-  `native/vendor/*/`-derived notice guard **cannot see SDL2** (it is fetched, never vendored), which
-  is why `build-windows.ps1` checks for it by name.
+  it ships SDL's licence — copied out of `native/vendor/SDL2`, the source tree that was compiled.
 - **The MSVC runtime is linked in too** (`CMAKE_MSVC_RUNTIME_LIBRARY`). Without it the exe imports
   `VCRUNTIME140.dll` / `MSVCP140.dll`, which every machine that can *build* this has and a stranger's
   machine does not — a failure invisible on any box you would test it on. The package script asserts
