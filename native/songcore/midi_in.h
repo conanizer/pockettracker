@@ -23,6 +23,7 @@
 #include "note_command.h"
 #include "router.h"
 #include "seqlock.h"
+#include "spsc_ring.h"
 
 namespace songcore {
 
@@ -59,12 +60,11 @@ struct IMidiIn {
 };
 
 // A byte ring between the backend's thread and the drain — bytes, since a backend read can split a
-// message. ⚠️ One producer, one consumer (the audio thread), no lock; each side owns one index.
-// Overflow is counted, never silent.
+// message. ⚠️ One producer, one consumer (the audio thread).
 class MidiInQueue : public IMidiInSink {
   public:
     // ~341 three-byte messages, drained every few ms; a flat-out cable sends ~1 040 a second.
-    static constexpr int CAPACITY = 1024;   // a power of two: the slot is `index & MASK`
+    static constexpr int CAPACITY = 1024;
     static constexpr int64_t NO_STAMP = INT64_MIN;   // a sink that keeps no time
 
     void on_bytes(const uint8_t* data, int len) override { on_bytes_at(data, len, NO_STAMP); }
@@ -72,64 +72,38 @@ class MidiInQueue : public IMidiInSink {
     // When full, drops the NEWEST bytes — dropping the oldest would orphan note-offs still coming.
     void on_bytes_at(const uint8_t* data, int len, int64_t arrivalUs) override {
         if (!data || len <= 0) return;
-        const uint32_t head = head_.load(std::memory_order_acquire);
-        uint32_t       tail = tail_.load(std::memory_order_relaxed);
-        for (int i = 0; i < len; ++i) {
-            if (tail - head >= static_cast<uint32_t>(CAPACITY)) {
-                dropped_.fetch_add(static_cast<uint64_t>(len - i), std::memory_order_relaxed);
-                break;
-            }
-            buf_[tail & MASK]   = data[i];
-            stamp_[tail & MASK] = arrivalUs;
-            ++tail;
-        }
-        tail_.store(tail, std::memory_order_release);
+        ring_.push_each(len, [&](int i) { return Byte{data[i], arrivalUs}; });
     }
 
     // Move up to `max` bytes into `out`, and their arrival stamps into `stamps` (nullable); returns
     // how many.
     int drain(uint8_t* out, int max, int64_t* stamps = nullptr) {
         if (!out || max <= 0) return 0;
-        const uint32_t tail = tail_.load(std::memory_order_acquire);
-        uint32_t       head = head_.load(std::memory_order_relaxed);
-        int n = 0;
-        while (head != tail && n < max) {
-            if (stamps) stamps[n] = stamp_[head & MASK];
-            out[n++] = buf_[head & MASK];
-            ++head;
-        }
-        head_.store(head, std::memory_order_release);
-        return n;
+        return ring_.pop_each(max, [&](int i, const Byte& b) {
+            out[i] = b.value;
+            if (stamps) stamps[i] = b.stamp;
+        });
     }
 
     // Bytes lost to a full ring, ever.
-    uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
-
-    int pending() const {
-        return static_cast<int>(tail_.load(std::memory_order_acquire) - head_.load(std::memory_order_acquire));
-    }
+    uint64_t dropped() const { return ring_.dropped(); }
+    int pending() const { return ring_.pending(); }
 
     // ⚠️ The consumer's call — it moves the consumer's index.
-    void clear() { head_.store(tail_.load(std::memory_order_acquire), std::memory_order_release); }
+    void clear() { ring_.clear(); }
 
     // A mark for `discard_up_to`. Any thread.
-    uint32_t written() const { return tail_.load(std::memory_order_acquire); }
+    uint32_t written() const { return ring_.written(); }
 
     // The consumer's: drop everything written before `mark`.
-    void discard_up_to(uint32_t mark) {
-        const uint32_t head = head_.load(std::memory_order_relaxed);
-        if (static_cast<int32_t>(mark - head) > 0) head_.store(mark, std::memory_order_release);
-    }
+    void discard_up_to(uint32_t mark) { ring_.discard_up_to(mark); }
 
   private:
-    static constexpr uint32_t MASK = CAPACITY - 1;
-    static_assert((CAPACITY & MASK) == 0, "the ring's capacity must be a power of two");
-
-    uint8_t               buf_[CAPACITY] = {0};
-    int64_t               stamp_[CAPACITY] = {0};
-    std::atomic<uint32_t> head_{0};      // consumer's
-    std::atomic<uint32_t> tail_{0};      // producer's
-    std::atomic<uint64_t> dropped_{0};
+    struct Byte {
+        uint8_t value = 0;
+        int64_t stamp = 0;
+    };
+    SpscRing<Byte, CAPACITY> ring_;
 };
 
 // How many bytes a message with this status byte occupies — 1, 2 or 3.
@@ -725,7 +699,7 @@ class MidiInPipeline {
         virtual void wheel(int64_t /*frame*/, uint8_t /*track*/, float /*semitones*/) {}
     };
 
-    static constexpr int SEEN_CAPACITY = 128;   // messages between two UI polls; a power of two
+    static constexpr int SEEN_CAPACITY = 128;   // messages between two UI polls
 
     // The backend's thread.
     MidiInQueue& sink() { return queue_; }
@@ -742,14 +716,7 @@ class MidiInPipeline {
     void request_release_keys() { requests_.fetch_or(REQ_RELEASE, std::memory_order_release); }
 
     // The next handled message, oldest first.
-    bool pop_seen(MidiInSeen& out) {
-        const uint32_t tail = seenTail_.load(std::memory_order_acquire);
-        const uint32_t head = seenHead_.load(std::memory_order_relaxed);
-        if (head == tail) return false;
-        out = seen_[head & (SEEN_CAPACITY - 1)];
-        seenHead_.store(head + 1, std::memory_order_release);
-        return true;
-    }
+    bool pop_seen(MidiInSeen& out) { return seen_->pop(out); }
 
 
     // ── the consumer ──
@@ -848,7 +815,7 @@ class MidiInPipeline {
     uint64_t injected() const { return injected_.load(std::memory_order_relaxed); }
     uint64_t discarded() const { return discarded_.load(std::memory_order_relaxed); }
     // Handled messages the UI ring had no room for (thru missed them; the sound did not).
-    uint64_t seen_dropped() const { return seenDropped_.load(std::memory_order_relaxed); }
+    uint64_t seen_dropped() const { return seen_->dropped(); }
 
     const MidiInputRouter& router() const { return router_; }
     const MidiParser&      parser() const { return parser_; }
@@ -860,16 +827,7 @@ class MidiInPipeline {
   private:
     static constexpr uint32_t REQ_RESET = 1, REQ_RELEASE = 2;
 
-    void push_seen(const MidiInSeen& s) {
-        const uint32_t head = seenHead_.load(std::memory_order_acquire);
-        const uint32_t tail = seenTail_.load(std::memory_order_relaxed);
-        if (tail - head >= static_cast<uint32_t>(SEEN_CAPACITY)) {
-            seenDropped_.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
-        seen_[tail & (SEEN_CAPACITY - 1)] = s;
-        seenTail_.store(tail + 1, std::memory_order_release);
-    }
+    void push_seen(const MidiInSeen& s) { seen_->push(s); }
 
     MidiInQueue        queue_;
     MidiParser         parser_;
@@ -884,12 +842,11 @@ class MidiInPipeline {
     std::atomic<uint32_t> requests_{0};
     std::atomic<uint32_t> resetMark_{0};
 
-    // ⚠️ On the heap: inline, the ring is ~165 KB and the host lives on the stack (Windows gives 1 MB).
-    std::unique_ptr<MidiInSeen[]> seen_{new MidiInSeen[SEEN_CAPACITY]};
-    std::atomic<uint32_t> seenHead_{0};   // the UI's
-    std::atomic<uint32_t> seenTail_{0};   // the drain's
+    // The drain → the UI. ⚠️ On the heap: inline, the ring is ~165 KB and the host lives on the stack
+    // (Windows gives 1 MB).
+    std::unique_ptr<SpscRing<MidiInSeen, SEEN_CAPACITY>> seen_{new SpscRing<MidiInSeen, SEEN_CAPACITY>};
 
-    std::atomic<uint64_t> bytes_{0}, messages_{0}, injected_{0}, discarded_{0}, seenDropped_{0};
+    std::atomic<uint64_t> bytes_{0}, messages_{0}, injected_{0}, discarded_{0};
 };
 
 }  // namespace songcore

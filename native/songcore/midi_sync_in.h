@@ -13,6 +13,7 @@
 
 #include "midi_clock.h"
 #include "seqlock.h"
+#include "spsc_ring.h"
 
 namespace songcore {
 
@@ -50,7 +51,7 @@ struct MidiTransportEvent {
 
 class MidiSyncIn {
   public:
-    static constexpr int EVENT_CAPACITY = 16;   // a power of two
+    static constexpr int EVENT_CAPACITY = 16;
     // A gap of more periods than this is a clock that stopped: the next tick starts a new fit.
     static constexpr int STOPPED_TICKS = 8;
     // The same before a run has a period of its own: 8 ticks at 20 BPM, up to 96 kHz.
@@ -92,18 +93,11 @@ class MidiSyncIn {
     // True when `out` now holds a newer line than `seen`.
     bool read_line(MidiClockLine& out, uint32_t& seen) const { return line_.read(out, seen); }
 
-    bool pop_event(MidiTransportEvent& out) {
-        const uint32_t tail = evTail_.load(std::memory_order_acquire);
-        const uint32_t head = evHead_.load(std::memory_order_relaxed);
-        if (head == tail) return false;
-        out = events_[head & (EVENT_CAPACITY - 1)];
-        evHead_.store(head + 1, std::memory_order_release);
-        return true;
-    }
+    bool pop_event(MidiTransportEvent& out) { return events_.pop(out); }
 
     // Ticks heard, ever, and events the UI ring had no room for.
     uint64_t clocks() const { return clocks_.load(std::memory_order_relaxed); }
-    uint64_t events_dropped() const { return eventsDropped_.load(std::memory_order_relaxed); }
+    uint64_t events_dropped() const { return events_.dropped(); }
 
   private:
     void arm(int position) {
@@ -235,16 +229,7 @@ class MidiSyncIn {
         line_.publish(l);
     }
 
-    void push(const MidiTransportEvent& ev) {
-        const uint32_t head = evHead_.load(std::memory_order_acquire);
-        const uint32_t tail = evTail_.load(std::memory_order_relaxed);
-        if (tail - head >= static_cast<uint32_t>(EVENT_CAPACITY)) {
-            eventsDropped_.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
-        events_[tail & (EVENT_CAPACITY - 1)] = ev;
-        evTail_.store(tail + 1, std::memory_order_release);
-    }
+    void push(const MidiTransportEvent& ev) { events_.push(ev); }
 
     // The clock — the drain's.
     bool    have_      = false;
@@ -273,10 +258,8 @@ class MidiSyncIn {
 
     SeqPublisher<MidiClockLine> line_;
 
-    MidiTransportEvent    events_[EVENT_CAPACITY];
-    std::atomic<uint32_t> evHead_{0};   // the UI's
-    std::atomic<uint32_t> evTail_{0};   // the drain's
-    std::atomic<uint64_t> clocks_{0}, eventsDropped_{0};
+    SpscRing<MidiTransportEvent, EVENT_CAPACITY> events_;   // the drain → the UI
+    std::atomic<uint64_t> clocks_{0};
 };
 
 }  // namespace songcore
