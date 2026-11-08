@@ -76,7 +76,10 @@ native/                            The portable program
 ├── audio-decoders.cpp / .h        WAV, MP3, FLAC, OGG, Opus, M4A decoding
 ├── sampler-voice.h                Per-voice state for sample playback
 ├── soundfont-voice.cpp / .h       Per-voice state for SF2/SF3 (TinySoundFont — see the note below)
-├── note-queue.h                   Sample-accurate note + parameter scheduling queues
+├── note-queue.h                   Sample-accurate note, kill and parameter queues
+├── instrument-params.h            An instrument's engine copy: sample window, filter, EQ, mod slots
+├── table-store.h                  The 256 tables the audio thread reads without waiting
+├── soundfont-slots.h              The loaded SoundFont presets and their LRU clock
 ├── sample-editor.cpp              Destructive waveform operations
 ├── transient-detector.cpp         Slice-point detection
 ├── oboe-audio-engine.cpp / .h     Android audio backend (the only Oboe-coupled TU)

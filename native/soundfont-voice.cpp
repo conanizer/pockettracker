@@ -17,7 +17,7 @@ extern "C" {
 // ⚠️ A realloc costs `old + new`, not `new`. Free memory reading 0 means unknown and never refuses.
 #include "common/platform_memory.h"
 #include "common/load_progress.h"
-#include "note-queue.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
+#include "soundfont-slots.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
 
 #include <cstdlib>
 #include <mutex>

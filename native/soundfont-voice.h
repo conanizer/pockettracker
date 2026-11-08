@@ -3,8 +3,9 @@
 #include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
 #include "table-lanes.h"
+#include "soundfont-slots.h"
 
-// tsf is defined in soundfont-voice.cpp; note-queue.h declares soundfonts[].
+// tsf is defined in soundfont-voice.cpp; soundfont-slots.h declares soundfonts[].
 
 // A track's SoundFont state. One tsf handle per slot, shared: track N plays on MIDI channel N, the
 // preview lane on channel 8. Audio thread only (or a render with the device paused), no lock.

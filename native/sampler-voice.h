@@ -6,6 +6,7 @@
 #include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
 #include "table-lanes.h"
+#include "instrument-params.h"
 
 // START and END are two free 0-255 cells, so an inverted pair is typeable. It means "from START to
 // the end of the sample". ⚠️ Derived in ONE place: the window is computed at note-on and again every
@@ -176,7 +177,7 @@ struct Voice : public IAudioVoice {
     // required argument of trigger() because forgetting it is silent in every other mode.
     float baseFrequency = 0.0f;
     bool reverse = false;
-    int loopMode = 0;                  // 0=off, 1=forward, 2=ping-pong, 3=oscillator (note-queue.h)
+    int loopMode = 0;                  // 0=off, 1=forward, 2=ping-pong, 3=oscillator (instrument-params.h)
     bool loopingBack = false;          // ping-pong: on the way down
     // An ADSR release began on a looping voice: the loop is abandoned and the tail plays out.
     bool loopReleasing = false;

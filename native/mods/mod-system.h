@@ -2,7 +2,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
-#include "note-queue.h"
+#include "audio-defs.h"
 #include "effects/glide.h"
 
 // A voice's parameters: each slot is a base (set at trigger or by an effect) plus a mod accumulator

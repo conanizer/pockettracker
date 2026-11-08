@@ -19,6 +19,9 @@
 #include "sampler-voice.h"
 #include "soundfont-voice.h"
 #include "soundfont-trim.h"
+#include "note-queue.h"
+#include "instrument-params.h"
+#include "table-store.h"
 #include "effects/send-chain.h"
 #include "effects/master-chain.h"
 
