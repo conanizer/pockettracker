@@ -98,7 +98,7 @@ void SongcoreHost::stop() {
     // The delay time a TIM took over — two sources again; read the engine's latch unconditionally.
     const bool table_tim = engine_ && engine_->takeTableDelayTimeTouched();
     if (engine_ && (seq_.delay_time_active() || table_tim) && seq_.has_live_project()) {
-        engine_->setDelayTime(project_.delayTime, project_.delaySync,
+        engine_->setDelayTime(project_.delay.time, project_.delay.sync,
                               static_cast<float>(tempo_in_force(project_)));
     }
     sync_clock();
@@ -867,8 +867,8 @@ void SongcoreHost::set_clock_tempo(int bpm) {
     if (now == before || !engine_) return;
     engine_->setTempo(now);
     // A synced delay counts note lengths, so it moves with the tempo — unless a TIM holds it.
-    if (project_.delaySync && !held_by_song().delayTime)
-        engine_->setDelayTime(project_.delayTime, true, static_cast<float>(now));
+    if (project_.delay.sync && !held_by_song().delayTime)
+        engine_->setDelayTime(project_.delay.time, true, static_cast<float>(now));
 }
 
 void SongcoreHost::resync_soundfont_slots() {

@@ -51,7 +51,7 @@ enum class MapDestId : uint8_t {
     TRACK_VOL  = 1,
     MASTER_VOL = 2,
 
-    REV_DCAY = 3,   // the tail's length — `reverbFeedback`
+    REV_DCAY = 3,   // the tail's length — `reverb.decay`
     REV_DAMP = 4,
     REV_WET  = 5,
     REV_SIZE = 6,
@@ -226,20 +226,20 @@ inline bool write_mapped(Project& p, const MidiMapping& m, int value) {
         case MapDestId::TRACK_VOL:  p.tracks[at].volume = v;   return true;
         case MapDestId::MASTER_VOL: p.masterVolume = v;        return true;
 
-        case MapDestId::REV_DCAY:   p.reverbFeedback = v;      return true;
-        case MapDestId::REV_DAMP:   p.reverbDamp = v;          return true;
+        case MapDestId::REV_DCAY:   p.reverb.decay = v;      return true;
+        case MapDestId::REV_DAMP:   p.reverb.damp = v;          return true;
         case MapDestId::REV_WET:    p.reverbWet = v;           return true;
-        case MapDestId::REV_SIZE:   p.reverbSize = v;          return true;
-        case MapDestId::REV_PRE:    p.reverbPreDelay = v;      return true;
-        case MapDestId::REV_WIDE:   p.reverbWidth = v;         return true;
-        case MapDestId::REV_MOD:    p.reverbMod = v;           return true;
+        case MapDestId::REV_SIZE:   p.reverb.size = v;          return true;
+        case MapDestId::REV_PRE:    p.reverb.pre = v;      return true;
+        case MapDestId::REV_WIDE:   p.reverb.width = v;         return true;
+        case MapDestId::REV_MOD:    p.reverb.mod = v;           return true;
 
-        case MapDestId::DLY_TIME:   p.delayTime = v;           return true;
-        case MapDestId::DLY_FDBK:   p.delayFeedback = v;       return true;
+        case MapDestId::DLY_TIME:   p.delay.time = v;           return true;
+        case MapDestId::DLY_FDBK:   p.delay.feedback = v;       return true;
         case MapDestId::DLY_WET:    p.delayWet = v;            return true;
-        case MapDestId::DLY_TONE:   p.delayTone = v;           return true;
-        case MapDestId::DLY_WOBL:   p.delayWobble = v;         return true;
-        case MapDestId::DLY_SEND:   p.delayReverbSend = v;     return true;
+        case MapDestId::DLY_TONE:   p.delay.tone = v;           return true;
+        case MapDestId::DLY_WOBL:   p.delay.wobble = v;         return true;
+        case MapDestId::DLY_SEND:   p.delay.reverbSend = v;     return true;
 
         case MapDestId::OTT_DEPTH:  p.ottDepth = v;            return true;
         case MapDestId::DUST_DEPTH: p.dustDepth = v;           return true;
@@ -272,20 +272,20 @@ inline int read_mapped(const Project& p, const MidiMapping& m) {
         case MapDestId::TRACK_VOL:  return p.tracks[at].volume;
         case MapDestId::MASTER_VOL: return p.masterVolume;
 
-        case MapDestId::REV_DCAY:   return p.reverbFeedback;
-        case MapDestId::REV_DAMP:   return p.reverbDamp;
+        case MapDestId::REV_DCAY:   return p.reverb.decay;
+        case MapDestId::REV_DAMP:   return p.reverb.damp;
         case MapDestId::REV_WET:    return p.reverbWet;
-        case MapDestId::REV_SIZE:   return p.reverbSize;
-        case MapDestId::REV_PRE:    return p.reverbPreDelay;
-        case MapDestId::REV_WIDE:   return p.reverbWidth;
-        case MapDestId::REV_MOD:    return p.reverbMod;
+        case MapDestId::REV_SIZE:   return p.reverb.size;
+        case MapDestId::REV_PRE:    return p.reverb.pre;
+        case MapDestId::REV_WIDE:   return p.reverb.width;
+        case MapDestId::REV_MOD:    return p.reverb.mod;
 
-        case MapDestId::DLY_TIME:   return p.delayTime;
-        case MapDestId::DLY_FDBK:   return p.delayFeedback;
+        case MapDestId::DLY_TIME:   return p.delay.time;
+        case MapDestId::DLY_FDBK:   return p.delay.feedback;
         case MapDestId::DLY_WET:    return p.delayWet;
-        case MapDestId::DLY_TONE:   return p.delayTone;
-        case MapDestId::DLY_WOBL:   return p.delayWobble;
-        case MapDestId::DLY_SEND:   return p.delayReverbSend;
+        case MapDestId::DLY_TONE:   return p.delay.tone;
+        case MapDestId::DLY_WOBL:   return p.delay.wobble;
+        case MapDestId::DLY_SEND:   return p.delay.reverbSend;
 
         case MapDestId::OTT_DEPTH:  return p.ottDepth;
         case MapDestId::DUST_DEPTH: return p.dustDepth;

@@ -26,10 +26,7 @@ inline int reverb_bank_index_by_name(const std::string& name) {
 }
 
 // The built-in the project's cells equal, or −1.
-inline int reverb_bank_match(const songcore::Project& p) {
-    return reverb_preset_match(p.reverbAlgo, p.reverbFeedback, p.reverbSize, p.reverbDamp,
-                               p.reverbPreDelay, p.reverbWidth, p.reverbMod);
-}
+inline int reverb_bank_match(const songcore::Project& p) { return reverb_preset_match(p.reverb); }
 
 // The stored name, else the built-in the cells match, else empty.
 inline std::string reverb_preset_display_name(const songcore::Project& p) {
@@ -59,10 +56,7 @@ inline int delay_bank_index_by_name(const std::string& name) {
     return -1;
 }
 
-inline int delay_bank_match(const songcore::Project& p) {
-    return delay_preset_match(p.delayPong, p.delaySync, p.delayTime, p.delayFeedback, p.delayTone,
-                              p.delayWobble, p.delayReverbSend);
-}
+inline int delay_bank_match(const songcore::Project& p) { return delay_preset_match(p.delay); }
 
 inline std::string delay_preset_display_name(const songcore::Project& p) {
     if (!p.delayPreset.empty()) return p.delayPreset;

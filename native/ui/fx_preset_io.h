@@ -22,54 +22,35 @@ inline constexpr const char* DELAY_FILE_EXT  = "ptd";
 // What fits on the preset row before SAVE, `*` included.
 inline constexpr int FX_PRESET_NAME_MAX = 14;
 
-struct ReverbCells {
-    std::string name;
-    int algo = 0, size = 0x60, decay = 0x60, damp = 0x80, pre = 0x00, width = 0x80, mod = 0x10;
+// A preset row's whole state: its name and the send's cells.
+struct NamedReverb {
+    std::string           name;
+    songcore::ReverbCells cells;
 };
 
-// `time` is a note division (0..B) when `sync`, else 00..FF.
-struct DelayCells {
-    std::string name;
-    bool pong = false, sync = false;
-    int  time = 0x40, feedback = 0x60, tone = 0xFF, wobble = 0x00, reverbSend = 0x00;
+struct NamedDelay {
+    std::string          name;
+    songcore::DelayCells cells;
 };
 
-inline ReverbCells reverb_cells_of(const songcore::Project& p) {
-    return {p.reverbPreset, p.reverbAlgo, p.reverbSize, p.reverbFeedback, p.reverbDamp,
-            p.reverbPreDelay, p.reverbWidth, p.reverbMod};
+inline NamedReverb reverb_cells_of(const songcore::Project& p) { return {p.reverbPreset, p.reverb}; }
+inline NamedDelay  delay_cells_of(const songcore::Project& p) { return {p.delayPreset, p.delay}; }
+
+inline void apply_reverb_cells(songcore::Project& p, const NamedReverb& r) {
+    p.reverbPreset = r.name;
+    p.reverb       = r.cells;
 }
 
-inline void apply_reverb_cells(songcore::Project& p, const ReverbCells& c) {
-    p.reverbPreset   = c.name;
-    p.reverbAlgo     = c.algo;
-    p.reverbSize     = c.size;
-    p.reverbFeedback = c.decay;
-    p.reverbDamp     = c.damp;
-    p.reverbPreDelay = c.pre;
-    p.reverbWidth    = c.width;
-    p.reverbMod      = c.mod;
+inline void apply_delay_cells(songcore::Project& p, const NamedDelay& d) {
+    p.delayPreset = d.name;
+    p.delay       = d.cells;
 }
 
-inline DelayCells delay_cells_of(const songcore::Project& p) {
-    return {p.delayPreset, p.delayPong, p.delaySync, p.delayTime, p.delayFeedback, p.delayTone,
-            p.delayWobble, p.delayReverbSend};
-}
-
-inline void apply_delay_cells(songcore::Project& p, const DelayCells& c) {
-    p.delayPreset     = c.name;
-    p.delayPong       = c.pong;
-    p.delaySync       = c.sync;
-    p.delayTime       = c.time;
-    p.delayFeedback   = c.feedback;
-    p.delayTone       = c.tone;
-    p.delayWobble     = c.wobble;
-    p.delayReverbSend = c.reverbSend;
-}
-
-inline std::string serialize_reverb_cells(const ReverbCells& c) {
+inline std::string serialize_reverb_cells(const NamedReverb& r) {
+    const songcore::ReverbCells& c = r.cells;
     songcore::JsonWriter w{songcore::JsonLayout::Pretty};
     w.begin_object();
-    if (!c.name.empty()) w.field_string("name", c.name);
+    if (!r.name.empty()) w.field_string("name", r.name);
     w.field_int("algo", c.algo);
     w.field_int("size", c.size);
     w.field_int("decay", c.decay);
@@ -81,10 +62,11 @@ inline std::string serialize_reverb_cells(const ReverbCells& c) {
     return std::move(w.out);
 }
 
-inline std::string serialize_delay_cells(const DelayCells& c) {
+inline std::string serialize_delay_cells(const NamedDelay& d) {
+    const songcore::DelayCells& c = d.cells;
     songcore::JsonWriter w{songcore::JsonLayout::Pretty};
     w.begin_object();
-    if (!c.name.empty()) w.field_string("name", c.name);
+    if (!d.name.empty()) w.field_string("name", d.name);
     w.field_bool("pong", c.pong);
     w.field_bool("sync", c.sync);
     w.field_int("time", c.time);
@@ -107,36 +89,38 @@ inline int fx_cell(const nlohmann::json& j, const char* key, int current, int ma
 // `out` keeps any cell the file does not name; a missing name falls back to the file's own, never the
 // row's. False only when it is not a JSON object.
 inline bool parse_reverb_cells(const std::string& text, const std::string& fallback_name,
-                               ReverbCells& out) {
+                               NamedReverb& out) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
+    songcore::ReverbCells& c = out.cells;
     out.name = songcore::detail::get_str(j, "name", fallback_name);
     // An unknown algorithm keeps the current one; clamping would pick an unrelated reverb.
-    const int algo = songcore::detail::get_int(j, "algo", out.algo);
-    if (algo >= 0 && algo < kReverbAlgoCount) out.algo = algo;
-    out.size  = detail::fx_cell(j, "size", out.size);
-    out.decay = detail::fx_cell(j, "decay", out.decay);
-    out.damp  = detail::fx_cell(j, "damp", out.damp);
-    out.pre   = detail::fx_cell(j, "pre", out.pre);
-    out.width = detail::fx_cell(j, "width", out.width);
-    out.mod   = detail::fx_cell(j, "mod", out.mod);
+    const int algo = songcore::detail::get_int(j, "algo", c.algo);
+    if (algo >= 0 && algo < kReverbAlgoCount) c.algo = algo;
+    c.size  = detail::fx_cell(j, "size", c.size);
+    c.decay = detail::fx_cell(j, "decay", c.decay);
+    c.damp  = detail::fx_cell(j, "damp", c.damp);
+    c.pre   = detail::fx_cell(j, "pre", c.pre);
+    c.width = detail::fx_cell(j, "width", c.width);
+    c.mod   = detail::fx_cell(j, "mod", c.mod);
     return true;
 }
 
 inline bool parse_delay_cells(const std::string& text, const std::string& fallback_name,
-                              DelayCells& out) {
+                              NamedDelay& out) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
-    out.name = songcore::detail::get_str(j, "name", fallback_name);
-    out.pong = songcore::detail::get_bool(j, "pong", out.pong);
-    out.sync = songcore::detail::get_bool(j, "sync", out.sync);
-    out.time       = detail::fx_cell(j, "time", out.time, out.sync ? 11 : 255);
-    out.feedback   = detail::fx_cell(j, "feedback", out.feedback);
-    out.tone       = detail::fx_cell(j, "tone", out.tone);
-    out.wobble     = detail::fx_cell(j, "wobble", out.wobble);
-    out.reverbSend = detail::fx_cell(j, "reverbSend", out.reverbSend);
+    songcore::DelayCells& c = out.cells;
+    out.name     = songcore::detail::get_str(j, "name", fallback_name);
+    c.pong       = songcore::detail::get_bool(j, "pong", c.pong);
+    c.sync       = songcore::detail::get_bool(j, "sync", c.sync);
+    c.time       = detail::fx_cell(j, "time", c.time, c.sync ? 11 : 255);
+    c.feedback   = detail::fx_cell(j, "feedback", c.feedback);
+    c.tone       = detail::fx_cell(j, "tone", c.tone);
+    c.wobble     = detail::fx_cell(j, "wobble", c.wobble);
+    c.reverbSend = detail::fx_cell(j, "reverbSend", c.reverbSend);
     return true;
 }
 
@@ -149,21 +133,21 @@ inline std::string fx_preset_file_stem(const std::string& path) {
     return stem.substr(0, static_cast<size_t>(FX_PRESET_NAME_MAX));
 }
 
-inline bool save_reverb_file(FileSystem& fs, const std::string& path, const ReverbCells& cells) {
+inline bool save_reverb_file(FileSystem& fs, const std::string& path, const NamedReverb& cells) {
     return fs.write_file(path, serialize_reverb_cells(cells));
 }
 
-inline bool load_reverb_file(FileSystem& fs, const std::string& path, ReverbCells& out) {
+inline bool load_reverb_file(FileSystem& fs, const std::string& path, NamedReverb& out) {
     std::string text;
     if (!fs.read_file(path, text)) return false;
     return parse_reverb_cells(text, fx_preset_file_stem(path), out);
 }
 
-inline bool save_delay_file(FileSystem& fs, const std::string& path, const DelayCells& cells) {
+inline bool save_delay_file(FileSystem& fs, const std::string& path, const NamedDelay& cells) {
     return fs.write_file(path, serialize_delay_cells(cells));
 }
 
-inline bool load_delay_file(FileSystem& fs, const std::string& path, DelayCells& out) {
+inline bool load_delay_file(FileSystem& fs, const std::string& path, NamedDelay& out) {
     std::string text;
     if (!fs.read_file(path, text)) return false;
     return parse_delay_cells(text, fx_preset_file_stem(path), out);

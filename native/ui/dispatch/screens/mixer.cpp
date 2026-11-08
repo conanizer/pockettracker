@@ -73,8 +73,8 @@ bool InputDispatcher::effects_release_action(int row, bool peek) {
     if (row == EffectModule::ROW_DLY_TIME) {
         if (!peek) {
             songcore::Project& e = host_.edit_project();
-            e.delaySync = !e.delaySync;
-            if (e.delaySync) e.delayTime = std::min(std::max(e.delayTime, 0), 11);
+            e.delay.sync = !e.delay.sync;
+            if (e.delay.sync) e.delay.time = std::min(std::max(e.delay.time, 0), 11);
             mark_modified();
         }
         return true;

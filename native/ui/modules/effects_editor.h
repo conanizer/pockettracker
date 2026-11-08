@@ -2,7 +2,7 @@
 
 // EFFECTS: the master FX type, the reverb and delay, and their input EQ slots (MIXER owns the send
 // levels). A form: the cursor walks editable cells and `effects_row_layout.h` places them among the
-// headers. TIME reads as a byte or a note division per `delaySync`. Each send opens with a preset line
+// headers. TIME reads as a byte or a note division per `delay.sync`. Each send opens with a preset line
 // (name, SAVE, LOAD), laid out like SCALE's name row.
 
 #include <string>

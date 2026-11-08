@@ -21,29 +21,40 @@ constexpr int PRESET_SAVE_X = LABEL_X[1];
 constexpr int PRESET_LOAD_X = LABEL_X[1] + VALUE_GAP;
 
 
-// The plain 00..FF cells: the field each edits and its A+B value.
+// The plain 00..FF cells: the field each edits (one of the two sends') and its A+B value.
 struct ByteCell {
-    int                    row;
-    int songcore::Project::*field;
-    int                    def;
+    int                          row;
+    int songcore::ReverbCells::* reverb;
+    int songcore::DelayCells::*  delay;
 };
 constexpr ByteCell BYTE_CELLS[] = {
-    {EffectModule::ROW_REV_DECAY,  &songcore::Project::reverbFeedback,  0x60},
-    {EffectModule::ROW_REV_SIZE,   &songcore::Project::reverbSize,      0x60},
-    {EffectModule::ROW_REV_DAMP,   &songcore::Project::reverbDamp,      0x80},
-    {EffectModule::ROW_REV_PRE,    &songcore::Project::reverbPreDelay,  0x00},
-    {EffectModule::ROW_REV_WIDE,   &songcore::Project::reverbWidth,     0x80},
-    {EffectModule::ROW_REV_MOD,    &songcore::Project::reverbMod,       0x10},
-    {EffectModule::ROW_DLY_TONE,   &songcore::Project::delayTone,       0xFF},
-    {EffectModule::ROW_DLY_WOBBLE, &songcore::Project::delayWobble,     0x00},
-    {EffectModule::ROW_DLY_FDBK,   &songcore::Project::delayFeedback,   0x60},
-    {EffectModule::ROW_DLY_REV,    &songcore::Project::delayReverbSend, 0x00},
+    {EffectModule::ROW_REV_DECAY,  &songcore::ReverbCells::decay, nullptr},
+    {EffectModule::ROW_REV_SIZE,   &songcore::ReverbCells::size,  nullptr},
+    {EffectModule::ROW_REV_DAMP,   &songcore::ReverbCells::damp,  nullptr},
+    {EffectModule::ROW_REV_PRE,    &songcore::ReverbCells::pre,   nullptr},
+    {EffectModule::ROW_REV_WIDE,   &songcore::ReverbCells::width, nullptr},
+    {EffectModule::ROW_REV_MOD,    &songcore::ReverbCells::mod,   nullptr},
+    {EffectModule::ROW_DLY_TONE,   nullptr, &songcore::DelayCells::tone},
+    {EffectModule::ROW_DLY_WOBBLE, nullptr, &songcore::DelayCells::wobble},
+    {EffectModule::ROW_DLY_FDBK,   nullptr, &songcore::DelayCells::feedback},
+    {EffectModule::ROW_DLY_REV,    nullptr, &songcore::DelayCells::reverbSend},
 };
 
 const ByteCell* byte_cell(int row) {
     for (const ByteCell& b : BYTE_CELLS)
         if (b.row == row) return &b;
     return nullptr;
+}
+
+int& byte_field(songcore::Project& p, const ByteCell& b) {
+    return b.reverb ? p.reverb.*b.reverb : p.delay.*b.delay;
+}
+int byte_field(const songcore::Project& p, const ByteCell& b) {
+    return b.reverb ? p.reverb.*b.reverb : p.delay.*b.delay;
+}
+// A+B: the cells' own default, which older projects play with.
+int byte_default(const ByteCell& b) {
+    return b.reverb ? songcore::ReverbCells{}.*b.reverb : songcore::DelayCells{}.*b.delay;
 }
 
 // The bank's own cycle; A+B back to row 0 (NORMAL, the defaults). `exact`: the cells are that row's.
@@ -146,18 +157,18 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
                     reverb_preset_display_name(p), reverb_preset_differs_from_its_name(p));
 
         // Which reverb reads the cells below. ⚠️ Turning it writes none of them.
-        const bool unread = !reverb_algo_reads_size_and_mod(p.reverbAlgo);
-        param("ALGO", EffectModule::ROW_REV_ALGO, reverb_algo_name(p.reverbAlgo));
-        param("SIZE", EffectModule::ROW_REV_SIZE, hex2(p.reverbSize), unread);
+        const bool unread = !reverb_algo_reads_size_and_mod(p.reverb.algo);
+        param("ALGO", EffectModule::ROW_REV_ALGO, reverb_algo_name(p.reverb.algo));
+        param("SIZE", EffectModule::ROW_REV_SIZE, hex2(p.reverb.size), unread);
 
-        param("PRE",  EffectModule::ROW_REV_PRE,   hex2(p.reverbPreDelay));
-        param("DCAY", EffectModule::ROW_REV_DECAY, hex2(p.reverbFeedback));
+        param("PRE",  EffectModule::ROW_REV_PRE,   hex2(p.reverb.pre));
+        param("DCAY", EffectModule::ROW_REV_DECAY, hex2(p.reverb.decay));
 
-        param("WIDE", EffectModule::ROW_REV_WIDE, hex2(p.reverbWidth));
-        param("DAMP", EffectModule::ROW_REV_DAMP, hex2(p.reverbDamp));
+        param("WIDE", EffectModule::ROW_REV_WIDE, hex2(p.reverb.width));
+        param("DAMP", EffectModule::ROW_REV_DAMP, hex2(p.reverb.damp));
 
         eq_param(EffectModule::ROW_REV_EQ, p.reverbInputEq);
-        param("MOD",  EffectModule::ROW_REV_MOD, hex2(p.reverbMod), unread);
+        param("MOD",  EffectModule::ROW_REV_MOD, hex2(p.reverb.mod), unread);
     }
 
     // ── Delay ────────────────────────────────────────────────────────────────────────────────────
@@ -166,18 +177,18 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         preset_line(EffectModule::ROW_DLY_TYPE, EffectModule::ROW_DLY_SAVE, EffectModule::ROW_DLY_LOAD,
                     delay_preset_display_name(p), delay_preset_differs_from_its_name(p));
 
-        param("PONG", EffectModule::ROW_DLY_PONG, p.delayPong ? "ON" : "OFF");
+        param("PONG", EffectModule::ROW_DLY_PONG, p.delay.pong ? "ON" : "OFF");
         // Synced, TIME is a note division, and its range changes with it (0..B instead of 00..FF).
         const auto& divisions = EffectModule::delay_sync_names();
         param("TIME", EffectModule::ROW_DLY_TIME,
-              p.delaySync ? divisions[static_cast<size_t>(clamp(p.delayTime, 0, 11))]
-                          : hex2(p.delayTime));
+              p.delay.sync ? divisions[static_cast<size_t>(clamp(p.delay.time, 0, 11))]
+                          : hex2(p.delay.time));
 
-        param("TONE", EffectModule::ROW_DLY_TONE, hex2(p.delayTone));
-        param("FDBK", EffectModule::ROW_DLY_FDBK, hex2(p.delayFeedback));
+        param("TONE", EffectModule::ROW_DLY_TONE, hex2(p.delay.tone));
+        param("FDBK", EffectModule::ROW_DLY_FDBK, hex2(p.delay.feedback));
 
-        param("WOBL", EffectModule::ROW_DLY_WOBBLE, hex2(p.delayWobble));
-        param("REV",  EffectModule::ROW_DLY_REV,    hex2(p.delayReverbSend));
+        param("WOBL", EffectModule::ROW_DLY_WOBBLE, hex2(p.delay.wobble));
+        param("REV",  EffectModule::ROW_DLY_REV,    hex2(p.delay.reverbSend));
 
         eq_param(EffectModule::ROW_DLY_EQ, p.delayInputEq);
     }
@@ -262,7 +273,7 @@ void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Proje
 
 CursorContext EffectModule::cursor_context(const EffectState& s) const {
     const songcore::Project& p = s.project;
-    if (const ByteCell* b = byte_cell(s.cursorRow)) return cc::plain_byte(p.*(b->field), b->def);
+    if (const ByteCell* b = byte_cell(s.cursorRow)) return cc::plain_byte(byte_field(p, *b), byte_default(*b));
 
     switch (s.cursorRow) {
         case ROW_MASTER_TYPE: {
@@ -297,18 +308,18 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
 
         case ROW_REV_ALGO:
             // A short named list that steps and wraps.
-            return cc::index_cycle(clamp(p.reverbAlgo, 0, kReverbAlgoCount - 1), kReverbAlgoCount);
+            return cc::index_cycle(clamp(p.reverb.algo, 0, kReverbAlgoCount - 1), kReverbAlgoCount);
 
         case ROW_REV_EQ:
             return cc::eq_slot(p.reverbInputEq);
 
         case ROW_DLY_PONG:
-            return cc::toggle_binary(p.delayPong);
+            return cc::toggle_binary(p.delay.pong);
 
         case ROW_DLY_TIME:
             // 12 subdivisions synced, a full byte free.
-            return p.delaySync ? cc::hex_byte(clamp(p.delayTime, 0, 11), 0, 11)
-                               : cc::plain_byte(p.delayTime, 0x40);
+            return p.delay.sync ? cc::hex_byte(clamp(p.delay.time, 0, 11), 0, 11)
+                               : cc::plain_byte(p.delay.time, 0x40);
         case ROW_DLY_EQ:
             return cc::eq_slot(p.delayInputEq);
 
@@ -357,7 +368,7 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
     const bool isSet = (action.type == ActionType::SET_VALUE);
     if (const ByteCell* b = byte_cell(cursor_row)) {
         if (!isSet) return {false};
-        p.*(b->field) = clamp(action.value, 0, 255);
+        byte_field(p, *b) = clamp(action.value, 0, 255);
         return {true};
     }
 
@@ -370,7 +381,7 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
         case ROW_REV_ALGO:
             // ⚠️ Writes only itself, so switching back and forth loses nothing.
             if (!isSet) break;
-            p.reverbAlgo = clamp(action.value, 0, kReverbAlgoCount - 1);
+            p.reverb.algo = clamp(action.value, 0, kReverbAlgoCount - 1);
             return {true};
 
         case ROW_REV_TYPE: {
@@ -394,13 +405,13 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
 
         case ROW_DLY_PONG:
             if (!isSet) break;
-            p.delayPong = action.value != 0;
+            p.delay.pong = action.value != 0;
             return {true};
 
         case ROW_DLY_TIME:
             if (!isSet) break;
             // Clamped into the live vocabulary.
-            p.delayTime = p.delaySync ? clamp(action.value, 0, 11) : clamp(action.value, 0, 255);
+            p.delay.time = p.delay.sync ? clamp(action.value, 0, 11) : clamp(action.value, 0, 255);
             return {true};
 
         case ROW_DLY_EQ:

@@ -2,25 +2,21 @@
 
 // The reverb's built-in presets (names for sets of cell values) and its algorithm list. The DSP
 // never sees a preset's name.
-// Row 0 is what a new project opens on (songcore::new_project). The struct defaults in model.h are
-// what older files play with and match no row.
+// Row 0 is what a new project opens on (songcore::new_project). The struct defaults (send_cells.h)
+// are what older files play with and match no row.
 // ⚠️ Only PRE and WIDE are gated out at their defaults; SIZE is neutral at 60 by construction (scale
 // exactly 1). DCAY, DAMP and MOD have no neutral value.
-// Only <cmath>: the UI reads this too, and the reverb module would clash with its EqModule.
+// Only <cmath> and the cells: the UI reads this too, and the reverb module would clash with its EqModule.
 #include <cmath>
 
+#include "../../songcore/send_cells.h"
+
 struct ReverbPreset {
-    const char* name;
-    int         algo;     // which reverb reads the rest — the project's `reverbAlgo`
-    int         decay;    // 00-FF, the tail's length — the project's `reverbFeedback`
-    int         room;     // 00-FF, the room's dimensions — the project's `reverbSize`; 60 = as shipped
-    int         damp;     // 00-FF, how bright it stays
-    int         pre;      // 00-FF, the gap before it starts; 00 = none
-    int         width;    // 00-FF, 80 = the stereo image untouched
-    int         mod;      // 00-FF, 40 = the wander the algorithm has always had; 00 = none
+    const char*           name;
+    songcore::ReverbCells cells;
 };
 
-// ALGO, the project's `reverbAlgo`. ⚠️ The number is what a project stores: append, never insert;
+// ALGO, the cells' `algo`. ⚠️ The number is what a project stores: append, never insert;
 // 0 is the original reverb, which an older project loads as. Each algorithm reads the same cells its
 // own way (dragonfly-reverb.cpp).
 inline constexpr int kReverbAlgoOld   = 0;   // ReverbSc — every cell
@@ -41,25 +37,21 @@ inline const char* reverb_algo_name(int algo) {
 }
 
 inline constexpr ReverbPreset kReverbPresets[] = {
-    //              algo                decay room  damp  pre   width mod
-    {"DEFAULT",     kReverbAlgoOld,     0x80, 0x80, 0x80, 0x20, 0xFF, 0x20},
-    {"ROOM",        kReverbAlgoHall,    0x10, 0x20, 0x40, 0x20, 0x80, 0x00},
-    {"ROOM_GLUE",   kReverbAlgoRoom,    0x10, 0x20, 0x30, 0x10, 0xA0, 0x30},
-    {"HALL_BRIGHT", kReverbAlgoHall,    0x80, 0xA0, 0x80, 0x80, 0xFF, 0x20},
-    {"HALL_WASH",   kReverbAlgoHall,    0xE0, 0x40, 0x20, 0x80, 0xFF, 0x10},
-    {"PLATE_SHORT", kReverbAlgoPlate,   0x60, 0x00, 0x40, 0x20, 0x80, 0x00},
-    {"FOIL_MONO",   kReverbAlgoFoil,    0x40, 0x00, 0xA0, 0x10, 0x00, 0x00},
+    //               algo               size  decay damp  pre   width mod
+    {"DEFAULT",     {kReverbAlgoOld,    0x80, 0x80, 0x80, 0x20, 0xFF, 0x20}},
+    {"ROOM",        {kReverbAlgoHall,   0x20, 0x10, 0x40, 0x20, 0x80, 0x00}},
+    {"ROOM_GLUE",   {kReverbAlgoRoom,   0x20, 0x10, 0x30, 0x10, 0xA0, 0x30}},
+    {"HALL_BRIGHT", {kReverbAlgoHall,   0xA0, 0x80, 0x80, 0x80, 0xFF, 0x20}},
+    {"HALL_WASH",   {kReverbAlgoHall,   0x40, 0xE0, 0x20, 0x80, 0xFF, 0x10}},
+    {"PLATE_SHORT", {kReverbAlgoPlate,  0x00, 0x60, 0x40, 0x20, 0x80, 0x00}},
+    {"FOIL_MONO",   {kReverbAlgoFoil,   0x00, 0x40, 0xA0, 0x10, 0x00, 0x00}},
 };
 inline constexpr int kReverbPresetCount = 7;
 
 // Which built-in preset these cells match, or −1.
-inline int reverb_preset_match(int algo, int decay, int room, int damp, int pre, int width, int mod) {
-    for (int i = 0; i < kReverbPresetCount; ++i) {
-        const ReverbPreset& r = kReverbPresets[i];
-        if (r.algo == algo && r.decay == decay && r.room == room && r.damp == damp &&
-            r.pre == pre && r.width == width && r.mod == mod)
-            return i;
-    }
+inline int reverb_preset_match(const songcore::ReverbCells& cells) {
+    for (int i = 0; i < kReverbPresetCount; ++i)
+        if (kReverbPresets[i].cells == cells) return i;
     return -1;
 }
 

@@ -370,7 +370,7 @@ void InputDispatcher::browser_confirm() {
 
         case AppState::BrowserPurpose::LOAD_REVERB: {
             // Read into a COPY of the cells, committed only once the file parses.
-            ReverbCells cells = reverb_cells_of(host_.project());
+            NamedReverb cells = reverb_cells_of(host_.project());
             if (ext != REVERB_FILE_EXT || !load_reverb_file(fs_, path, cells)) {
                 set_status(b, "LOAD FAILED", false);
                 return;
@@ -385,7 +385,7 @@ void InputDispatcher::browser_confirm() {
 
         case AppState::BrowserPurpose::LOAD_DELAY: {
             // As the reverb's, including the order of the last two calls.
-            DelayCells cells = delay_cells_of(host_.project());
+            NamedDelay cells = delay_cells_of(host_.project());
             if (ext != DELAY_FILE_EXT || !load_delay_file(fs_, path, cells)) {
                 set_status(b, "LOAD FAILED", false);
                 return;

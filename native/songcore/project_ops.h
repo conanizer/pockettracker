@@ -127,28 +127,14 @@ inline void clean_unused_inst(Project& project) {
 // A built-in preset onto the section's cells, and its name onto the row. Out of range does nothing.
 inline void reverb_apply_bank(Project& p, int index) {
     if (index < 0 || index >= kReverbPresetCount) return;
-    const ReverbPreset& r = kReverbPresets[index];
-    p.reverbAlgo     = r.algo;
-    p.reverbFeedback = r.decay;
-    p.reverbSize     = r.room;
-    p.reverbDamp     = r.damp;
-    p.reverbPreDelay = r.pre;
-    p.reverbWidth    = r.width;
-    p.reverbMod      = r.mod;
-    p.reverbPreset   = r.name;
+    p.reverb       = kReverbPresets[index].cells;
+    p.reverbPreset = kReverbPresets[index].name;
 }
 
 inline void delay_apply_bank(Project& p, int index) {
     if (index < 0 || index >= kDelayPresetCount) return;
-    const DelayPreset& d = kDelayPresets[index];
-    p.delayPong       = d.pong;
-    p.delaySync       = d.sync;
-    p.delayTime       = d.time;
-    p.delayFeedback   = d.feedback;
-    p.delayTone       = d.tone;
-    p.delayWobble     = d.wobble;
-    p.delayReverbSend = d.reverbSend;
-    p.delayPreset     = d.name;
+    p.delay       = kDelayPresets[index].cells;
+    p.delayPreset = kDelayPresets[index].name;
 }
 
 // NEW: a fresh document. ⚠️ `version = 1`, not the struct's 0 — a 0 would load as a legacy file.

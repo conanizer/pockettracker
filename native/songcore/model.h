@@ -17,6 +17,7 @@
 // For the CC-slot ids `resolve_cc_param` translates; event.h is a leaf, so no cycle.
 #include "event.h"
 #include "program.h"   // PROGRAM_SLOTS — the engine's program table is one row per instrument
+#include "send_cells.h"
 
 namespace songcore {
 
@@ -463,27 +464,13 @@ struct Project {
     int masterVolume = 0xFF;
     int ottDepth = 0, masterBusFx = 0, dustDepth = 0, limiterPreGain = 0;
     std::vector<EqPreset> eqPresets;              // 128, filled by the factory
-    // ⚠️ `reverbFeedback` is the DCAY cell (the tail's length); the JSON key keeps the old name. The
-    // room is `reverbSize`.
-    int reverbFeedback = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbInputEq = -1;
-    // The reverb's character. ⚠️ The defaults are what older projects play with: PRE 00 (no line),
-    // WIDE 80 (mid/side skipped).
-    int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
-    // The SIZE cell. ⚠️ 0x60 is exactly the original room (`reverb_room_scale` is 1), so older projects
-    // sound as they did.
-    int reverbSize = 0x60;
-    // Which reverb reads the cells above (`kReverbAlgo*`). ⚠️ 0 is the original, and a number is an
-    // identity — append, never insert. Switching rewrites no cell.
-    int reverbAlgo = 0;
+    // The sends' cells (send_cells.h); the level, input EQ and preset name sit beside them.
+    ReverbCells reverb;
+    int reverbWet = 0x80, reverbInputEq = -1;
+    DelayCells delay;
+    int delayWet = 0x80, delayInputEq = -1;
     // The names the preset rows show — labels only. Empty = matched against the built-ins.
     std::string reverbPreset, delayPreset;
-    int delayTime = 0x40;
-    bool delaySync = false;
-    int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;
-    // The delay's character, written by the preset row (effects/modules/delay-presets.h).
-    // ⚠️ Defaults are what older projects play with: TONE FF (filter switched out), WOBL 00.
-    bool delayPong = false;
-    int  delayTone = 0xFF, delayWobble = 0x00;
     // The two send RETURNS are mixer channels with a mute each. ⚠️ `dryMute` silences the tracks' own
     // sound but NOT what they feed the returns: muting the tracks instead would starve a return heard alone.
     bool reverbMute = false, delayMute = false, dryMute = false;

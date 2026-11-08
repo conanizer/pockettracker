@@ -114,21 +114,21 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
             engine.setEqBand(slot, band, b.type, b.freq, b.gain, b.q);
         }
     }
-    engine.setReverbParams(project.reverbFeedback, project.reverbDamp, project.reverbWet,
-                           project.reverbSize);
-    engine.setReverbAlgo(project.reverbAlgo);
-    engine.setReverbCharacter(project.reverbPreDelay, project.reverbWidth, project.reverbMod);
+    engine.setReverbParams(project.reverb.decay, project.reverb.damp, project.reverbWet,
+                           project.reverb.size);
+    engine.setReverbAlgo(project.reverb.algo);
+    engine.setReverbCharacter(project.reverb.pre, project.reverb.width, project.reverb.mod);
     engine.setReverbInputEq(project.reverbInputEq);
     // ⚠️ Only the TIME is skipped while a TIM owns it — FDBK and WET edits must still be heard.
     if (held.delayTime) {
-        engine.setDelayFeedbackWet(project.delayFeedback, project.delayWet);
+        engine.setDelayFeedbackWet(project.delay.feedback, project.delayWet);
     } else {
-        engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
+        engine.setDelayParams(project.delay.time, project.delay.feedback, project.delay.sync,
                               static_cast<float>(tempo_in_force(project)), project.delayWet);
     }
-    engine.setDelayCharacter(project.delayPong, project.delayTone, project.delayWobble);
+    engine.setDelayCharacter(project.delay.pong, project.delay.tone, project.delay.wobble);
     engine.setDelayInputEq(project.delayInputEq);
-    engine.setDelayReverbSend(project.delayReverbSend);
+    engine.setDelayReverbSend(project.delay.reverbSend);
     if (!held.masterEq) engine.setMasterEqSlot(project.masterEqSlot);   // -1 = bypass
 }
 
@@ -171,28 +171,28 @@ bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scop
         case MapDestId::REV_DAMP:
         case MapDestId::REV_WET:
         case MapDestId::REV_SIZE:
-            engine.setReverbParams(p.reverbFeedback, p.reverbDamp, p.reverbWet, p.reverbSize);
+            engine.setReverbParams(p.reverb.decay, p.reverb.damp, p.reverbWet, p.reverb.size);
             return true;
         case MapDestId::REV_PRE:
         case MapDestId::REV_WIDE:
         case MapDestId::REV_MOD:
-            engine.setReverbCharacter(p.reverbPreDelay, p.reverbWidth, p.reverbMod);
+            engine.setReverbCharacter(p.reverb.pre, p.reverb.width, p.reverb.mod);
             return true;
 
         // ⚠️ FDBK and WET leave the TIME alone: a TIM may own it, and only a TIME knob takes it back.
         case MapDestId::DLY_TIME:
-            engine.setDelayTime(p.delayTime, p.delaySync, static_cast<float>(tempo_in_force(p)));
+            engine.setDelayTime(p.delay.time, p.delay.sync, static_cast<float>(tempo_in_force(p)));
             return true;
         case MapDestId::DLY_FDBK:
         case MapDestId::DLY_WET:
-            engine.setDelayFeedbackWet(p.delayFeedback, p.delayWet);
+            engine.setDelayFeedbackWet(p.delay.feedback, p.delayWet);
             return true;
         case MapDestId::DLY_TONE:
         case MapDestId::DLY_WOBL:
-            engine.setDelayCharacter(p.delayPong, p.delayTone, p.delayWobble);
+            engine.setDelayCharacter(p.delay.pong, p.delay.tone, p.delay.wobble);
             return true;
         case MapDestId::DLY_SEND:
-            engine.setDelayReverbSend(p.delayReverbSend);
+            engine.setDelayReverbSend(p.delay.reverbSend);
             return true;
 
         case MapDestId::OTT_DEPTH:  engine.setOttDepth(p.ottDepth);             return true;
