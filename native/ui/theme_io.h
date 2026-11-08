@@ -2,7 +2,7 @@
 
 // `.ptt`, a theme as a file. Parsed tolerantly; written byte-exact (a golden pins it):
 //   * a field equal to `Theme{}`'s (CLASSIC) is omitted, so an unmodified CLASSIC is `{}`;
-//   * 4-space indent, keys in declaration order, no trailing newline;
+//   * 4-space indent, keys in THEME_COLORS order, no trailing newline;
 //   * a colour is a plain decimal (0xFF0A0A0A is `4278518794`);
 //   * `visualizerType` is its serial name — not the settings label, which would read back as SCOPE.
 
@@ -45,40 +45,13 @@ inline std::string serialize_theme(const Theme& t) {
 
     if (t.name != d.name) w.field_string("name", t.name);
 
-    // ⚠️ Spelled out, not from `theme_color_rows()`: this order is the file format.
-    auto color = [&](const char* key, Argb v, Argb dv) {
-        if (v != dv) w.field_int(key, static_cast<long long>(v));
-    };
-
-    color("background",      t.background,      d.background);
-    color("rowEvery4th",     t.rowEvery4th,     d.rowEvery4th);
-    color("rowCursor",       t.rowCursor,       d.rowCursor);
-    color("rowPlayback",     t.rowPlayback,     d.rowPlayback);
-    color("rowSelection",    t.rowSelection,    d.rowSelection);
-    color("textTitle",       t.textTitle,       d.textTitle);
-    color("textParam",       t.textParam,       d.textParam);
-    color("textValue",       t.textValue,       d.textValue);
-    color("textCursor",      t.textCursor,      d.textCursor);
-    color("textEmpty",       t.textEmpty,       d.textEmpty);
-    color("vizBackground",   t.vizBackground,   d.vizBackground);
-    color("vizCenterLine",   t.vizCenterLine,   d.vizCenterLine);
-    color("vizWave",         t.vizWave,         d.vizWave);
-    color("meterBackground", t.meterBackground, d.meterBackground);
-    color("meterLow",        t.meterLow,        d.meterLow);
-    color("meterMid",        t.meterMid,        d.meterMid);
-    color("meterHigh",       t.meterHigh,       d.meterHigh);
-    color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
-
-    // The six borrowed keys are omitted when they equal what `derive_borrowed_colors` gives this theme.
+    // A borrowed colour is omitted when it equals what `derive_borrowed_colors` gives this theme.
     Theme e = t;
     derive_borrowed_colors(e);
-    color("eqBg",     t.eqBg,     e.eqBg);
-    color("eqFill",   t.eqFill,   e.eqFill);
-    color("eqBorder", t.eqBorder, e.eqBorder);
-    color("eqTxt",    t.eqTxt,    e.eqTxt);
-
-    color("textSelection", t.textSelection, e.textSelection);
-    color("textPlayhead",  t.textPlayhead,  e.textPlayhead);
+    for (const ThemeColor& c : THEME_COLORS) {
+        const Argb v = t.*c.field;
+        if (v != (c.borrowed ? e : d).*c.field) w.field_int(c.key, static_cast<long long>(v));
+    }
 
     if (t.visualizerType != d.visualizerType)
         w.field_string("visualizerType", visualizer_serial_name(t.visualizerType));
@@ -97,39 +70,16 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     if (const auto it = j.find("name"); it != j.end() && it->is_string())
         t.name = it->get<std::string>();
 
-    auto color = [&](const char* key, Argb& field) {
-        const auto it = j.find(key);
+    auto read = [&](const ThemeColor& c) {
+        const auto it = j.find(c.key);
         if (it == j.end() || !it->is_number_integer()) return;
-        field = static_cast<Argb>(static_cast<uint64_t>(it->get<int64_t>()) & 0xFFFFFFFFu);
+        t.*c.field = static_cast<Argb>(static_cast<uint64_t>(it->get<int64_t>()) & 0xFFFFFFFFu);
     };
 
-    color("background",      t.background);
-    color("rowEvery4th",     t.rowEvery4th);
-    color("rowCursor",       t.rowCursor);
-    color("rowPlayback",     t.rowPlayback);
-    color("rowSelection",    t.rowSelection);
-    color("textTitle",       t.textTitle);
-    color("textParam",       t.textParam);
-    color("textValue",       t.textValue);
-    color("textCursor",      t.textCursor);
-    color("textEmpty",       t.textEmpty);
-    color("vizBackground",   t.vizBackground);
-    color("vizCenterLine",   t.vizCenterLine);
-    color("vizWave",         t.vizWave);
-    color("meterBackground", t.meterBackground);
-    color("meterLow",        t.meterLow);
-    color("meterMid",        t.meterMid);
-    color("meterHigh",       t.meterHigh);
-    color("meterBorder",     t.meterBorder);
-
-    // Derived from what was read, then overwritten by whatever the file names.
+    // The borrowed ones are derived from what was read, then overwritten by whatever the file names.
+    for (const ThemeColor& c : THEME_COLORS) if (!c.borrowed) read(c);
     derive_borrowed_colors(t);
-    color("eqBg",     t.eqBg);
-    color("eqFill",   t.eqFill);
-    color("eqBorder", t.eqBorder);
-    color("eqTxt",    t.eqTxt);
-    color("textSelection", t.textSelection);
-    color("textPlayhead",  t.textPlayhead);
+    for (const ThemeColor& c : THEME_COLORS) if (c.borrowed) read(c);
 
     if (const auto it = j.find("visualizerType"); it != j.end() && it->is_string())
         t.visualizerType = visualizer_from_serial_name(it->get<std::string>());

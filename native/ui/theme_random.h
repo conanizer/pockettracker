@@ -145,11 +145,7 @@ inline PaletteContext theme_context(const Theme& base, const ThemeLocks& locks) 
     for (size_t i = 0; i < rows.size(); ++i) {
         if (!locks.locked(static_cast<int>(i))) continue;
         Argb Theme::* const f = rows[i].field;
-        if (f == &Theme::background || f == &Theme::rowEvery4th ||
-            f == &Theme::vizBackground || f == &Theme::meterBackground || f == &Theme::eqBg ||
-            f == &Theme::meterLow || f == &Theme::meterMid || f == &Theme::meterHigh) {
-            continue;
-        }
+        if (!theme_color(f).hue) continue;
         any = true;
         // The most colourful held row names the hue.
         const OkLch c = to_oklch(base.*f);

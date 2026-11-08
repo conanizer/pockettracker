@@ -169,11 +169,7 @@ inline const char* theme_field_label(Argb Theme::* field) {
     for (const ThemeColorRow& row : theme_color_rows()) {
         if (row.field == field) return row.label;
     }
-    if (field == &Theme::meterBorder) return "MTR BORDER";
-    if (field == &Theme::rowPlayback) return "ROW PLAY";
-    if (field == &Theme::textCursor)  return "TXT CURSOR";
-    if (field == &Theme::textSelection) return "TXT SELECT";
-    return "?";
+    return "?";   // no rule blames a colour without a row
 }
 
 // What this editor row's colour clashes with, or `nullptr` — the message beside the title.

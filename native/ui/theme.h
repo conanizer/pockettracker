@@ -97,8 +97,52 @@ inline void derive_borrowed_colors(Theme& t) {
     t.textPlayhead  = lift_seed_to_ink(t.rowPlayback, t.textCursor);
 }
 
+// ─── Every colour, in the `.ptt` file's order ─────────────────────────────────────────────────────
+// ⚠️ The order and the keys are the file format. `borrowed`: its default is derived from the rest
+// (`derive_borrowed_colors`), so the file omits it while it equals that. `hue`: a held row of this
+// colour may name the hue a theme roll keeps — false for the grounds and the meters.
+struct ThemeColor {
+    const char* key;
+    Argb Theme::* field;
+    bool borrowed;
+    bool hue;
+};
+
+inline constexpr ThemeColor THEME_COLORS[] = {
+    {"background",      &Theme::background,      false, false},
+    {"rowEvery4th",     &Theme::rowEvery4th,     false, false},
+    {"rowCursor",       &Theme::rowCursor,       false, true},
+    {"rowPlayback",     &Theme::rowPlayback,     false, true},
+    {"rowSelection",    &Theme::rowSelection,    false, true},
+    {"textTitle",       &Theme::textTitle,       false, true},
+    {"textParam",       &Theme::textParam,       false, true},
+    {"textValue",       &Theme::textValue,       false, true},
+    {"textCursor",      &Theme::textCursor,      false, true},
+    {"textEmpty",       &Theme::textEmpty,       false, true},
+    {"vizBackground",   &Theme::vizBackground,   false, false},
+    {"vizCenterLine",   &Theme::vizCenterLine,   false, true},
+    {"vizWave",         &Theme::vizWave,         false, true},
+    {"meterBackground", &Theme::meterBackground, false, false},
+    {"meterLow",        &Theme::meterLow,        false, false},
+    {"meterMid",        &Theme::meterMid,        false, false},
+    {"meterHigh",       &Theme::meterHigh,       false, false},
+    {"meterBorder",     &Theme::meterBorder,     false, false},
+    {"eqBg",            &Theme::eqBg,            true,  false},
+    {"eqFill",          &Theme::eqFill,          true,  true},
+    {"eqBorder",        &Theme::eqBorder,        true,  true},
+    {"eqTxt",           &Theme::eqTxt,           true,  true},
+    {"textSelection",   &Theme::textSelection,   true,  true},
+    {"textPlayhead",    &Theme::textPlayhead,    true,  true},
+};
+
+inline const ThemeColor& theme_color(Argb Theme::* field) {
+    for (const ThemeColor& c : THEME_COLORS)
+        if (c.field == field) return c;
+    return THEME_COLORS[0];
+}
+
 // ─── The theme editor's rows ─────────────────────────────────────────────────────────────────────
-// Four fields have none: `meterBorder`, `rowPlayback` (a seed), `textCursor` and `textSelection`
+// Four colours have none: `meterBorder`, `rowPlayback` (a seed), `textCursor` and `textSelection`
 // (unused). ⚠️ A row's position is its number in the help text and the tests: append.
 
 struct ThemeColorRow {

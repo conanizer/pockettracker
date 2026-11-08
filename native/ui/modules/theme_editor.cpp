@@ -36,7 +36,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
     c.draw_text("THEME EDIT", x + NAME_COL_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     // ⚠️ The accent, never red (red means destruction). A failed roll outranks the cursor's reading.
-    // Seventeen characters: "BLENDS " + `MTR BORDER` exactly.
+    // Seventeen characters: "BLENDS " + the longest row label (BACKGROUND).
     constexpr int MSG_X    = NAME_COL_X + 11 * CHAR_W;   // past "THEME EDIT" and a space
     constexpr int MSG_COLS = (WIDTH - 10 - MSG_X) / CHAR_W;
 
