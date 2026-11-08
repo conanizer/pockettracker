@@ -17,6 +17,7 @@
 
 #include "event.h"
 #include "midi_map.h"   // the knob gate
+#include "midi_port.h"  // IMidiOut for thru, to7bit
 #include "midi_sync_in.h"
 #include "model.h"
 #include "note_command.h"

@@ -115,7 +115,9 @@ native/                            The portable program
 │   ├── engine_setup.h               Project → engine push (instruments, buses, EQ bank)
 │   ├── host.h / .cpp                SongcoreHost — the one runtime object a shell constructs
 │   ├── render.h / wav_writer.h      Offline render, WAV output
+│   ├── midi_port.h                  The output port, a message's bytes, the 7-bit scale
 │   ├── midi_out.h / midi_in.h       The MIDI seams, serializer, parser, router
+│   ├── midi_wheel.h                 The pitch commands as the channel's pitch wheel
 │   ├── midi_clock.h                 24 PPQN clock, transport, song position
 │   ├── midi_sync_in.h               An incoming clock as a line; Start / Stop / position as events
 │   ├── note_command.h               A phrase's voice commands, sent with their note to another PocketTracker

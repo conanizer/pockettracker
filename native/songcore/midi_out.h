@@ -6,7 +6,7 @@
 // KIL or the transport stopping. ⚠️ Gear has no voice allocator: an unanswered note-on sounds for ever.
 // Events arrive ahead of the clock, are queued by frame and released by `pump(now)` — from the sender
 // thread (`shell/midi/midi-sender.h`) or `SongcoreHost::poll`. Two threads, hence `mu_`.
-// The pitch commands become the channel's pitch wheel (`Wheel`).
+// The pitch commands become the channel's pitch wheel (midi_wheel.h).
 
 #include <algorithm>
 #include <bitset>
@@ -17,10 +17,11 @@
 #include <string>
 #include <vector>
 
-#include "effects.h"       // fine_tune_semitones
 #include "event.h"
 #include "note_command.h"
 #include "midi_clock.h"    // the 24 PPQN grid and the transport bytes
+#include "midi_port.h"
+#include "midi_wheel.h"
 #include "model.h"
 #include "note_tables.h"   // f32_from_bits
 #include "router.h"
@@ -28,79 +29,9 @@
 
 namespace songcore {
 
-// A MIDI output port, one per platform. `send` gets a complete message and must not block for long —
-// it runs on whichever thread pumps the queue.
-struct IMidiOut {
-    virtual ~IMidiOut() = default;
-
-    // Re-enumerated on each call; hot-plug changes it.
-    virtual int device_count() = 0;
-    virtual std::string device_name(int index) = 0;
-
-    virtual bool open(int index) = 0;
-    virtual void close() = 0;
-    virtual bool is_open() const = 0;
-
-    virtual void send(const uint8_t* data, int len) = 0;
-
-    // The open port failed in a way only a reopen cures (the cable was pulled).
-    virtual bool broken() const { return false; }
-
-    // A synth built into the OS — AUTO passes over it.
-    virtual bool is_builtin_synth(int /*index*/) { return false; }
-};
-
-// A 0..1 bus value to 0–127 — the one place, so internal and external cannot drift.
-inline int to7bit(float v01) {
-    if (!(v01 > 0.0f)) return 0;      // also catches NaN
-    if (v01 >= 1.0f) return 127;
-    return static_cast<int>(v01 * 127.0f + 0.5f);
-}
-
-// An authored 0x00–0xFF byte to 0–127.
-inline int byte_to_7bit(int b) {
-    if (b <= 0) return 0;
-    if (b >= 255) return 127;
-    return (b * 127 + 127) / 255;
-}
-
-constexpr uint8_t MIDI_NOTE_OFF = 0x80, MIDI_NOTE_ON = 0x90, MIDI_CC = 0xB0,
-                  MIDI_PROGRAM  = 0xC0, MIDI_PITCH_BEND = 0xE0;
-
-constexpr uint8_t MIDI_CC_BANK_MSB = 0, MIDI_CC_BANK_LSB = 32, MIDI_CC_ALL_NOTES_OFF = 123;
-
-// RPN 0, the bend range: the RPN's number goes to 101/100, its value to 6/38.
-constexpr uint8_t MIDI_CC_RPN_MSB = 101, MIDI_CC_RPN_LSB = 100, MIDI_CC_DATA_MSB = 6, MIDI_CC_DATA_LSB = 38;
-
-// A moving wheel is re-sent this often. ⚠️ A 5-pin cable carries ~1000 such messages a second in all.
-constexpr int MIDI_WHEEL_MS = 5;
-
-// One message and the frame it is due on. `seq` keeps same-frame messages in production order
-// (bank → program → CC → note-on). `UNSCHEDULED` = a panic message; a lateness observer skips it.
-struct MidiMessage {
-    static constexpr int64_t UNSCHEDULED = INT64_MIN;
-
-    int64_t  frame = 0;
-    uint32_t seq   = 0;
-    uint8_t  bytes[NOTE_COMMAND_BYTES] = {};   // the longest a note command
-    uint8_t  len   = 0;
-    // A wheel position: its BEND goes first when the channel holds another. A re-send equal to what
-    // the channel holds is dropped, unless it is an MPB — a command, sent as written.
-    uint8_t  bendRange  = 0;
-    bool     bendAlways = false;
-    uint8_t  track      = 0xFF;   // the sequencer track that queued it, for a LIVE take-back
-};
-
-// Told about every message as it is released — how lateness is measured; called with no port open too.
-// ⚠️ Called under the lock: be quick, and never call back into `ExternalConsumer`.
-struct IMidiSendObserver {
-    virtual ~IMidiSendObserver() = default;
-    virtual void on_released(const MidiMessage& m, int64_t nowFrame, bool sent) = 0;
-};
-
 class ExternalConsumer : public IMidiConsumer {
   public:
-    explicit ExternalConsumer(const Project* project) : project_(project) { forget_channel_state(); }
+    explicit ExternalConsumer(const Project* project) : project_(project) {}
     ~ExternalConsumer() override { panic(); }
 
     // ⚠️ Threads: the frame loop produces and panics, the sender thread only calls `pump`. Every public
@@ -266,7 +197,7 @@ class ExternalConsumer : public IMidiConsumer {
     bool needs_fast_pump() const {
         std::lock_guard<std::mutex> lk(mu_);
         if (!pending_.empty() || clock_.running()) return true;
-        for (const Wheel& w : wheel_)
+        for (const MidiWheel& w : wheel_)
             if (w.next != INT64_MAX) return true;
         return false;
     }
@@ -321,20 +252,20 @@ class ExternalConsumer : public IMidiConsumer {
         }
         for (ActiveNote& a : active_) a.on = false;
         for (int c = 0; c < 16; ++c) {
-            if (!channelUsed_[c]) continue;
+            if (!sent_[c].used) continue;
             send_now(MIDI_CC | static_cast<uint8_t>(c), MIDI_CC_ALL_NOTES_OFF, 0);
         }
         // Centre bent channels — a bend outlives its note — and turn a VOL's channel back up.
         for (int c = 0; c < 16; ++c) {
-            if (wheelOut_[c] == MIDI_BEND_CENTRE) continue;
+            if (sent_[c].wheel == MIDI_BEND_CENTRE) continue;
             send_now(MIDI_PITCH_BEND | static_cast<uint8_t>(c),
                      MIDI_BEND_CENTRE & 0x7F, (MIDI_BEND_CENTRE >> 7) & 0x7F);
         }
         for (int c = 0; c < 16; ++c)
-            if (volOut_[c] != VOL_UNTOUCHED && volOut_[c] != 127)
+            if (sent_[c].vol != VOL_UNTOUCHED && sent_[c].vol != 127)
                 send_now(MIDI_CC | static_cast<uint8_t>(c), CC_VOLUME, 127);
         pending_.clear();
-        for (Wheel& w : wheel_) w = Wheel{};
+        for (MidiWheel& w : wheel_) w = MidiWheel{};
         for (std::vector<TrackSnap>& h : history_) h.clear();
         forget_channel_state();
     }
@@ -356,11 +287,11 @@ class ExternalConsumer : public IMidiConsumer {
         const uint8_t kind = m.bytes[0] & 0xF0, ch = m.bytes[0] & 0x0F;
         if (kind == MIDI_PROGRAM ||
             (kind == MIDI_CC && (m.bytes[1] == MIDI_CC_BANK_MSB || m.bytes[1] == MIDI_CC_BANK_LSB))) {
-            lastBank_[ch] = -2;
-            lastProgram_[ch] = -2;
+            sent_[ch].bank = -2;
+            sent_[ch].program = -2;
         }
-        if (kind == MIDI_CC && m.bytes[1] == CC_PAN) lastPan_[ch] = -1;
-        if (kind == MIDI_CC && m.bytes[1] == CC_VOLUME) volOut_[ch] = VOL_UNKNOWN;
+        if (kind == MIDI_CC && m.bytes[1] == CC_PAN) sent_[ch].pan = -1;
+        if (kind == MIDI_CC && m.bytes[1] == CC_VOLUME) sent_[ch].vol = VOL_UNKNOWN;
     }
 
     struct ActiveNote {
@@ -397,9 +328,9 @@ class ExternalConsumer : public IMidiConsumer {
 
         // PAN rides CC 10, sent only when it changes.
         const int pan7 = to7bit(f32_from_bits(ev.noteOn.panBits));
-        if (lastPan_[ch] != pan7) {
+        if (sent_[ch].pan != pan7) {
             send_at(ev.frame, MIDI_CC | ch, CC_PAN, static_cast<uint8_t>(pan7));
-            lastPan_[ch] = pan7;
+            sent_[ch].pan = pan7;
         }
 
         // Ahead of the note, so a PSL's attack starts on the old pitch.
@@ -433,7 +364,7 @@ class ExternalConsumer : public IMidiConsumer {
                 a.keyOn[++a.chordCount] = on;
             }
         }
-        channelUsed_[ch] = true;
+        sent_[ch].used = true;
     }
 
     // End the track's note at `frame` or its LEN gate, whichever is FIRST.
@@ -509,23 +440,23 @@ class ExternalConsumer : public IMidiConsumer {
     // CC 7 as the note needs it. A channel no VOL has touched counts as full, so a song without VOL
     // puts no CC 7 on the wire.
     void state_volume(int64_t frame, uint8_t ch, int v7) {
-        if (volOut_[ch] == v7 || (volOut_[ch] == VOL_UNTOUCHED && v7 == 127)) return;
+        if (sent_[ch].vol == v7 || (sent_[ch].vol == VOL_UNTOUCHED && v7 == 127)) return;
         send_at(frame, MIDI_CC | ch, CC_VOLUME, static_cast<uint8_t>(v7));
-        volOut_[ch] = v7;
+        sent_[ch].vol = v7;
     }
 
     // Bank + program, when set and the channel is not already on them (forgotten at each start).
     void send_program(int64_t frame, uint8_t ch, const Instrument& ins) {
         if (ins.midiProgram < 0 && ins.midiBank < 0) return;
-        if (lastBank_[ch] == ins.midiBank && lastProgram_[ch] == ins.midiProgram) return;
+        if (sent_[ch].bank == ins.midiBank && sent_[ch].program == ins.midiProgram) return;
         if (ins.midiBank >= 0) {
             send_at(frame, MIDI_CC | ch, MIDI_CC_BANK_MSB, static_cast<uint8_t>((ins.midiBank >> 7) & 0x7F));
             send_at(frame, MIDI_CC | ch, MIDI_CC_BANK_LSB, static_cast<uint8_t>(ins.midiBank & 0x7F));
         }
         if (ins.midiProgram >= 0)
             send_at(frame, MIDI_PROGRAM | ch, static_cast<uint8_t>(ins.midiProgram & 0x7F));
-        lastBank_[ch] = ins.midiBank;
-        lastProgram_[ch] = ins.midiProgram;
+        sent_[ch].bank = ins.midiBank;
+        sent_[ch].program = ins.midiProgram;
     }
 
     // The instrument's CC slots, re-sent with EVERY note-on: a CCA or a knob may have moved them.
@@ -553,8 +484,8 @@ class ExternalConsumer : public IMidiConsumer {
         const uint8_t ch = chan(ins);
         const int v7 = to7bit(f32_from_bits(ev.cc.valueBits));
         send_at(ev.frame, MIDI_CC | ch, static_cast<uint8_t>(param & 0x7F), static_cast<uint8_t>(v7));
-        if (param == CC_PAN) lastPan_[ch] = v7;   // keep the note-on de-dup honest
-        if (ev.cc.param == CC_VOLUME) volOut_[ch] = live_ ? VOL_UNTOUCHED : v7;
+        if (param == CC_PAN) sent_[ch].pan = v7;   // keep the note-on de-dup honest
+        if (ev.cc.param == CC_VOLUME) sent_[ch].vol = live_ ? VOL_UNTOUCHED : v7;
     }
 
     // A command a phrase gave the track's note, for another PocketTracker: with the note while its
@@ -584,199 +515,86 @@ class ExternalConsumer : public IMidiConsumer {
         pending_.insert(on, m);
     }
 
-    // MPG. ⚠️ Updates `lastProgram_`, or the next note would stay on the MPG's program; the bank
+    // MPG. ⚠️ Updates the channel's sent program, or the next note would stay on the MPG's program; the bank
     // becomes unknown.
     void program_event(const Event& ev, const Instrument& ins) {
         const uint8_t ch = chan(ins);
         const int prog = ev.program.program & 0x7F;
         send_at(ev.frame, MIDI_PROGRAM | ch, static_cast<uint8_t>(prog));
-        lastProgram_[ch] = prog;
-        lastBank_[ch] = -2;
+        sent_[ch].program = prog;
+        sent_[ch].bank = -2;
     }
 
     // MPB: where the wheel rests under the commands. It outlives the note, until the next MPB or stop.
     void pitch_bend_event(const Event& ev, const Instrument& ins) {
-        Wheel& w = wheel_at(ev.track, ins, ev.frame);
+        MidiWheel& w = wheel_at(ev.track, ins, ev.frame);
         w.mpb = (ev.pitchBend.value14 & 0x3FFF) - MIDI_BEND_CENTRE;
         wheel_changed(w, ev.frame, /*always=*/true);
     }
 
-    // ── The pitch wheel ──
-    // A track's PSL / PBN slide, PVB / PVX vibrato, FIN and MPB, run as a sampler voice runs them
-    // (engine-mix.cpp `startNotePitchFx`) and sent as the channel's bend, scaled to the instrument's
-    // BEND. A closed form from `from`, so a value does not depend on how often `pump` ran.
-    // ⚠️ The wheel is per CHANNEL on the device: tracks sharing a channel share every bend.
-    struct Wheel {
-        uint8_t channel = 0;
-        int     range   = MIDI_BEND_RANGE_DEFAULT;  // semitones at full throw
-        int64_t from    = 0;
-        float   offset  = 0.0f;                     // the slide, in semitones at `from`…
-        float   target  = 0.0f, rate = 0.0f;        // …moving toward `target`, semitones a frame
-        double  phase   = 0.0;                      // the vibrato: radians at `from`…
-        float   speed   = 0.0f, depth = 0.0f;       // …Hz, semitones; depth 0 = none, phase held
-        float   fine    = 0.0f;                     // FIN, semitones
-        int     mpb     = 0;                        // MPB, wheel steps off centre; outlives the note
-        int64_t next    = INT64_MAX;                // when it is next re-sent; INT64_MAX = still
-    };
-
-    static float slide_at(const Wheel& w, int64_t frame) {
-        if (w.rate == 0.0f) return w.offset;
-        const double dt = static_cast<double>(std::max<int64_t>(0, frame - w.from));
-        const double v  = w.offset + static_cast<double>(w.rate) * dt;
-        return static_cast<float>(w.rate > 0.0f ? std::min(v, static_cast<double>(w.target))
-                                                : std::max(v, static_cast<double>(w.target)));
-    }
-
-    double phase_at(const Wheel& w, int64_t frame) const {
-        constexpr double TWO_PI = 6.283185307179586;
-        if (w.depth <= 0.0f) return w.phase;
-        const double dt = static_cast<double>(std::max<int64_t>(0, frame - w.from));
-        return std::fmod(w.phase + TWO_PI * w.speed * dt / sampleRate_, TWO_PI);
-    }
-
-    int wheel_value(const Wheel& w, int64_t frame) const {
-        float semis = slide_at(w, frame) + w.fine;
-        if (w.depth > 0.0f) semis += static_cast<float>(std::sin(phase_at(w, frame))) * w.depth;
-        const long v = std::lround(MIDI_BEND_CENTRE + w.mpb + semis / static_cast<float>(w.range) * 8192.0f);
-        return static_cast<int>(std::clamp(v, 0L, 16383L));
-    }
-
-    // The anchor moves to `frame`; the motion goes on from where it has got to.
-    void settle(Wheel& w, int64_t frame) const {
-        if (frame <= w.from) return;
-        w.offset = slide_at(w, frame);
-        if (w.offset == w.target) w.rate = 0.0f;
-        w.phase = phase_at(w, frame);
-        w.from  = frame;
-    }
-
-    // Moving, unless the slide has landed or is pinned at the wheel's end, and there is no vibrato.
-    bool wheel_moves(const Wheel& w, int64_t frame) const {
-        if (w.depth > 0.0f) return true;
-        if (w.rate == 0.0f || slide_at(w, frame) == w.target) return false;
-        const int v = wheel_value(w, frame);
-        return w.rate > 0.0f ? v < 16383 : v > 0;
-    }
-
-    // The next re-send after one at `frame`. A slide's landing is a point of its own, so it is exact.
-    void plan_next(Wheel& w, int64_t frame) const {
-        if (!wheel_moves(w, frame)) {
-            w.next = INT64_MAX;
-            return;
-        }
-        int64_t next = frame + wheel_step();
-        if (w.rate != 0.0f) {
-            const int64_t land = frame + static_cast<int64_t>(std::ceil((w.target - slide_at(w, frame)) / w.rate));
-            if (land > frame && land < next) next = land;
-        }
-        w.next = next;
-    }
-
-    int64_t wheel_step() const {
-        return std::max<int64_t>(1, static_cast<int64_t>(sampleRate_) * MIDI_WHEEL_MS / 1000);
-    }
-
-    void queue_wheel(const Wheel& w, int64_t frame, bool always = false) {
-        const int v = wheel_value(w, frame);
-        queue(frame, MIDI_PITCH_BEND | w.channel, static_cast<uint8_t>(v & 0x7F),
-              static_cast<uint8_t>((v >> 7) & 0x7F), 3, static_cast<uint8_t>(w.range), always);
-    }
+    // ── The pitch wheel (midi_wheel.h) ──
 
     // Queue the re-sends due before `until`. A backlog the clock has left behind collapses into its
     // newest re-send: a stale position is worse than none, and it is what bounds a late `pump`.
     void run_wheel(uint8_t track, int64_t until) {
         if (track >= TrackInstruments::LANES) return;
-        Wheel& w = wheel_[track];
-        const int64_t step = wheel_step(), passed = std::min(until - 1, lastDue_);
+        MidiWheel& w = wheel_[track];
+        const int64_t step = wheel_step(sampleRate_), passed = std::min(until - 1, lastDue_);
         if (w.next < until && w.next <= passed && passed - w.next >= step) {
             const int64_t at = w.next + (passed - w.next) / step * step;
             queue_wheel(w, at);
-            plan_next(w, at);
+            wheel_plan_next(w, at, sampleRate_);
         }
         while (w.next < until) {
             const int64_t at = w.next;
             queue_wheel(w, at);
-            plan_next(w, at);
+            wheel_plan_next(w, at, sampleRate_);
         }
     }
 
+    void queue_wheel(const MidiWheel& w, int64_t frame, bool always = false) {
+        const int v = wheel_value(w, frame, sampleRate_);
+        queue(frame, MIDI_PITCH_BEND | w.channel, static_cast<uint8_t>(v & 0x7F),
+              static_cast<uint8_t>((v >> 7) & 0x7F), 3, static_cast<uint8_t>(w.range), always);
+    }
+
     // The track's wheel, aimed at the instrument playing there and anchored at `frame`.
-    Wheel& wheel_at(uint8_t track, const Instrument& ins, int64_t frame) {
-        Wheel& w = wheel_[track];
-        settle(w, frame);
+    MidiWheel& wheel_at(uint8_t track, const Instrument& ins, int64_t frame) {
+        MidiWheel& w = wheel_[track];
+        wheel_settle(w, frame, sampleRate_);
         w.channel = chan(ins);
         w.range   = std::clamp(ins.midiBendRange, MIDI_BEND_RANGE_MIN, MIDI_BEND_RANGE_MAX);
         return w;
     }
 
-    void wheel_changed(Wheel& w, int64_t frame, bool always = false) {
+    void wheel_changed(MidiWheel& w, int64_t frame, bool always = false) {
         queue_wheel(w, frame, always);
-        plan_next(w, frame);
+        wheel_plan_next(w, frame, sampleRate_);
     }
 
-    // A note starts everything over but MPB, as a voice does.
     void start_wheel(const Event& ev, const Instrument& ins) {
-        Wheel& w = wheel_[ev.track];
-        const int mpb = w.mpb;
-        w = Wheel{};
-        w.mpb  = mpb;
-        w.from = ev.frame;
+        MidiWheel& w = wheel_[ev.track];
+        wheel_start_note(w, ev.frame, ev.noteOn, tempo_now(), sampleRate_);
         wheel_at(ev.track, ins, ev.frame);
-
-        const NoteOnPayload& n = ev.noteOn;
-        const int   tempo = tempo_now();
-        const float tic   = frames_per_tic_f(tempo, sampleRate_);
-        const float pslOff = f32_from_bits(n.pslOffBits), pslDur = f32_from_bits(n.pslDurBits);
-        if (std::fabs(pslOff) > 0.001f && pslDur > 0.0f) {
-            w.offset = pslOff;
-            w.rate   = -pslOff / std::max(1.0f, pslDur * tic);
-        }
-        // PBN, semitones a step, takes a PSL's slide over from its offset.
-        const float pbn = f32_from_bits(n.pbnRateBits);
-        if (pbn != 0.0f) {
-            w.rate   = pbn / (tic * TICS_PER_STEP);
-            w.target = pbn > 0.0f ? 127.0f : -127.0f;
-        }
-        const float depth = f32_from_bits(n.vibDepBits);
-        if (depth > 0.01f) {
-            w.speed = f32_from_bits(n.vibSpdBits);
-            w.depth = depth;
-        }
         wheel_changed(w, ev.frame);
     }
 
-    // PBN on an empty step: a new rate from where the slide has got to; 00 holds it there.
     void wheel_rate(const Event& ev, const Instrument& ins) {
-        Wheel& w = wheel_at(ev.track, ins, ev.frame);
-        const float perStep = f32_from_bits(ev.extPitchRate.rateBits);
-        if (perStep == 0.0f) {
-            w.rate = 0.0f;
-        } else {
-            const int tempo = ev.extPitchRate.tempo > 0 ? ev.extPitchRate.tempo : tempo_;
-            w.rate   = perStep / (frames_per_tic_f(tempo, sampleRate_) * TICS_PER_STEP);
-            w.target = perStep > 0.0f ? 127.0f : -127.0f;
-        }
+        MidiWheel& w = wheel_at(ev.track, ins, ev.frame);
+        const int tempo = ev.extPitchRate.tempo > 0 ? ev.extPitchRate.tempo : tempo_;
+        wheel_set_rate(w, f32_from_bits(ev.extPitchRate.rateBits), tempo, sampleRate_);
         wheel_changed(w, ev.frame);
     }
 
-    // PVB / PVX on an empty step: the phase runs on; 00 stops the vibrato.
     void wheel_vibrato(const Event& ev, const Instrument& ins) {
-        Wheel& w = wheel_at(ev.track, ins, ev.frame);
-        const float depth = f32_from_bits(ev.extVibrato.depthBits);
-        if (depth < 0.01f) {
-            w.depth = 0.0f;
-        } else {
-            w.speed = f32_from_bits(ev.extVibrato.speedBits);
-            w.depth = depth;
-        }
+        MidiWheel& w = wheel_at(ev.track, ins, ev.frame);
+        wheel_set_vibrato(w, f32_from_bits(ev.extVibrato.speedBits), f32_from_bits(ev.extVibrato.depthBits));
         wheel_changed(w, ev.frame);
     }
 
-    // FIN retunes the sounding note; the next note clears it.
     void wheel_fine(const Event& ev, const Instrument& ins) {
-        Wheel& w = wheel_at(ev.track, ins, ev.frame);
-        const int byte = std::clamp(static_cast<int>(f32_from_bits(ev.cc.valueBits) * 255.0f + 0.5f), 0, 255);
-        w.fine = fine_tune_semitones(byte);
+        MidiWheel& w = wheel_at(ev.track, ins, ev.frame);
+        wheel_set_fine(w, f32_from_bits(ev.cc.valueBits));
         wheel_changed(w, ev.frame);
     }
 
@@ -886,12 +704,12 @@ class ExternalConsumer : public IMidiConsumer {
         const int  value  = m.bytes[1] | (m.bytes[2] << 7);
         if (m.bendRange > 0) {
             // Per CHANNEL, at send time: a plain note re-centres a channel another track left bent.
-            if (value == wheelOut_[ch] && !m.bendAlways) return;
-            if (rangeOut_[ch] != m.bendRange) send_range(m, nowFrame);
+            if (value == sent_[ch].wheel && !m.bendAlways) return;
+            if (sent_[ch].range != m.bendRange) send_range(m, nowFrame);
         }
         const bool sent = out_ && out_->is_open();
         if (sent) out_->send(m.bytes, m.len);
-        if (isBend) wheelOut_[ch] = value;
+        if (isBend) sent_[ch].wheel = value;
         if (sent) track_sounding(m);
         // Outside the `sent` test, so timing is measurable with no cable.
         if (observer_) observer_->on_released(m, nowFrame, sent);
@@ -920,19 +738,12 @@ class ExternalConsumer : public IMidiConsumer {
             m.len   = 3;
             emit(m, nowFrame);
         }
-        rangeOut_[bend.bytes[0] & 0x0F] = bend.bendRange;
+        sent_[bend.bytes[0] & 0x0F].range = bend.bendRange;
     }
 
+    // ⚠️ Not `soundingOut_`: what the device holds is forgotten only as its note-offs leave.
     void forget_channel_state() {
-        for (int c = 0; c < 16; ++c) {
-            lastBank_[c] = -2;      // -2, not -1: -1 is a real value ("send nothing")
-            lastProgram_[c] = -2;
-            lastPan_[c] = -1;
-            channelUsed_[c] = false;
-            wheelOut_[c] = MIDI_BEND_CENTRE;
-            rangeOut_[c] = 0;       // unknown: the next bend states it
-            volOut_[c]   = VOL_UNTOUCHED;
-        }
+        for (ChannelSent& c : sent_) c = ChannelSent{};
     }
 
     mutable std::mutex mu_;
@@ -952,16 +763,20 @@ class ExternalConsumer : public IMidiConsumer {
     int     followBpm_     = 0;   // set_follow's
     int64_t followQuarter_ = 0;
 
-    int  lastBank_[16] = {0}, lastProgram_[16] = {0}, lastPan_[16] = {0};
-    bool channelUsed_[16] = {false};
-    int  wheelOut_[16] = {0};   // the bend each channel last received
-    // The CC 7 each channel holds from a VOL: a value, or one of these two.
+    // What each channel of the device was last sent, so a repeat is skipped; forgotten at each start.
     static constexpr int VOL_UNTOUCHED = -1, VOL_UNKNOWN = -2;
-    int  volOut_[16] = {0};
-    int  rangeOut_[16] = {0};   // the BEND it was last told, 0 = not yet this take
+    struct ChannelSent {
+        int  bank = -2, program = -2;    // -2, not -1: -1 is a real value ("send nothing")
+        int  pan = -1;
+        bool used = false;               // a note went out: a panic sends it CC 123
+        int  wheel = MIDI_BEND_CENTRE;   // the bend it last received
+        int  range = 0;                  // the BEND it was last told, 0 = not yet this take
+        int  vol = VOL_UNTOUCHED;        // the CC 7 it holds from a VOL: a value, or VOL_UNTOUCHED / VOL_UNKNOWN
+    };
+    ChannelSent sent_[16];
     std::bitset<128> soundingOut_[16];   // the notes each channel holds — what a panic ends
 
-    Wheel   wheel_[TrackInstruments::LANES];
+    MidiWheel wheel_[TrackInstruments::LANES];
     int64_t lastDue_ = INT64_MIN;   // the newest "now" `pump` has seen
 
     // A sequencer track's state before one of its events; `seq` is the first message queued from there.
@@ -970,7 +785,7 @@ class ExternalConsumer : public IMidiConsumer {
         uint32_t   seq;
         int16_t    instrument;
         ActiveNote active;
-        Wheel      wheel;
+        MidiWheel  wheel;
     };
     static constexpr size_t HISTORY_CAP = 1024;
     std::vector<TrackSnap> history_[POOL_TRACKS];   // per track, in frame order

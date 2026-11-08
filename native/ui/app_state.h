@@ -27,7 +27,7 @@
 #include "ui/selection.h"
 
 #include "songcore/midi_in.h"    // IMidiIn
-#include "songcore/midi_out.h"   // IMidiOut
+#include "songcore/midi_port.h"  // IMidiOut
 
 #include <cstdint>
 #include <string>

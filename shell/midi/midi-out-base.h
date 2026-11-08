@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <string>
 
-#include "songcore/midi_out.h"
+#include "songcore/midi_port.h"
 
 namespace ptshell {
 
