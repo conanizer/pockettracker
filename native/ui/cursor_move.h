@@ -130,23 +130,20 @@ inline void snap_instrument_cursor(AppState& s) {
 }
 
 
-// ─── SAMPLE EDITOR: sparse rows (ui/modules/sample_editor.h), so a step is a lookup ──────────────
+// ─── SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────────
 namespace detail {
 
 inline void sample_editor_step_row(AppState& s, int delta) {
     SampleEditorState& se = s.sampleEditor;
-    const int newRow = (delta < 0) ? SampleEditorModule::row_above(se.cursorRow, se.sliceMethod)
-                                   : SampleEditorModule::row_below(se.cursorRow, se.sliceMethod);
-    se.cursorRow = newRow;
-    se.cursorCol = std::min(se.cursorCol,
-                            SampleEditorModule::max_col_for_row(newRow, se.sliceMethod));
+    se.cursorRow = SampleEditorModule::row_step(se.cursorRow, delta, se.sliceMethod);
+    se.cursorCol = std::min(se.cursorCol, SampleEditorModule::max_col(se.cursorRow, se.sliceMethod));
 }
 
-// The two op rows (13, 14) wrap; every other row clamps.
+// The two op rows wrap; every other row clamps.
 inline void sample_editor_step_col(AppState& s, int delta) {
     SampleEditorState& se     = s.sampleEditor;
-    const int          maxCol = SampleEditorModule::max_col_for_row(se.cursorRow, se.sliceMethod);
-    const bool         isOps  = (se.cursorRow == 13 || se.cursorRow == 14);
+    const int          maxCol = SampleEditorModule::max_col(se.cursorRow, se.sliceMethod);
+    const bool         isOps  = (se.cursorRow == SampleRow::OPS1 || se.cursorRow == SampleRow::OPS2);
 
     if (isOps) {
         se.cursorCol = (delta < 0) ? ((se.cursorCol == 0) ? maxCol : se.cursorCol - 1)

@@ -2874,7 +2874,7 @@ inline HelpTopic theme_cell_topic(int row, int channel) {
 // The sample editor. Row 10 column 1 is SENS or BY by slice method; row 19 column 3 (CHOP) exists only
 // with slices.
 // ⚠️ OPS_1/OPS_2 are indexed by column: keep them in `ops_row1()`/`ops_row2()` order (sample_editor.cpp).
-inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method) {
+inline HelpTopic sample_editor_cell_topic(SampleRow row, int column, int slice_method) {
     static constexpr HelpTopic OPS_1[] = {HelpTopic::SE_OP_CROP,  HelpTopic::SE_OP_COPY,
                                           HelpTopic::SE_OP_CUT,   HelpTopic::SE_OP_DUPL,
                                           HelpTopic::SE_OP_PASTE, HelpTopic::SE_OP_DEL};
@@ -2884,45 +2884,43 @@ inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method)
     const bool op_col = (column >= 0 && column < 6);
 
     switch (row) {
-        case 1:
+        case SampleRow::VIEW:
             if (column == 0) return HelpTopic::SE_ZOOM;
             if (column == 1) return HelpTopic::SE_SOURCE;
             return (column == 2) ? HelpTopic::SE_RATE : HelpTopic::NONE;
-        case 2:
+        case SampleRow::EDIT:
             if (column == 0) return HelpTopic::SE_PITCH;
             if (column == 1) return HelpTopic::SE_DURATION;
             return (column == 2) ? HelpTopic::SE_BIT : HelpTopic::NONE;
 
-        // Rows 3..8 are the selection; the column is which edge.
-        case 3: case 4: case 5: case 6: case 7: case 8:
+        case SampleRow::SELECTION:   // the column is which edge
             return (column == 1) ? HelpTopic::SE_SEL_END : HelpTopic::SE_SEL_START;
 
-        case 10:
+        case SampleRow::SLICE:
             if (column == 0) return HelpTopic::SE_SLICE_METHOD;
             if (column != 1) return HelpTopic::NONE;
             if (slice_method == SampleEditorModule::SLICE_TRANSIENT) return HelpTopic::SE_SLICE_SENS;
             if (slice_method == SampleEditorModule::SLICE_DIVIDE)    return HelpTopic::SE_SLICE_BY;
             return HelpTopic::NONE;
-        case 11:
+        case SampleRow::SLICE_AT:
             return (column == 1) ? HelpTopic::SE_SLICE_POS : HelpTopic::SE_SLICE_INDEX;
 
-        case 13: return op_col ? OPS_1[column] : HelpTopic::NONE;
-        case 14: return op_col ? OPS_2[column] : HelpTopic::NONE;
+        case SampleRow::OPS1: return op_col ? OPS_1[column] : HelpTopic::NONE;
+        case SampleRow::OPS2: return op_col ? OPS_2[column] : HelpTopic::NONE;
 
-        case 16:
+        case SampleRow::FX:
             if (column == 0) return HelpTopic::SE_FX_TYPE;
             if (column == 1) return HelpTopic::SE_FX_VALUE;
             return (column == 2) ? HelpTopic::SE_FX_APPLY : HelpTopic::NONE;
 
-        case 18: return HelpTopic::SE_NAME;
-        case 19:
+        case SampleRow::NAME: return HelpTopic::SE_NAME;
+        case SampleRow::FILE:
             if (column == 0) return HelpTopic::SE_LOAD;
             if (column == 1) return HelpTopic::SE_SAVE;
             if (column == 2) return HelpTopic::SE_OVERWRITE;
             return (column == 3) ? HelpTopic::SE_CHOP : HelpTopic::NONE;
-
-        default: return HelpTopic::NONE;   // the title bar and the four spacer rows
     }
+    return HelpTopic::NONE;
 }
 
 // The TSTRETCH box. DURATION is the editor's own cell, shown again.

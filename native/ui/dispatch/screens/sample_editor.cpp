@@ -27,8 +27,8 @@ int64_t coarse_step(const SampleEditorState& se) {
 GestureResult InputDispatcher::sample_editor_screen(Gesture g) {
     SampleEditorState& se = s_.sampleEditor;
 
-    // A+DPAD drags the selection's active edge on rows 3..8, the slice boundary on row 11's POSITION
-    // cell; elsewhere it edits the cell like any screen.
+    // A+DPAD drags the selection's active edge on SELECTION, the slice boundary on SLICE_AT's
+    // POSITION cell; elsewhere it edits the cell like any screen.
     auto nudge = [&](int64_t delta) {
         if (on_sample_selection_row())        sampleSession_.nudge_selection_edge(delta);
         else if (on_sample_slice_marker_row()) sampleSession_.nudge_slice_marker(delta);
@@ -58,19 +58,19 @@ GestureResult InputDispatcher::sample_editor_screen(Gesture g) {
         case Gesture::A_RIGHT: return nudge(+fine_step(se));
 
         case Gesture::A_B:
-            // The SELECTION row: back to the sample's own bound — START to 0, END to the last frame.
-            if (se.cursorRow == 8) {
+            // SELECTION: back to the sample's own bound — START to 0, END to the last frame.
+            if (se.cursorRow == SampleRow::SELECTION) {
                 if (se.cursorCol == 0)      se.selectionStart = 0;
                 else if (se.cursorCol == 1) se.selectionEnd   = se.totalFrames;
                 return GestureResult::TAKEN;
             }
-            // The SLICE DETAIL row: the boundary back where its method would put it; under MANUAL, gone.
-            if (se.cursorRow == 11) {
+            // SLICE_AT: the boundary back where its method would put it; under MANUAL, gone.
+            if (se.cursorRow == SampleRow::SLICE_AT) {
                 sampleSession_.reset_slice_marker();
                 return GestureResult::TAKEN;
             }
             // The TSTRETCH cell: everything its box dials, back as a session opens.
-            if (se.cursorRow == 16 && se.cursorCol == 1 && se.fxType == SampleEditorModule::FX_SYNC &&
+            if (se.cursorRow == SampleRow::FX && se.cursorCol == 1 && se.fxType == SampleEditorModule::FX_SYNC &&
                 se.syncType == SampleEditorModule::SYNC_TSTRETCH) {
                 se.reset_stretch();
                 return GestureResult::TAKEN;
@@ -118,10 +118,7 @@ void InputDispatcher::open_sample_editor() {
     if (ins.instrumentType == songcore::InstrumentType::SOUNDFONT) return;
 
     s_.sampleEditor              = SampleEditorState{};   // a fresh session, every time
-    s_.sampleEditor.sampleId     = s_.currentInstrument;
     s_.sampleEditor.instrumentId = s_.currentInstrument;
-    s_.sampleEditor.cursorRow    = 1;
-    s_.sampleEditor.cursorCol    = 0;
 
     s_.previousScreen = s_.currentScreen;
     s_.currentScreen  = ScreenType::SAMPLE_EDITOR;
@@ -132,7 +129,7 @@ void InputDispatcher::open_sample_editor() {
 
 void InputDispatcher::sample_editor_confirm() {
     SampleEditorState& se = s_.sampleEditor;
-    if (se.cursorRow != 18 && se.cursorRow != 19) {
+    if (se.cursorRow != SampleRow::NAME && se.cursorRow != SampleRow::FILE) {
         sampleSession_.run_op();
         return;
     }
@@ -141,14 +138,13 @@ void InputDispatcher::sample_editor_confirm() {
     host_.restore_fx_preview_backup();
 
     switch (se.cursorRow) {
-        // ── Row 18: NAME ────────────────────────────────────────────────────────────────────────
-        case 18:
+        case SampleRow::NAME:
             open_qwerty(QwertyContext::SAMPLE_NAME, se.sampleName, "SAMPLE NAME:",
                         fs_.samples_directory());
             break;
 
-        // ── Row 19: LOAD  SAVE  OVERWRITE  CHOP ─────────────────────────────────────────────────
-        case 19:
+        // ── FILE: LOAD  SAVE  OVERWRITE  CHOP ───────────────────────────────────────────────────
+        case SampleRow::FILE:
             switch (se.cursorCol) {
                 case 0: {   // LOAD — a different sample, into the slot the editor is already open on
                     // ⚠️ Keep previousScreen as the editor's return target.

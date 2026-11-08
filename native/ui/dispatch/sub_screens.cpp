@@ -144,7 +144,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
         case ScreenType::SAMPLE_EDITOR: {
             // The FX row's VALUE cell: an EQ slot opens the EQ editor, TSTRETCH its box.
             const SampleEditorState& se = s_.sampleEditor;
-            if (se.cursorRow != 16 || se.cursorCol != 1) break;
+            if (se.cursorRow != SampleRow::FX || se.cursorCol != 1) break;
             if (se.fxType == SampleEditorModule::FX_EQ) {
                 if (!peek) {
                     // ⚠️ "--" takes slot 00 on open: START and APPLY read the cell.

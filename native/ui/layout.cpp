@@ -504,8 +504,9 @@ void TrackerLayout::draw_button_locks(Canvas& c, const AppState& s) const {
     const bool full = full_screen_module(s);
     const int  x0   = full ? DESIGN_W - SIDE_SPACER - 5 * SLOT_W : RIGHT_BAR_X;
     const int  y    = !full ? EDITOR_Y + ROW_HEIGHT + 14 + 10 * ROW_HEIGHT + 10
-                    : s.currentScreen == ScreenType::SAMPLE_EDITOR ? SampleEditorModule::content_y(9)
-                                                                   : SCREEN_SPACER + ROW_HEIGHT;
+                    : s.currentScreen == ScreenType::SAMPLE_EDITOR
+                        ? SampleEditorModule::row_y(SampleRow::SELECTION) + ROW_HEIGHT
+                        : SCREEN_SPACER + ROW_HEIGHT;
     for (int i = 0; i < 5; ++i) {
         const uint16_t bit = static_cast<uint16_t>(1u << static_cast<int>(SLOTS[i].button));
         const int      x   = x0 + i * SLOT_W + 3;

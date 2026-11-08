@@ -941,29 +941,29 @@ class InputDispatcher {
     bool sample_close_open() const { return on_sample_editor() && s_.sampleEditor.showConfirmClose; }
     GestureResult sample_close_layer(Gesture g);
 
-    // Rows 3..8: the D-pad drags the selection instead of moving a cursor.
+    // SELECTION: the D-pad drags the selection instead of moving a cursor.
     bool on_sample_selection_row() const {
-        return on_sample_editor() && s_.sampleEditor.cursorRow >= 3 && s_.sampleEditor.cursorRow <= 8;
+        return on_sample_editor() && s_.sampleEditor.cursorRow == SampleRow::SELECTION;
     }
 
     // INSTRUMENT's EDIT button. Samplers only.
     void open_sample_editor();
 
-    // Row 11's POSITION cell: A+DPAD drags the boundary under the cursor. Col 0 keeps choosing the marker.
+    // SLICE_AT's POSITION cell: A+DPAD drags the boundary under the cursor. Col 0 keeps choosing the marker.
     bool on_sample_slice_marker_row() const {
-        return on_sample_editor() && s_.sampleEditor.cursorRow == 11 &&
+        return on_sample_editor() && s_.sampleEditor.cursorRow == SampleRow::SLICE_AT &&
                s_.sampleEditor.cursorCol == 1 &&
                s_.sampleEditor.sliceMethod != SampleEditorModule::SLICE_OFF;
     }
 
-    // Row 11 under MANUAL: a plain A is the chop tap, held by the mapper until release.
+    // SLICE_AT under MANUAL: a plain A is the chop tap, held by the mapper until release.
     // ⚠️ Every other gesture here starts with A held; a tap on the press would add an unasked boundary.
     bool on_slice_tap_cell() const {
-        return on_sample_editor() && s_.sampleEditor.cursorRow == 11 &&
+        return on_sample_editor() && s_.sampleEditor.cursorRow == SampleRow::SLICE_AT &&
                s_.sampleEditor.sliceMethod == SampleEditorModule::SLICE_MANUAL;
     }
 
-    // A on rows 11/13/14/16/18/19 — the tap, the ops, the FX apply, the name, the save buttons.
+    // A on SLICE_AT, the op rows, FX, NAME and FILE — the tap, the ops, the apply, the name, the save buttons.
     void sample_editor_confirm();
 
     // ── The TSTRETCH box (ui/dispatch/layers/stretch_editor.cpp) ─────────────────────────────────

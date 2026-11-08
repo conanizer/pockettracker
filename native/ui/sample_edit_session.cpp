@@ -13,14 +13,13 @@ using songcore::Instrument;
 
 namespace {
 
-/** The selection and the slice position, moved with audio that went from `oldLen` frames to `newLen`. */
+/** The selection, moved with audio that went from `oldLen` frames to `newLen`. */
 void rescale_positions(SampleEditorState& se, int oldLen, int newLen) {
     auto scale = [&](int64_t f) -> int64_t {
         return oldLen > 0 ? std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen) : 0;
     };
     se.selectionStart = scale(se.selectionStart);
     se.selectionEnd   = scale(se.selectionEnd);
-    se.slicePosition  = scale(se.slicePosition);
 }
 
 /** DIVIDE's boundaries: `divisions` equal slices. */
@@ -211,7 +210,7 @@ void SampleEditSession::nudge_selection_edge(int64_t delta) {
     }
 }
 
-// ─── The slice markers: A+DPAD and A+B on row 11 ─────────────────────────────────────────────────
+// ─── The slice markers: A+DPAD and A+B on SLICE_AT ───────────────────────────────────────────────
 
 /** Copy what the method shows into the editable list, stamped with its (method, parameter). */
 void SampleEditSession::materialise_manual_markers() {
@@ -233,7 +232,7 @@ void SampleEditSession::materialise_manual_markers() {
     se.manualKeyParam  = se.manual_key_param();
 }
 
-/** The selection follows row 11's slice. ⚠️ Every boundary or cursor move ends here, so START plays
+/** The selection follows SLICE_AT's slice. ⚠️ Every boundary or cursor move ends here, so START plays
  *  the slice as it now is. */
 void SampleEditSession::select_current_slice() {
     SampleEditorState& se = s_.sampleEditor;
@@ -266,7 +265,7 @@ void SampleEditSession::nudge_slice_marker(int64_t delta) {
 
     const int dir  = (delta > 0) ? 1 : -1;
     int64_t   want = from + delta;
-    // SNAP (row 2) applies to boundaries as to selection edges, searching in the direction of travel.
+    // SNAP applies to boundaries as to selection edges, searching in the direction of travel.
     if (se.snapEnabled)
         want = host_.find_zero_crossing(
             se.instrumentId,
@@ -406,8 +405,8 @@ void SampleEditSession::run_op() {
     before_long_operation();
     SampleEditorState& se     = s_.sampleEditor;
     // ⚠️ First: an auditioned effect has processed the sample itself, and COPY or an op would take it.
-    // Not on row 11, whose tap must not stop the audition it is tapped against.
-    if (se.cursorRow != 11) host_.restore_fx_preview_backup();
+    // Not on SLICE_AT, whose tap must not stop the audition it is tapped against.
+    if (se.cursorRow != SampleRow::SLICE_AT) host_.restore_fx_preview_backup();
     const int          instId = se.instrumentId;
     const int          startF = static_cast<int>(se.selectionStart);
     const int          endF   = static_cast<int>(se.selectionEnd);
@@ -430,14 +429,14 @@ void SampleEditSession::run_op() {
     };
 
     switch (se.cursorRow) {
-        // ── Row 11: cut a boundary at the playhead, mid-audition ─────────────────────────────────
+        // ── SLICE_AT: cut a boundary at the playhead, mid-audition ───────────────────────────────
         // On A's release (defer_a_to_release), at the playhead of the press. Editor state: no backup.
-        case 11:
+        case SampleRow::SLICE_AT:
             tap_slice_marker();
             break;
 
-        // ── Row 13: CROP  COPY  CUT  DUPL  PASTE  DEL ────────────────────────────────────────────
-        case 13:
+        // ── OPS1: CROP  COPY  CUT  DUPL  PASTE  DEL ──────────────────────────────────────────────
+        case SampleRow::OPS1:
             switch (se.cursorCol) {
                 case 0:   // CROP — keep the selection, discard the rest
                     if (startF < endF) resizing([&] { return host_.crop_sample(instId, startF, endF); });
@@ -469,8 +468,8 @@ void SampleEditSession::run_op() {
             }
             break;
 
-        // ── Row 14: NORM  FADE+  FADE-  SLNC  REV  UNDO ──────────────────────────────────────────
-        case 14:
+        // ── OPS2: NORM  FADE+  FADE-  SLNC  REV  UNDO ────────────────────────────────────────────
+        case SampleRow::OPS2:
             switch (se.cursorCol) {
                 case 0: in_place([&] { host_.normalize_sample(instId, startF, endF); }); break;
                 case 1: in_place([&] { host_.fade_in_sample(instId, startF, endF); }); break;
@@ -484,15 +483,14 @@ void SampleEditSession::run_op() {
                     if (!host_.undo_sample(instId)) { out_of_memory(); break; }
                     refresh_view(host_.sample_length(instId) != lenBefore);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
-                    se.slicePosition = std::clamp<int64_t>(se.slicePosition, 0, se.totalFrames);
                     break;
                 }
                 default: break;
             }
             break;
 
-        // ── Row 16: the FX row. Col 2 is APPLY; the other two are dialled with A+DPAD. ───────────
-        case 16: {
+        // ── FX: col 2 is APPLY; the other two are dialled with A+DPAD. ───────────────────────────
+        case SampleRow::FX: {
             if (se.cursorCol != 2) break;
 
             if (se.fxType <= SampleEditorModule::FX_EQ) {

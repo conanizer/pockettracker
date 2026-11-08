@@ -4,9 +4,8 @@
 // (640×480): a waveform needs the width. All DSP is in the engine (`native/sample-editor.cpp`); this
 // draws and walks the cursor.
 //
-// The row map is sparse: the cursor walks 1, 2, 8, 10, 11, 13, 14, 16, 18, 19 — rows 3–7 are the
-// waveform, 9/12/15/17 spacers. Row 11 is unreachable with slicing OFF.
-// ⚠️ On rows 3..8 the D-pad drags a selection edge (the dispatcher does it), so `cursor_context()`
+// The cursor walks the ten `SampleRow`s; the waveform between EDIT and SELECTION has none.
+// ⚠️ On SELECTION the D-pad drags a selection edge (the dispatcher does it), so `cursor_context()`
 // answers `none()` there.
 
 #include <cstdint>
@@ -31,14 +30,17 @@ struct SliceMarker {
 // The TSTRETCH box's cells in cursor order. PREVIEW and APPLY share the last line.
 enum class StretchCell { DURATION, BPM, PITCH, GRAIN, PREVIEW, APPLY };
 
+// The rows the cursor walks, top to bottom. SLICE_AT is there only while slicing is on.
+enum class SampleRow { VIEW, EDIT, SELECTION, SLICE, SLICE_AT, OPS1, OPS2, FX, NAME, FILE };
+inline constexpr int SAMPLE_ROW_COUNT = 10;
+
 // The editor's session state. The audio is in the engine (only the waveform's min/max pairs are
 // here); name, path and slice markers reach the document only when saved.
 struct SampleEditorState {
-    int sampleId     = 0;
     int instrumentId = 0;
 
-    int cursorRow = 1;
-    int cursorCol = 0;
+    SampleRow cursorRow = SampleRow::VIEW;
+    int       cursorCol = 0;
 
     // ── The sample, as the engine reports it ─────────────────────────────────────────────────────
     std::string sampleName;
@@ -51,7 +53,7 @@ struct SampleEditorState {
     std::vector<float> waveformData;
     int                audioVersion = 0;   // bumped by every load or op that rewrites the audio
 
-    // ── Row 1: the view ──────────────────────────────────────────────────────────────────────────
+    // ── VIEW ─────────────────────────────────────────────────────────────────────────────────────
     int  zoomLevel     = 0;      // 0 = 1×, 1 = 2×, … 4 = 16×
     // 0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO. Opens on STEREO when there is a right channel —
     // only that mode saves both.
@@ -59,7 +61,7 @@ struct SampleEditorState {
     int  rateMode      = 0;      // 0 = HIGH, 1 = NORM, 2 = LOFI  (a DESTRUCTIVE decimation)
     bool hasStereoData = false;  // the loaded sample has a right channel
 
-    // ── Row 2: the edit controls ─────────────────────────────────────────────────────────────────
+    // ── EDIT ─────────────────────────────────────────────────────────────────────────────────────
     // A pending shift in semitones; SAVE bakes it.
     int  pitchSemitones = 0;
     int  durationIndex  = 2;     // "1 BAR" — the target SYNC stretches/pitches to
@@ -78,12 +80,9 @@ struct SampleEditorState {
     int sliceMethod      = 2;   // 0 = TRANSIENT, 1 = DIVIDE, 2 = OFF, 3 = MANUAL
     int sliceSensitivity = 64;  // TRANSIENT: the detector's threshold
     int sliceDivisions   = 8;   // DIVIDE: cut into N equal parts
-    // Row 11: which slice, under every method. ⚠️ Slice 00's left edge is the sample start, not a
+    // SLICE_AT: which slice, under every method. ⚠️ Slice 00's left edge is the sample start, not a
     // marker (`slice_marker_index()`). Under MANUAL it reaches one past the last slice: the next one.
     int sliceIndex       = 0;
-
-    // ⚠️ Kept for UNDO and the two SYNC ops; the slice rows read `effective_slice_position()`.
-    int64_t slicePosition = 0;
 
     // The file's own markers (its `cue ` chunk), cleared by a length-changing op. What SLICE = OFF
     // shows and saves back, and where MANUAL starts. Sorted, unique, strictly inside the sample.
@@ -101,7 +100,7 @@ struct SampleEditorState {
     int manualKeyMethod = -1;
     int manualKeyParam  = -1;
 
-    // ── Row 16: the FX row ───────────────────────────────────────────────────────────────────────
+    // ── FX ───────────────────────────────────────────────────────────────────────────────────────
     int fxType   = 0;   // 0 = OTT, 1 = DUST, 2 = DRIVE, 3 = EQ, 4 = SYNC
     int fxValue  = 0;   // OTT / DUST / DRIVE: the amount. 0 = nothing to audition or apply
     int fxEqSlot = -1;  // EQ: the slot in the 128-preset bank. −1 = none, drawn "--"
@@ -144,13 +143,13 @@ struct SampleEditorState {
     // MANUAL's free slot.
     int slice_marker_index() const;
 
-    // Row 11's top index: N markers → N, MANUAL one further.
+    // SLICE_AT's top index: N markers → N, MANUAL one further.
     int slice_index_ceiling() const;
 
     // (start, end) of slice `idx`. OFF = the whole sample.
     void slice_bounds(int idx, int64_t& start, int64_t& end) const;
 
-    // Row 11's position: the start of the slice under the cursor.
+    // SLICE_AT's position: the start of the slice under the cursor.
     int64_t effective_slice_position() const;
 
     // The visible frame window: the whole sample at zoom 0, else `totalFrames >> zoom` centred on
@@ -195,7 +194,6 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
 
 // What `handle_input` changed, so the dispatcher knows which engine calls to make.
 struct SampleEditorInputResult {
-    bool modified = false;
     // RATE and BIT are destructive: the dispatcher rebuilds the audio from the cached original.
     bool rateModeChanged = false;
     bool bitDepthChanged = false;
@@ -211,8 +209,8 @@ public:
     static constexpr int WAVEFORM_H = 155;
     static constexpr int WAVEFORM_W = 620;
 
-    // Rows 8..19 sit under the waveform.
-    static int content_y(int row);
+    // Where a row is drawn, from the module's top.
+    static int row_y(SampleRow row);
 
     static const std::vector<std::string>& source_values();    // LEFT / RIGHT / STEREO / MONO
     static const std::vector<std::string>& rate_values();      // HIGH / NORM / LOFI
@@ -244,16 +242,14 @@ public:
     // ⚠️ Appended after OFF: `sliceMethod` survives a session.
     static constexpr int SLICE_MANUAL    = 3;
 
-    // Row 10's second cell: SENS (TRANSIENT) or BY (DIVIDE).
+    // SLICE's second cell: SENS (TRANSIENT) or BY (DIVIDE).
     static constexpr bool slice_has_parameter(int slice_method) {
         return slice_method == SLICE_TRANSIENT || slice_method == SLICE_DIVIDE;
     }
 
-    // Rows 3–7 and the spacers are skipped, and row 11 too with slicing OFF; row 1 and 19 wrap.
-    static int row_above(int row, int slice_method = -1);
-    static int row_below(int row, int slice_method = -1);
-    static int max_col_for_row(int row, int slice_method = SLICE_OFF);
-
+    // The next row up (`delta` −1) or down, wrapping; SLICE_AT is skipped with slicing OFF.
+    static SampleRow row_step(SampleRow row, int delta, int slice_method);
+    static int max_col(SampleRow row, int slice_method);
 
     void draw(Canvas& c, int x, int y, const SampleEditorState& s, const Theme& t) const;
 

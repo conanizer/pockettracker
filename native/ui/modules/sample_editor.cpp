@@ -74,45 +74,47 @@ const std::vector<std::string>& SampleEditorModule::ops_row2() {
     return v;
 }
 
-int SampleEditorModule::content_y(int row) { return (row - 8) * ROW_HEIGHT + 228; }
+// ─── The rows ────────────────────────────────────────────────────────────────────────────────────
 
-// ─── The sparse row map ──────────────────────────────────────────────────────────────────────────
+namespace {
 
-int SampleEditorModule::row_above(int row, int slice_method) {
-    switch (row) {
-        case 0:  return 0;
-        case 1:  return 19;   // wrap to the last row
-        case 8:  return 2;
-        case 10: return 8;
-        case 13: return (slice_method == SLICE_OFF) ? 10 : 11;
-        case 16: return 14;
-        case 18: return 16;
-        default: return row - 1;
-    }
+// `lines` rows of text under the waveform; the gaps between groups are empty lines.
+constexpr int under_wave(int lines) { return 228 + lines * ROW_HEIGHT; }
+
+constexpr int ROW_Y[SAMPLE_ROW_COUNT] = {
+    26, 47,                        // VIEW, EDIT — above the waveform
+    under_wave(0),                 // SELECTION
+    under_wave(2), under_wave(3),  // SLICE, SLICE_AT
+    under_wave(5), under_wave(6),  // OPS1, OPS2
+    under_wave(8),                 // FX
+    under_wave(10), under_wave(11) // NAME, FILE
+};
+
+}  // namespace
+
+int SampleEditorModule::row_y(SampleRow row) { return ROW_Y[static_cast<int>(row)]; }
+
+SampleRow SampleEditorModule::row_step(SampleRow row, int delta, int slice_method) {
+    int r = static_cast<int>(row);
+    do {
+        r = (r + delta + SAMPLE_ROW_COUNT) % SAMPLE_ROW_COUNT;
+    } while (r == static_cast<int>(SampleRow::SLICE_AT) && slice_method == SLICE_OFF);
+    return static_cast<SampleRow>(r);
 }
 
-int SampleEditorModule::row_below(int row, int slice_method) {
+int SampleEditorModule::max_col(SampleRow row, int slice_method) {
     switch (row) {
-        case 2:  return 8;
-        case 8:  return 10;
-        case 10: return (slice_method == SLICE_OFF) ? 13 : 11;
-        case 11: return 13;
-        case 14: return 16;
-        case 16: return 18;
-        case 19: return 1;    // wrap to the first row
-        default: return row + 1;
+        case SampleRow::VIEW:
+        case SampleRow::EDIT:      return 2;
+        case SampleRow::SELECTION: return 1;   // START / END
+        case SampleRow::SLICE:     return slice_has_parameter(slice_method) ? 1 : 0;
+        case SampleRow::SLICE_AT:  return 1;
+        case SampleRow::OPS1:
+        case SampleRow::OPS2:      return 5;   // six ops per row
+        case SampleRow::FX:        return 2;   // TYPE / VALUE / APPLY
+        case SampleRow::NAME:      return 0;   // the whole row is one cell
+        case SampleRow::FILE:      return (slice_method == SLICE_OFF) ? 2 : 3;   // CHOP needs slices
     }
-}
-
-int SampleEditorModule::max_col_for_row(int row, int slice_method) {
-    if (row == 1 || row == 2) return 2;
-    if (row >= 3 && row <= 8) return 1;          // the selection's two edges (START / END)
-    if (row == 10) return slice_has_parameter(slice_method) ? 1 : 0;
-    if (row == 11) return 1;
-    if (row == 13 || row == 14) return 5;        // six ops per row
-    if (row == 16) return 2;                     // TYPE / VALUE / APPLY
-    if (row == 18) return 0;                     // NAME — the whole row is one cell
-    if (row == 19) return (slice_method == SLICE_OFF) ? 2 : 3;   // CHOP only exists with slices
     return 0;
 }
 
@@ -221,12 +223,12 @@ int64_t SampleEditorState::view_start() const {
 
     // With nothing sounding, centre on the marker the cursor points at.
     int64_t center;
-    if (cursorRow == 8 && cursorCol == 1) {
+    if (cursorRow == SampleRow::SELECTION && cursorCol == 1) {
         center = selectionEnd;
-    } else if (cursorRow == 11 && sliceMethod != SampleEditorModule::SLICE_OFF) {
+    } else if (cursorRow == SampleRow::SLICE_AT && sliceMethod != SampleEditorModule::SLICE_OFF) {
         center = effective_slice_position();
     } else {
-        center = selectionStart;   // row 8 col 0, and every other row
+        center = selectionStart;   // START, and every other row
     }
     const int64_t anchored = window_for(center);
 
@@ -343,9 +345,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         c.draw_text(s.duration_display(), x + 492, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
-    {   // Row 1 — ZOOM / SOURCE / RATE
-        const int  ry  = y + 26;
-        const bool cur = (s.cursorRow == 1);
+    {   // VIEW — ZOOM / SOURCE / RATE
+        const int  ry  = y + row_y(SampleRow::VIEW);
+        const bool cur = (s.cursorRow == SampleRow::VIEW);
         // A mono sample reads MONO whatever the mode (the cell is read-only there).
         const std::string source = s.hasStereoData ? at(source_values(), s.sourceMode) : "MONO";
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
@@ -354,9 +356,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                         "RATE",   at(rate_values(), s.rateMode),           2);
     }
 
-    {   // Row 2 — PITCH / DURATION / BIT
-        const int  ry  = y + 47;
-        const bool cur = (s.cursorRow == 2);
+    {   // EDIT — PITCH / DURATION / BIT
+        const int  ry  = y + row_y(SampleRow::EDIT);
+        const bool cur = (s.cursorRow == SampleRow::EDIT);
         const std::string pitch = (s.pitchSemitones >= 0 ? "+" : "") + std::to_string(s.pitchSemitones);
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
                         "PITCH",    pitch,                                  0,
@@ -366,9 +368,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
 
     draw_waveform(c, x, y + WAVEFORM_Y, s, t);
 
-    {   // Row 8 — the selection, in frames
-        const int  ry  = y + content_y(8);
-        const bool cur = (s.cursorRow == 8);
+    {   // SELECTION, in frames
+        const int  ry  = y + row_y(SampleRow::SELECTION);
+        const bool cur = (s.cursorRow == SampleRow::SELECTION);
         const int ty = ry + TEXT_PADDING;
         c.draw_text("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                     FONT_SCALE);
@@ -378,9 +380,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                          t.textValue, t);
     }
 
-    {   // Row 10 — the slice METHOD, and its one parameter (SENS or BY, depending)
-        const int  ry  = y + content_y(10);
-        const bool cur = (s.cursorRow == 10);
+    {   // SLICE — the METHOD, and its one parameter (SENS or BY, depending)
+        const int  ry  = y + row_y(SampleRow::SLICE);
+        const bool cur = (s.cursorRow == SampleRow::SLICE);
         const int ty = ry + TEXT_PADDING;
         c.draw_text("SLICE", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, at(slice_methods(), s.sliceMethod), x + 175, ty,
@@ -395,9 +397,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         }
     }
 
-    if (s.sliceMethod != SLICE_OFF) {   // Row 11 — which slice, and where it starts
-        const int  ry  = y + content_y(11);
-        const bool cur = (s.cursorRow == 11);
+    if (s.sliceMethod != SLICE_OFF) {   // SLICE_AT — which slice, and where it starts
+        const int  ry  = y + row_y(SampleRow::SLICE_AT);
+        const bool cur = (s.cursorRow == SampleRow::SLICE_AT);
         const int ty = ry + TEXT_PADDING;
 
         // ⚠️ The row has no label, so the cursor's fill is the only sign the cursor is here.
@@ -411,12 +413,14 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                          t.textValue, t);
     }
 
-    draw_ops_row(c, x, y + content_y(13), ops_row1(), s.cursorRow == 13, s.cursorCol, t);
-    draw_ops_row(c, x, y + content_y(14), ops_row2(), s.cursorRow == 14, s.cursorCol, t);
+    draw_ops_row(c, x, y + row_y(SampleRow::OPS1), ops_row1(), s.cursorRow == SampleRow::OPS1,
+                 s.cursorCol, t);
+    draw_ops_row(c, x, y + row_y(SampleRow::OPS2), ops_row2(), s.cursorRow == SampleRow::OPS2,
+                 s.cursorCol, t);
 
-    {   // Row 16 — the FX row. Its VALUE cell is the one cell in the app with three vocabularies.
-        const int  ry  = y + content_y(16);
-        const bool cur = (s.cursorRow == 16);
+    {   // FX. Its VALUE cell is the one cell in the app with three vocabularies.
+        const int  ry  = y + row_y(SampleRow::FX);
+        const bool cur = (s.cursorRow == SampleRow::FX);
         const int ty = ry + TEXT_PADDING;
         c.draw_text("EFFECT", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, at(fx_types(), s.fxType), x + 180, ty, cur && s.cursorCol == 0,
@@ -434,17 +438,17 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         draw_cursor_cell(c, "APPLY", x + 440, ty, cur && s.cursorCol == 2, t.textValue, t);
     }
 
-    {   // Row 18 — NAME. One cell, and no column: the row and the cell are the same thing.
-        const int  ry  = y + content_y(18);
-        const bool cur = (s.cursorRow == 18);
+    {   // NAME. One cell, and no column: the row and the cell are the same thing.
+        const int  ry  = y + row_y(SampleRow::NAME);
+        const bool cur = (s.cursorRow == SampleRow::NAME);
         const int ty = ry + TEXT_PADDING;
         c.draw_text("NAME", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, s.sampleName, x + 120, ty, cur, t.textValue, t);
     }
 
-    {   // Row 19 — LOAD / SAVE / OVERWRITE, and CHOP when there are slices to chop
-        const int  ry  = y + content_y(19);
-        const bool cur = (s.cursorRow == 19);
+    {   // FILE — LOAD / SAVE / OVERWRITE, and CHOP when there are slices to chop
+        const int  ry  = y + row_y(SampleRow::FILE);
+        const bool cur = (s.cursorRow == SampleRow::FILE);
         const int ty = ry + TEXT_PADDING;
         auto btn = [&](const char* text, int bx, int i) {
             draw_cursor_cell(c, text, bx, ty, cur && s.cursorCol == i, t.textValue, t);
@@ -524,7 +528,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
         }
     }
 
-    const bool onSliceRow = (s.cursorRow == 11);
+    const bool onSliceRow = (s.cursorRow == SampleRow::SLICE_AT);
 
     // The band behind the slice under the cursor, faint so the wave shows through.
     auto highlight_slice = [&](int64_t start, int64_t end) {
@@ -594,9 +598,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
     if (s.showConfirmClose) return cc::none();
 
     switch (s.cursorRow) {
-        case 0: return cc::read_only();   // the title bar
-
-        case 1:
+        case SampleRow::VIEW:
             switch (s.cursorCol) {
                 case 0: return cc::hex_byte(s.zoomLevel, 0, 4);
                 // A mono sample: the cell reads MONO and cannot change (read_only, not none).
@@ -607,7 +609,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        case 2:
+        case SampleRow::EDIT:
             switch (s.cursorCol) {
                 // PITCH ±24 carried as 0..48; handle_input un-biases. A+B = +0.
                 case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48, -1, false, false, false,
@@ -622,11 +624,11 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        // Rows 3..8: A+DPAD drags a selection edge — `SampleEditSession::nudge_selection_edge`.
-        case 3: case 4: case 5: case 6: case 7: case 8:
+        // A+DPAD drags a selection edge — `SampleEditSession::nudge_selection_edge`.
+        case SampleRow::SELECTION:
             return cc::none();
 
-        case 10:
+        case SampleRow::SLICE:
             switch (s.cursorCol) {
                 case 0: return cc::toggle_ternary(at(slice_methods(), s.sliceMethod), slice_methods());
                 case 1:
@@ -636,16 +638,17 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        case 11:
+        case SampleRow::SLICE_AT:
             // Col 1, the position, has no cell: A+DPAD drags the marker (`SampleEditSession::nudge_slice_marker`).
             if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF)
                 return cc::hex_byte(s.sliceIndex, 0, s.slice_index_ceiling());
             return cc::none();
 
-        case 13: case 14:
+        case SampleRow::OPS1:
+        case SampleRow::OPS2:
             return cc::none();   // the op buttons: A fires them, there is nothing to step
 
-        case 16:
+        case SampleRow::FX:
             switch (s.cursorCol) {
                 case 0: return cc::toggle_ternary(at(fx_types(), s.fxType), fx_types());
                 case 1:
@@ -657,12 +660,11 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();   // col 2 = APPLY, an action
             }
 
-        case 18: case 19:
+        case SampleRow::NAME:
+        case SampleRow::FILE:
             return cc::none();   // NAME opens the keyboard; the save buttons are actions
-
-        default:
-            return cc::none();
     }
+    return cc::none();
 }
 
 // ─── The edit ────────────────────────────────────────────────────────────────────────────────────
@@ -672,8 +674,8 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
     SampleEditorInputResult r;
 
     // The EQ slot is the one cell here that deletes and inserts.
-    if (s.cursorRow == 16 && s.cursorCol == 1 && s.fxType == FX_EQ) {
-        r.modified = apply_optional_byte(s.fxEqSlot, 127, action);
+    if (s.cursorRow == SampleRow::FX && s.cursorCol == 1 && s.fxType == FX_EQ) {
+        apply_optional_byte(s.fxEqSlot, 127, action);
         return r;
     }
 
@@ -681,43 +683,40 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
     const int v = action.value;
 
     switch (s.cursorRow) {
-        case 1:
+        case SampleRow::VIEW:
             switch (s.cursorCol) {
-                case 0: s.zoomLevel  = std::clamp(v, 0, 4); r.modified = true; break;
-                case 1: s.sourceMode = v;                   r.modified = true; break;
+                case 0: s.zoomLevel  = std::clamp(v, 0, 4); break;
+                case 1: s.sourceMode = v; break;
                 case 2:
                     // Destructive: the module reports it, the dispatcher makes the engine calls.
                     if (v != s.rateMode) r.rateModeChanged = true;
                     s.rateMode = v;
-                    r.modified = true;
                     break;
                 default: break;
             }
             break;
 
-        case 2:
+        case SampleRow::EDIT:
             switch (s.cursorCol) {
-                case 0: s.pitchSemitones = v - 24;  r.modified = true; break;   // un-bias (see cursor_context)
-                case 1: s.durationIndex  = v;       r.modified = true; break;
+                case 0: s.pitchSemitones = v - 24; break;   // un-bias (see cursor_context)
+                case 1: s.durationIndex  = v; break;
                 case 2: {
                     // Destructive like RATE.
                     const int bits = std::atoi(at(bit_depth_choices(s.sourceBitDepth), v).c_str());
                     if (bits != s.bitDepth) r.bitDepthChanged = true;
                     s.bitDepth = bits;
-                    r.modified = true;
                     break;
                 }
                 default: break;
             }
             break;
 
-        case 10:
+        case SampleRow::SLICE:
             switch (s.cursorCol) {
                 case 0:
                     s.sliceMethod = v;
                     // Clearing the detector's list makes the feed re-run it.
                     if (v == SLICE_TRANSIENT) s.transientMarkers.clear();
-                    r.modified = true;
                     break;
                 case 1:
                     if (s.sliceMethod == SLICE_TRANSIENT) {
@@ -726,13 +725,12 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                     } else {
                         s.sliceDivisions = v;
                     }
-                    r.modified = true;
                     break;
                 default: break;
             }
             break;
 
-        case 11:
+        case SampleRow::SLICE_AT:
             // Stepping the index selects that slice, so CROP/CHOP/preview act on the one in view.
             if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF) {
                 int64_t start = 0, end = 0;
@@ -740,17 +738,15 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                 s.sliceIndex      = v;
                 s.selectionStart  = start;
                 s.selectionEnd    = end;
-                r.modified        = true;
             }
             break;
 
-        case 16:
+        case SampleRow::FX:
             switch (s.cursorCol) {
-                case 0: s.fxType = v; r.modified = true; break;
+                case 0: s.fxType = v; break;
                 case 1:
                     if (s.fxType == FX_SYNC) s.syncType = v;
                     else                     s.fxValue  = v;
-                    r.modified = true;
                     break;
                 default: break;
             }

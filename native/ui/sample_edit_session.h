@@ -48,13 +48,13 @@ class SampleEditSession {
     // A+DPAD on rows 3..8: drag the selection's edge under the cursor.
     void nudge_selection_edge(int64_t delta);
 
-    // A+DPAD on row 11's POSITION cell: drag the boundary under the cursor.
+    // A+DPAD on SLICE_AT's POSITION cell: drag the boundary under the cursor.
     void nudge_slice_marker(int64_t delta);
 
-    // A+B on row 11: the marker back where its method would put it; under MANUAL, gone.
+    // A+B on SLICE_AT: the marker back where its method would put it; under MANUAL, gone.
     void reset_slice_marker();
 
-    // A on rows 11, 13, 14 and 16: the tap, the ops, the FX apply.
+    // A on SLICE_AT, OPS1, OPS2 and FX: the tap, the ops, the FX apply.
     void run_op();
 
     // RATE and BIT rebuild the buffer; false (with a message) when memory was refused.
@@ -82,10 +82,10 @@ class SampleEditSession {
     // lands on a slot no longer on screen.
     void finish_preview();
 
-    // A on row 11 under MANUAL: cut a boundary at the playhead — START, listen, tap on each hit.
+    // A on SLICE_AT under MANUAL: cut a boundary at the playhead — START, listen, tap on each hit.
     void tap_slice_marker();
 
-    // Put the selection on the slice row 11's cursor points at; every boundary gesture ends here.
+    // Put the selection on the slice SLICE_AT's cursor points at; every boundary gesture ends here.
     void select_current_slice();
 
     // Copy the method's computed boundaries into the hand-placed list, so a nudge has a home.
