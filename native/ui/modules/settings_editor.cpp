@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include "ui/helpers.h"
-#include "ui/input_config.h"   // abxy_name
 
 namespace pt::ui {
 
@@ -14,6 +13,98 @@ constexpr int VAL1_X     = 190;  // the primary value
 constexpr int SUBLABEL_X = 355;  // the secondary column's own label (STR / VOL / POW)
 constexpr int VAL2_X     = 408;  // the secondary value
 
+using V = SettingsValues;
+
+// One value cell: a flag shown as two words, a byte shown as hex, or an index into a list of names.
+struct Cell {
+    enum Kind { NONE, FLAG, BYTE, CHOICE } kind;
+    bool V::* flag;
+    int  V::* number;
+    const char* on;
+    const char* off;
+    const char* const* names;
+    int count;
+};
+
+constexpr Cell NO_CELL{Cell::NONE, nullptr, nullptr, nullptr, nullptr, nullptr, 0};
+constexpr Cell flag(bool V::* f, const char* on = "ON", const char* off = "OFF") {
+    return {Cell::FLAG, f, nullptr, on, off, nullptr, 0};
+}
+constexpr Cell byte(int V::* n) { return {Cell::BYTE, nullptr, n, nullptr, nullptr, nullptr, 0}; }
+template <int N>
+constexpr Cell choice(int V::* n, const char* const (&names)[N]) {
+    return {Cell::CHOICE, nullptr, n, nullptr, nullptr, names, N};
+}
+
+constexpr const char* ABXY_NAMES[] = {"AUTO", "XBOX", "NINTENDO"};   // AbxyLayout
+constexpr const char* HELP_NAMES[] = {"OFF", "SHORT", "FULL"};       // HelpMode
+
+// The rows that are only value cells; a second cell sits behind its own little label. The rest of
+// the rows are code below.
+struct TableRow {
+    SettingsRow row;
+    const char* label;
+    Cell        first;
+    const char* sublabel;
+    Cell        second;
+};
+
+constexpr TableRow ROWS[] = {
+    {SettingsRow::SCALING,   "SCALING",   flag(&V::scalingBilinear, "BILINEAR", "INT"), nullptr, NO_CELL},
+    {SettingsRow::BTN_SOUND, "BTN SOUND", flag(&V::buttonSoundEnabled), "VOL", byte(&V::buttonSoundVolume)},
+    {SettingsRow::ABXY,      "ABXY",      choice(&V::abxyIndex, ABXY_NAMES), nullptr, NO_CELL},
+    {SettingsRow::METRONOME, "METRONOME", flag(&V::metronomeEnabled), "VOL", byte(&V::metronomeVolume)},
+    {SettingsRow::KB_INSERT, "KB INSERT", flag(&V::insertBefore, "BEFORE", "AFTER"), nullptr, NO_CELL},
+    {SettingsRow::CURSOR,    "CURSOR",    flag(&V::cursorRemember, "REMEMBER", "REFRESH"), nullptr, NO_CELL},
+    {SettingsRow::NAV,       "NAV",       flag(&V::navSongRelative, "SONG", "POOL"), nullptr, NO_CELL},
+    {SettingsRow::FOLDER,    "FOLDER",    flag(&V::rememberFolder, "REMEMBER", "REFRESH"), nullptr, NO_CELL},
+    {SettingsRow::NOTE_PREV, "NOTE PREV", flag(&V::notePreviewEnabled), nullptr, NO_CELL},
+    {SettingsRow::HELP,      "HELP",      choice(&V::helpMode, HELP_NAMES), nullptr, NO_CELL},
+    {SettingsRow::RESUME,    "RESUME",    flag(&V::autosaveResumeAuto, "AUTO", "ASK"), nullptr, NO_CELL},
+    {SettingsRow::TRACE,     "TRACE",     flag(&V::traceEnabled), nullptr, NO_CELL},
+};
+
+const TableRow* table_row(SettingsRow row) {
+    for (const TableRow& r : ROWS)
+        if (r.row == row) return &r;
+    return nullptr;
+}
+
+const Cell& cell_at(const TableRow& r, int column) {
+    return (column >= 2 && r.second.kind != Cell::NONE) ? r.second : r.first;
+}
+
+std::string cell_text(const Cell& c, const V& v) {
+    switch (c.kind) {
+        case Cell::FLAG:   return v.*c.flag ? c.on : c.off;
+        case Cell::BYTE:   return hex2(v.*c.number);
+        case Cell::CHOICE: return c.names[clamp(v.*c.number, 0, c.count - 1)];
+        case Cell::NONE:   break;
+    }
+    return {};
+}
+
+CursorContext cell_context(const Cell& c, const V& v) {
+    switch (c.kind) {
+        case Cell::FLAG:   return cc::toggle_binary(v.*c.flag);
+        case Cell::BYTE:   return cc::hex_byte(v.*c.number, 0, 255);
+        case Cell::CHOICE: return cc::enum_cycle(v.*c.number, c.count);
+        case Cell::NONE:   break;
+    }
+    return cc::read_only();
+}
+
+// An index the cycle could not produce falls back to the first (OFF, AUTO, …).
+int index_in(int value, int count) { return (value >= 0 && value < count) ? value : 0; }
+
+void cell_apply(const Cell& c, V& v, int value) {
+    switch (c.kind) {
+        case Cell::FLAG:   v.*c.flag   = value > 0; break;
+        case Cell::BYTE:   v.*c.number = clamp(value, 0, 255); break;
+        case Cell::CHOICE: v.*c.number = index_in(value, c.count); break;
+        case Cell::NONE:   break;
+    }
+}
 
 }  // namespace
 
@@ -47,7 +138,6 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
 
-    // ── Scroll ───────────────────────────────────────────────────────────────────────────────────
     // ── Scroll: only debug builds overflow; derived from the cursor row each frame ───────────────
     const int viewportH = HEIGHT - (firstRowY - y);
     const int contentH  = settings_content_height(s.caps, ROW_HEIGHT);
@@ -89,6 +179,13 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     // Every row is drawn through `rowY`; clipped to the viewport.
     const Canvas::ClipScope rowsClip(c, x, firstRowY, WIDTH, viewportH);
 
+    for (const TableRow& r : ROWS) {
+        if (r.second.kind == Cell::NONE)
+            param_row(r.row, r.label, cell_text(r.first, v));
+        else
+            dual_row(r.row, r.label, cell_text(r.first, v), r.sublabel, cell_text(r.second, v));
+    }
+
     // ── LAYOUT, and its skin column when the layout is skinned ───────────────────────────────────
     if (v.skinCount > 0) {
         dual_row(SettingsRow::LAYOUT, "LAYOUT", s.layoutText, "", s.skinText);
@@ -96,47 +193,27 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::LAYOUT, "LAYOUT", s.layoutText);
     }
 
-    param_row(SettingsRow::SCALING, "SCALING", v.scalingBilinear ? "BILINEAR" : "INT");
-
     dual_row(SettingsRow::OVERLAY, "OVERLAY", s.overlayText, "STR", hex2(v.overlayStrength));
 
     // An OS driver name: 18 characters to the panel edge.
     param_row(SettingsRow::AUDIO_OUT, "AUDIO OUT",
               Canvas::clip_text(s.audioOutText, (WIDTH - VAL1_X - NAME_X) / CHAR_W));
 
-    dual_row(SettingsRow::BTN_SOUND, "BTN SOUND", on_off(v.buttonSoundEnabled),
-             "VOL", hex2(v.buttonSoundVolume));
     // POW is LO/HI: the target ROMs have only EFFECT_TICK and EFFECT_CLICK (LO < 128 ≤ HI).
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
              "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
 
-    // The face-button swap; input_config.h names it, as config.json does.
-    param_row(SettingsRow::ABXY, "ABXY",
-              abxy_name(static_cast<AbxyLayout>(clamp(v.abxyIndex, 0, 2))));
-
-    dual_row(SettingsRow::METRONOME, "METRONOME", on_off(v.metronomeEnabled),
-             "VOL", hex2(v.metronomeVolume));
-
-    param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
-    param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
-    param_row(SettingsRow::NAV,       "NAV",       v.navSongRelative ? "SONG" : "POOL");
     if (v.oneHanded)
         dual_row(SettingsRow::ONE_HAND, "ONE HAND", on_off(true),
                  "MS", std::to_string(ONE_HAND_HOLD_STEPS[one_hand_hold_index(v.oneHandHoldMs)]));
     else
         param_row(SettingsRow::ONE_HAND, "ONE HAND", on_off(false));
-    param_row(SettingsRow::NOTE_PREV, "NOTE PREV", on_off(v.notePreviewEnabled));
 
     {
         const std::vector<std::string>& names = visualizer_names();
         const int index = clamp(static_cast<int>(t.visualizerType), 0,
                                 static_cast<int>(names.size()) - 1);
         param_row(SettingsRow::VISUALIZER, "VISUALIZER", names[static_cast<size_t>(index)]);
-    }
-
-    {
-        static constexpr const char* HELP_NAMES[3] = {"OFF", "SHORT", "FULL"};
-        param_row(SettingsRow::HELP, "HELP", HELP_NAMES[clamp(v.helpMode, 0, 2)]);
     }
 
     // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped two glyphs short so a
@@ -159,13 +236,6 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                              on_cell(row, i + 1), t.textValue, t);
         }
     }
-
-    param_row(SettingsRow::RESUME, "RESUME", v.autosaveResumeAuto ? "AUTO" : "ASK");
-
-    param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
-
-    // FOLDER = REMEMBER / REFRESH, placed by its own offset.
-    param_row(SettingsRow::FOLDER, "FOLDER", v.rememberFolder ? "REMEMBER" : "REFRESH");
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────────────────────────
@@ -178,6 +248,8 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
     const SettingsRow row = static_cast<SettingsRow>(s.cursorRow);
     if (!settings_row_visible(row, s.caps)) return cc::none();
 
+    if (const TableRow* r = table_row(row)) return cell_context(cell_at(*r, s.cursorColumn), v);
+
     switch (row) {
         case SettingsRow::LAYOUT:
             if (s.cursorColumn == 2) {
@@ -187,86 +259,58 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             }
             return cc::enum_cycle(v.layoutIndex, v.layoutCount);
 
-        case SettingsRow::SCALING:
-            return cc::toggle_binary(v.scalingBilinear);
-
         case SettingsRow::OVERLAY:
             if (s.cursorColumn == 1) return cc::enum_cycle(v.overlayIndex, v.overlayCount);
             return cc::hex_byte(v.overlayStrength, 0, 255);
-
-        case SettingsRow::BTN_SOUND:
-            if (s.cursorColumn == 1) return cc::toggle_binary(v.buttonSoundEnabled);
-            return cc::hex_byte(v.buttonSoundVolume, 0, 255);
 
         case SettingsRow::BTN_VIBRO:
             if (s.cursorColumn == 1) return cc::toggle_binary(v.buttonVibroEnabled);
             return cc::toggle_binary(v.vibroPower >= 128);  // LO / HI, not a 0..255 knob
 
-        case SettingsRow::METRONOME:
-            if (s.cursorColumn == 1) return cc::toggle_binary(v.metronomeEnabled);
-            return cc::hex_byte(v.metronomeVolume, 0, 255);
-
-        case SettingsRow::ABXY:       return cc::enum_cycle(v.abxyIndex, 3);
         case SettingsRow::AUDIO_OUT:  return cc::enum_cycle(v.audioOutIndex, v.audioOutCount);
-        case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
-        case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
-        case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
+
         case SettingsRow::ONE_HAND:
             if (s.cursorColumn == 1) return cc::toggle_binary(v.oneHanded);
             if (!v.oneHanded) return cc::read_only();
             return cc::enum_cycle(one_hand_hold_index(v.oneHandHoldMs), ONE_HAND_HOLD_COUNT);
 
-        case SettingsRow::FOLDER:     return cc::toggle_binary(v.rememberFolder);
-        case SettingsRow::NAV:        return cc::toggle_binary(v.navSongRelative);
-
         case SettingsRow::VISUALIZER:
             return cc::enum_cycle(static_cast<int>(s.theme.visualizerType),
                                   static_cast<int>(visualizer_names().size()));
 
-        case SettingsRow::HELP:       return cc::enum_cycle(v.helpMode, 3);
-
-        // A opens the theme editor.
-        case SettingsRow::THEME:      return cc::read_only();
-        // A triggers SAVE or CLEAR.
+        // A opens the theme editor, or triggers SAVE or CLEAR.
+        case SettingsRow::THEME:
         case SettingsRow::TEMPLATE:   return cc::read_only();
 
-        case SettingsRow::RESUME:     return cc::toggle_binary(v.autosaveResumeAuto);
-
-        case SettingsRow::TRACE:      return cc::toggle_binary(v.traceEnabled);
+        default:                      break;
     }
     return cc::none();
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────────────────────────
 
-SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme,
-                                                 const PlatformCaps& caps,
-                                                 int cursor_row, int cursor_column,
-                                                 const InputAction& action) const {
+void SettingsModule::handle_input(SettingsValues& v, Theme& theme, const PlatformCaps& caps,
+                                  int cursor_row, int cursor_column, const InputAction& action) const {
     const SettingsRow row = static_cast<SettingsRow>(cursor_row);
-    if (!settings_row_visible(row, caps)) return SettingsInputResult{false};
-    const SettingsInputResult done{action.type != ActionType::NONE};
-    if (action.type != ActionType::SET_VALUE) return done;
+    if (!settings_row_visible(row, caps) || action.type != ActionType::SET_VALUE) return;
 
     const int  value = action.value;
     const bool on    = value > 0;
-    // An index the cycle could not produce falls back to the first (OFF, AUTO, …).
-    const auto index_in = [value](int count) { return (value >= 0 && value < count) ? value : 0; };
+
+    if (const TableRow* r = table_row(row)) {
+        if (cursor_column >= 1) cell_apply(cell_at(*r, cursor_column), v, value);
+        return;
+    }
 
     switch (row) {
         case SettingsRow::LAYOUT:
-            if (cursor_column != 2)  v.layoutIndex = index_in(v.layoutCount);
+            if (cursor_column != 2)  v.layoutIndex = index_in(value, v.layoutCount);
             else if (v.skinCount > 0) v.skinIndex  = clamp(value, 0, v.skinCount - 1);
             break;
 
         case SettingsRow::OVERLAY:
-            if (cursor_column == 1)      v.overlayIndex    = index_in(v.overlayCount);
+            if (cursor_column == 1)      v.overlayIndex    = index_in(value, v.overlayCount);
             else if (cursor_column == 2) v.overlayStrength = clamp(value, 0, 255);
-            break;
-
-        case SettingsRow::BTN_SOUND:
-            if (cursor_column == 1)      v.buttonSoundEnabled = on;
-            else if (cursor_column == 2) v.buttonSoundVolume  = clamp(value, 0, 255);
             break;
 
         case SettingsRow::BTN_VIBRO:
@@ -275,41 +319,23 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
             else if (cursor_column == 2) v.vibroPower         = on ? 255 : 64;
             break;
 
-        case SettingsRow::METRONOME:
-            if (cursor_column == 1)      v.metronomeEnabled = on;
-            else if (cursor_column == 2) v.metronomeVolume  = clamp(value, 0, 255);
-            break;
-
-        case SettingsRow::ABXY: v.abxyIndex = index_in(3); break;
         // The shell opens the output and writes the NAME once it plays.
-        case SettingsRow::AUDIO_OUT: v.audioOutIndex = index_in(v.audioOutCount); break;
+        case SettingsRow::AUDIO_OUT: v.audioOutIndex = index_in(value, v.audioOutCount); break;
 
-        case SettingsRow::SCALING:   v.scalingBilinear    = on; break;
-        case SettingsRow::KB_INSERT: v.insertBefore       = on; break;
-        case SettingsRow::CURSOR:    v.cursorRemember     = on; break;
-        case SettingsRow::NOTE_PREV: v.notePreviewEnabled = on; break;
         case SettingsRow::ONE_HAND:
-            if (cursor_column == 1)      v.oneHanded     = on;
-            else if (cursor_column == 2) v.oneHandHoldMs = ONE_HAND_HOLD_STEPS[index_in(ONE_HAND_HOLD_COUNT)];
+            if (cursor_column == 1) v.oneHanded = on;
+            else if (cursor_column == 2)
+                v.oneHandHoldMs = ONE_HAND_HOLD_STEPS[index_in(value, ONE_HAND_HOLD_COUNT)];
             break;
-        case SettingsRow::FOLDER:    v.rememberFolder     = on; break;
-        case SettingsRow::NAV:       v.navSongRelative    = on; break;
-        case SettingsRow::RESUME:    v.autosaveResumeAuto = on; break;
-        case SettingsRow::TRACE:     v.traceEnabled       = on; break;
 
         case SettingsRow::VISUALIZER:
-            theme.visualizerType =
-                static_cast<VisualizerType>(index_in(static_cast<int>(visualizer_names().size())));
+            theme.visualizerType = static_cast<VisualizerType>(
+                index_in(value, static_cast<int>(visualizer_names().size())));
             break;
 
-        case SettingsRow::HELP: v.helpMode = clamp(value, 0, 2); break;
-
-        // A-only rows: the dispatcher's.
-        case SettingsRow::THEME:
-        case SettingsRow::TEMPLATE:
-            break;
+        // A-only rows (THEME, TEMPLATE) are the dispatcher's.
+        default: break;
     }
-    return done;
 }
 
 }  // namespace pt::ui

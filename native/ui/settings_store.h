@@ -19,8 +19,8 @@ bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& th
 
 enum class SettingsWrite { UNCHANGED, SAVED, FAILED };
 
-// Write only if the bytes would differ — the shell's call on exit, instead of a dirty flag (the theme
-// editor writes `theme` directly, and a flag lost its palette).
+// Write only if the bytes would differ — the shell's call on exit, instead of a dirty flag, so no
+// change made past one (the theme editor writes `theme` directly) is missed.
 SettingsWrite save_settings_if_changed(FileSystem& fs, const SettingsValues& values, const Theme& theme);
 
 }  // namespace pt::ui

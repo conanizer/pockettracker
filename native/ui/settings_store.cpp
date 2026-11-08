@@ -1,5 +1,6 @@
 #include "ui/settings_store.h"
 
+#include <algorithm>
 #include <string>
 
 #include "ui/theme_io.h"
@@ -30,12 +31,47 @@ std::string get_string(const json& j, const char* key, const std::string& fallba
     return it->get<std::string>();
 }
 
-int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+using V = SettingsValues;
+
+// The settings that are one key and one field, read and written by both halves. The rest are written
+// out in each.
+constexpr struct { const char* key; bool V::* field; } BOOLS[] = {
+    {"scalingBilinear", &V::scalingBilinear},       {"insertBefore", &V::insertBefore},
+    {"cursorRemember", &V::cursorRemember},         {"notePreview", &V::notePreviewEnabled},
+    {"oneHanded", &V::oneHanded},                   {"rememberFolder", &V::rememberFolder},   // not the path
+    {"navSongRelative", &V::navSongRelative},       {"trace", &V::traceEnabled},
+    {"touchButtonsWithPad", &V::touchButtonsWithPad}, {"metronome", &V::metronomeEnabled},
+    {"midi_sync_out", &V::midiSyncOut},             {"midi_velocity", &V::midiVelocity},
+    {"autosaveResumeAuto", &V::autosaveResumeAuto}, {"buttonSound", &V::buttonSoundEnabled},
+    {"buttonVibro", &V::buttonVibroEnabled},
+};
+
+constexpr struct { const char* key; int V::* field; int lo, hi; } INTS[] = {
+    {"oneHandHoldMs", &V::oneHandHoldMs, 50, 5000},
+    {"abxy", &V::abxyIndex, 0, 2},                  // 0 AUTO, 1 XBOX, 2 NINTENDO
+    {"metronomeVolume", &V::metronomeVolume, 0, 255},
+    {"help", &V::helpMode, 0, 2},                   // 0 OFF, 1 SHORT, 2 FULL
+    {"midi_offset_ms", &V::midiOffsetMs, -99, 99},
+    {"midi_sync_in", &V::midiSyncIn, 0, 2},
+    {"buttonSoundVolume", &V::buttonSoundVolume, 0, 255},
+    {"vibroPower", &V::vibroPower, 0, 255},
+    {"overlayStrength", &V::overlayStrength, 0, 255},
+};
+
+// Devices by name — port lists reorder on every replug; a missing name resolves to OFF. SKIN and
+// OVERLAY are stable names, resolved by the shell.
+constexpr struct { const char* key; std::string V::* field; } STRINGS[] = {
+    {"midi_out_device", &V::midiOutDevice}, {"midi_in_device", &V::midiInDevice},
+    {"audio_output", &V::audioOutput},      // a driver name
+    {"portrait_skin", &V::portraitSkin},    {"overlay_name", &V::overlayName},
+};
 
 constexpr int VISUALIZER_COUNT = 6;   // VisualizerType — SCOPE … SPECTRUM_PEAKS
 
 }  // namespace
 
+// ⚠️ Every key is read and written on every platform, even where its row is not shown: Android's prefs
+// import writes them before boot, and a key one side drops would be lost on the first quit.
 bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     std::string blob;
     if (!fs.read_file(fs.settings_path(), blob)) return false;   // first launch
@@ -43,59 +79,22 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     const json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
-    values.scalingBilinear    = get_bool(j, "scalingBilinear",    values.scalingBilinear);
-    values.insertBefore       = get_bool(j, "insertBefore",       values.insertBefore);
-    values.cursorRemember     = get_bool(j, "cursorRemember",     values.cursorRemember);
-    values.notePreviewEnabled = get_bool(j, "notePreview",        values.notePreviewEnabled);
-    values.oneHanded          = get_bool(j, "oneHanded",          values.oneHanded);
-    values.oneHandHoldMs      = clamp(get_int(j, "oneHandHoldMs", values.oneHandHoldMs), 50, 5000);
+    for (const auto& s : BOOLS)   values.*s.field = get_bool(j, s.key, values.*s.field);
+    for (const auto& s : INTS)    values.*s.field = std::clamp(get_int(j, s.key, values.*s.field), s.lo, s.hi);
+    for (const auto& s : STRINGS) values.*s.field = get_string(j, s.key, values.*s.field);
 
-    values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);   // not the path
-    values.navSongRelative    = get_bool(j, "navSongRelative", values.navSongRelative);
-    values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
-
-    values.abxyIndex          = clamp(get_int(j, "abxy", values.abxyIndex), 0, 2);
-    values.touchButtonsWithPad = get_bool(j, "touchButtonsWithPad", values.touchButtonsWithPad);
-
-    values.metronomeEnabled   = get_bool(j, "metronome", values.metronomeEnabled);
-    values.metronomeVolume    = clamp(get_int(j, "metronomeVolume", values.metronomeVolume), 0, 255);
-
-    values.helpMode           = clamp(get_int(j, "help", values.helpMode), 0, 2);
-
-    // ── MIDI: the cable's half (the song's half is in the .ptp) ──────────────────────────────────
-    // Devices by name — port lists reorder on every replug; a missing name resolves to OFF.
-    values.midiOutDevice      = get_string(j, "midi_out_device", values.midiOutDevice);
-    values.midiInDevice       = get_string(j, "midi_in_device", values.midiInDevice);
-    values.midiOffsetMs       = clamp(get_int(j, "midi_offset_ms", values.midiOffsetMs), -99, 99);
-    // ⚠️ After the line above, which its fallback reads: an older file is AUTO only if its offset was 0.
-    values.midiOffsetAuto     = get_bool(j, "midi_offset_auto", values.midiOffsetMs == 0);
-    values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
-    values.midiSyncIn         = clamp(get_int(j, "midi_sync_in", values.midiSyncIn), 0, 2);
+    // ⚠️ After the offset, which its fallback reads: an older file is AUTO only if its offset was 0.
+    values.midiOffsetAuto = get_bool(j, "midi_offset_auto", values.midiOffsetMs == 0);
     // 0-15 or `MIDI_CTL_CH_ALL`; out of range (an older build's `-1`) → ALL.
     values.midiControlChannel = get_int(j, "midi_control_channel", values.midiControlChannel);
     if (values.midiControlChannel < 0 || values.midiControlChannel > songcore::MIDI_CTL_CH_ALL)
         values.midiControlChannel = songcore::MIDI_CTL_CH_ALL;
     values.midiInVoices = get_int(j, "midi_in_voices", values.midiInVoices);
     if (values.midiInVoices < 1 || values.midiInVoices > 8) values.midiInVoices = 4;
-    values.midiVelocity = get_bool(j, "midi_velocity", values.midiVelocity);
-    values.audioOutput  = get_string(j, "audio_output", values.audioOutput);   // a driver name
-
-    values.autosaveResumeAuto = get_bool(j, "autosaveResumeAuto", values.autosaveResumeAuto);
-
-    // ── The device rows, read and written on every platform even where not shown ─────────────────
-    // ⚠️ Android's prefs import writes these keys before boot; a key one side writes and the other drops
-    // would be lost on the first quit. SKIN and OVERLAY are stable names, resolved by the shell.
-    values.portraitSkin       = get_string(j, "portrait_skin", values.portraitSkin);
-    values.overlayName        = get_string(j, "overlay_name",  values.overlayName);
-    values.buttonSoundEnabled = get_bool(j, "buttonSound",  values.buttonSoundEnabled);
-    values.buttonVibroEnabled = get_bool(j, "buttonVibro",  values.buttonVibroEnabled);
-    values.buttonSoundVolume  = clamp(get_int(j, "buttonSoundVolume", values.buttonSoundVolume), 0, 255);
-    values.vibroPower         = clamp(get_int(j, "vibroPower",        values.vibroPower),        0, 255);
-    values.overlayStrength    = clamp(get_int(j, "overlayStrength",   values.overlayStrength),   0, 255);
 
     // The user's, not the theme's: read first, so the theme load below cannot overwrite it.
-    const int viz = clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
-                          0, VISUALIZER_COUNT - 1);
+    const int viz = std::clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
+                               0, VISUALIZER_COUNT - 1);
 
     // ⚠️ The whole palette, not its name: an invented palette exists nowhere else. Through the `.ptt`
     // parser, so the two formats cannot drift.
@@ -113,41 +112,13 @@ namespace {
 // The exact bytes settings.json should hold — both the comparison and the write use it.
 std::string serialize_settings(const SettingsValues& values, const Theme& theme) {
     json j;
-    j["scalingBilinear"]    = values.scalingBilinear;
-    j["insertBefore"]       = values.insertBefore;
-    j["cursorRemember"]     = values.cursorRemember;
-    j["notePreview"]        = values.notePreviewEnabled;
-    j["oneHanded"]          = values.oneHanded;
-    j["oneHandHoldMs"]      = values.oneHandHoldMs;
-    j["rememberFolder"]     = values.rememberFolder;
-    j["navSongRelative"]    = values.navSongRelative;
-    j["abxy"]               = values.abxyIndex;            // 0 AUTO, 1 XBOX, 2 NINTENDO
-    j["touchButtonsWithPad"] = values.touchButtonsWithPad;
-    j["metronome"]          = values.metronomeEnabled;
-    j["metronomeVolume"]    = values.metronomeVolume;
-    j["help"]               = values.helpMode;             // 0 OFF, 1 SHORT, 2 FULL
-    j["trace"]              = values.traceEnabled;
-    j["autosaveResumeAuto"] = values.autosaveResumeAuto;
-    j["visualizer"]         = static_cast<int>(theme.visualizerType);
-
-    j["midi_out_device"]    = values.midiOutDevice;
-    j["midi_in_device"]     = values.midiInDevice;
-    j["midi_offset_ms"]     = values.midiOffsetMs;
-    j["midi_offset_auto"]   = values.midiOffsetAuto;
-    j["midi_sync_out"]      = values.midiSyncOut;
-    j["midi_sync_in"]       = values.midiSyncIn;
+    for (const auto& s : BOOLS)   j[s.key] = values.*s.field;
+    for (const auto& s : INTS)    j[s.key] = values.*s.field;
+    for (const auto& s : STRINGS) j[s.key] = values.*s.field;
+    j["midi_offset_auto"]     = values.midiOffsetAuto;
     j["midi_control_channel"] = values.midiControlChannel;   // 0-15 (shown 01-16), or MIDI_CTL_CH_ALL
     j["midi_in_voices"]       = values.midiInVoices;         // 1 = MONO, 2-8 = POLY
-    j["midi_velocity"]        = values.midiVelocity;
-    j["audio_output"]         = values.audioOutput;
-
-    j["portrait_skin"]      = values.portraitSkin;
-    j["overlay_name"]       = values.overlayName;
-    j["buttonSound"]        = values.buttonSoundEnabled;
-    j["buttonSoundVolume"]  = values.buttonSoundVolume;
-    j["buttonVibro"]        = values.buttonVibroEnabled;
-    j["vibroPower"]         = values.vibroPower;
-    j["overlayStrength"]    = values.overlayStrength;
+    j["visualizer"]           = static_cast<int>(theme.visualizerType);
 
     j["theme"]    = theme.name;   // for older builds
     j["appTheme"] = json::parse(serialize_theme(theme), nullptr, /*allow_exceptions=*/false);

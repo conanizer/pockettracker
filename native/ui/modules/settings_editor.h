@@ -152,10 +152,6 @@ struct SettingsState {
     Theme        theme = theme_classic();
 };
 
-struct SettingsInputResult {
-    bool modified = false;
-};
-
 class SettingsModule {
 public:
     static constexpr int WIDTH  = 510;
@@ -169,9 +165,8 @@ public:
     CursorContext cursor_context(const SettingsState& s) const;
 
     // Writes into `values` (and `theme`, for VISUALIZER).
-    SettingsInputResult handle_input(SettingsValues& values, Theme& theme, const PlatformCaps& caps,
-                                     int cursor_row, int cursor_column,
-                                     const InputAction& action) const;
+    void handle_input(SettingsValues& values, Theme& theme, const PlatformCaps& caps,
+                      int cursor_row, int cursor_column, const InputAction& action) const;
 };
 
 }  // namespace pt::ui
