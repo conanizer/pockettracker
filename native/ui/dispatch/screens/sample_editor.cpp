@@ -2,7 +2,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "ui/std_filesystem.h"
+#include "ui/filesystem.h"
 
 #include <algorithm>
 #include <string>
@@ -173,7 +173,7 @@ void InputDispatcher::sample_editor_confirm() {
                 case 2: {   // OVERWRITE — back over the file it came from. Nothing to do if it has none.
                     if (se.sampleFilePath.empty()) break;
                     if (!sampleSession_.bake_pending_pitch()) break;
-                    if (to_lower(path_extension(se.sampleFilePath)) == "wav") {
+                    if (to_lower_ascii(path_extension(se.sampleFilePath)) == "wav") {
                         sampleSession_.save_to(se.sampleFilePath, /*adopt_name=*/false);
                         break;
                     }

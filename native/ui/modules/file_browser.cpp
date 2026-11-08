@@ -45,7 +45,7 @@ std::string format_file_date(int64_t millis) {
 
 bool ext_matches(const std::string& ext, const std::vector<std::string>& allowed) {
     if (allowed.empty()) return true;   // no filter = every file
-    const std::string lower = to_lower(ext);
+    const std::string lower = to_lower_ascii(ext);
     return std::find(allowed.begin(), allowed.end(), lower) != allowed.end();
 }
 
@@ -149,7 +149,7 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
             act.kind        = BrowserItem::Kind::ACTION;
             act.path        = e.path;
             act.displayName = e.name;
-            act.sortName    = to_lower(e.name);
+            act.sortName    = to_lower_ascii(e.name);
             actions.push_back(std::move(act));
             continue;
         }
@@ -158,7 +158,7 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
 
         BrowserItem it;
         it.path         = e.path;
-        it.sortName     = to_lower(e.name);
+        it.sortName     = to_lower_ascii(e.name);
         it.size         = e.size;
         it.lastModified = e.lastModified;
         it.isRoot       = e.isRoot;

@@ -240,11 +240,7 @@ struct MediaLoadResult {
 };
 
 inline std::string path_extension_lower(const std::string& path) {
-    const size_t dot = path.find_last_of('.');
-    if (dot == std::string::npos) return "";
-    std::string ext = path.substr(dot + 1);
-    for (char& c : ext) c = static_cast<char>((c >= 'A' && c <= 'Z') ? c + 32 : c);
-    return ext;
+    return to_lower_ascii(path_extension(path));
 }
 
 // A sample format other than WAV — one the engine decodes whole (`common/sample_formats.h`).

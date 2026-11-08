@@ -5,7 +5,7 @@
 #include "ui/fx_preset_io.h"
 #include "ui/groove_io.h"
 #include "ui/scale_io.h"
-#include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
+#include "ui/filesystem.h"
 #include "ui/theme_io.h"
 #include "common/load_progress.h"       // load_cancelled
 
@@ -92,7 +92,7 @@ void InputDispatcher::browser_audition() {
     const BrowserItem* item = s_.fileBrowser.current();
     if (!item || item->kind != BrowserItem::Kind::FILE) return;
 
-    const std::string ext = to_lower(item->extension);
+    const std::string ext = to_lower_ascii(item->extension);
     const bool audible = std::find(sample_extensions().begin(), sample_extensions().end(), ext) !=
                          sample_extensions().end();
     if (!audible) return;   // a .pti or an .sf2 has no waveform
@@ -273,7 +273,7 @@ void InputDispatcher::browser_confirm() {
 
     // ── It is a FILE — the reason the browser was opened ─────────────────────────────────────────
     const int         id   = s_.currentInstrument;
-    const std::string ext  = to_lower(item->extension);
+    const std::string ext  = to_lower_ascii(item->extension);
     const std::string path = item->path;
     const std::string stem = item->displayName;
 
@@ -557,7 +557,7 @@ void InputDispatcher::browser_rename() {
     if (!item || item->is_pseudo()) return;   // ".." and ADD FOLDER… are not files
 
     const bool  dir   = (item->kind == BrowserItem::Kind::FOLDER);
-    const std::string ext = to_lower(item->extension);
+    const std::string ext = to_lower_ascii(item->extension);
     const char* label = dir              ? "FOLDER NAME:"
                         : (ext == "wav") ? "SAMPLE NAME:"
                         : (ext == "ptp") ? "PROJECT NAME:"

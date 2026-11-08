@@ -1,6 +1,6 @@
 #include "ui/sample_edit_session.h"
 
-#include "ui/std_filesystem.h"   // path_stem
+#include "ui/filesystem.h"
 
 #include <algorithm>
 #include <cmath>

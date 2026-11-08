@@ -327,8 +327,7 @@ bool SongcoreHost::load_project_file(const std::string& path, const std::string&
 
     if (!push_project(blob)) return false;
 
-    const size_t slash = path.find_last_of("/\\");
-    mediaRoots_.projectDir = (slash == std::string::npos) ? std::string() : path.substr(0, slash);
+    mediaRoots_.projectDir = path_dir(path);
 
     // ⚠️ Both, in this order, or the project you hear is not the one you loaded.
     load_media(baseDir);

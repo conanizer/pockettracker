@@ -1,7 +1,6 @@
 #include "ui/project_actions.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -76,9 +75,8 @@ namespace {
 
 // For comparing two spellings of one path: one kind of slash, one case.
 std::string comparable_path(std::string p) {
-    for (char& c : p)
-        c = (c == '\\') ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return p;
+    for (char& c : p) if (c == '\\') c = '/';
+    return to_lower_ascii(p);
 }
 
 // Bytes in the file, or 0 when it cannot be measured (it then adds nothing to the bar).

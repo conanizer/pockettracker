@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../common/byte_source.h"  // pt_fopen
+#include "path_parts.h"
 
 namespace songcore {
 
@@ -41,11 +42,6 @@ inline std::string app_root_relative_tail(const std::string& path) {
     }
     if (best == std::string::npos) return "";
     return path.substr(best + 1);   // drop the leading '/', keep "Samples/…"
-}
-
-inline std::string to_lower_ascii(std::string s) {
-    for (char& c : s) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-    return s;
 }
 
 // A path whose stored CASE may not match the disk: the longest existing prefix, then case-insensitive
@@ -137,10 +133,8 @@ inline std::string collected_media_path(const std::string& path) {
     }
     if (!tail.empty()) return tail;
 
-    const size_t slash = path.find_last_of("/\\");
-    const std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
-    const std::string ext = to_lower_ascii(name.substr(name.find_last_of('.') + 1));
-    return (ext == "sf2" || ext == "sf3" ? "Soundfonts/" : "Samples/") + name;
+    const std::string ext = to_lower_ascii(path_extension(path));
+    return (ext == "sf2" || ext == "sf3" ? "Soundfonts/" : "Samples/") + path_name(path);
 }
 
 // The folders a stored media path resolves against. All empty ⇒ paths are used as written.

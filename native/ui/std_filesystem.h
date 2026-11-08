@@ -70,16 +70,9 @@ class StdFileSystem : public FileSystem {
 };
 
 // ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
-// ⚠️ Not `path::extension()`: here `.bashrc` has the extension "bashrc". The browser filters on it.
-
-std::string path_name(const std::string& path);        // "/a/b/c.wav" → "c.wav"
-std::string path_extension(const std::string& path);   // "c.wav" → "wav", "README" → ""
-std::string path_stem(const std::string& path);        // "/a/b/c.wav" → "c"
 
 // `[^a-zA-Z0-9_-.]` → '_'. A folder name takes no dot (`allow_dot` false): "a.b" reads as a file.
 std::string path_sanitize(const std::string& name, bool allow_dot);
-
-std::string to_lower(std::string s);
 
 // The app's folder when the shell does not say: `$POCKETTRACKER_HOME`, else Documents\PocketTracker
 // (Windows, as Explorer resolves it), $HOME/Documents/PocketTracker (macOS),

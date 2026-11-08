@@ -3,10 +3,11 @@
 // The file system as an interface: where the app's directories live is per platform. `StdFileSystem`
 // is the portable implementation; Android's goes through granted trees.
 
-#include <cctype>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "songcore/path_parts.h"
 
 namespace pt::ui {
 
@@ -146,6 +147,11 @@ class FileSystem {
     virtual bool copy_file(const std::string& from, const std::string& to) = 0;
 };
 
+using songcore::path_extension;
+using songcore::path_name;
+using songcore::path_stem;
+using songcore::to_lower_ascii;
+
 // A name as a FAT32-safe filename: anything outside `[A-Za-z0-9_]` → `_`. The caller supplies a
 // fallback for an empty one (`.pts` alone is a hidden dotfile).
 inline std::string safe_file_name(const std::string& name) {
@@ -163,9 +169,7 @@ inline std::string safe_file_name(const std::string& name) {
 inline bool folder_has_extension(FileSystem& fs, const std::string& dir, const std::string& ext) {
     for (const FileInfo& f : fs.list_files(dir)) {
         if (f.isDirectory) continue;
-        std::string e = f.extension;
-        for (char& c : e) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (e == ext) return true;
+        if (songcore::to_lower_ascii(f.extension) == ext) return true;
     }
     return false;
 }

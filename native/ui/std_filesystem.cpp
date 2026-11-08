@@ -81,23 +81,6 @@ std::string documents_directory() {
 
 // ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
 
-std::string path_name(const std::string& path) {
-    const size_t slash = path.find_last_of("/\\");
-    return slash == std::string::npos ? path : path.substr(slash + 1);
-}
-
-std::string path_extension(const std::string& path) {
-    const std::string name = path_name(path);
-    const size_t      dot  = name.find_last_of('.');
-    return dot == std::string::npos ? std::string() : name.substr(dot + 1);
-}
-
-std::string path_stem(const std::string& path) {
-    const std::string name = path_name(path);
-    const size_t      dot  = name.find_last_of('.');
-    return dot == std::string::npos ? name : name.substr(0, dot);
-}
-
 std::string path_sanitize(const std::string& name, bool allow_dot) {
     std::string out;
     out.reserve(name.size());
@@ -107,12 +90,6 @@ std::string path_sanitize(const std::string& name, bool allow_dot) {
         out.push_back(ok ? c : '_');
     }
     return out;
-}
-
-std::string to_lower(std::string s) {
-    for (char& c : s)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-    return s;
 }
 
 std::string default_app_root() {

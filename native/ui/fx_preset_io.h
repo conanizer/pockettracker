@@ -126,11 +126,7 @@ inline bool parse_delay_cells(const std::string& text, const std::string& fallba
 
 // `/card/Reverbs/BIG_HALL.ptr` → `BIG_HALL`: the name of a file with no `name` key.
 inline std::string fx_preset_file_stem(const std::string& path) {
-    const size_t slash = path.find_last_of("/\\");
-    std::string  stem  = path.substr(slash == std::string::npos ? 0 : slash + 1);
-    const size_t dot   = stem.rfind('.');
-    if (dot != std::string::npos) stem.erase(dot);
-    return stem.substr(0, static_cast<size_t>(FX_PRESET_NAME_MAX));
+    return songcore::path_stem(path).substr(0, static_cast<size_t>(FX_PRESET_NAME_MAX));
 }
 
 inline bool save_reverb_file(FileSystem& fs, const std::string& path, const NamedReverb& cells) {
