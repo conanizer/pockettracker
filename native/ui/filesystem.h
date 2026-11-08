@@ -153,6 +153,19 @@ using songcore::path_stem;
 using songcore::safe_name;
 using songcore::to_lower_ascii;
 
+// `base`, then `base_2`, `base_3`… — how a second copy of a name is numbered.
+inline std::string numbered_name(const std::string& base, int n) {
+    return n <= 1 ? base : base + "_" + std::to_string(n);
+}
+
+// The first n in `from`…`last` whose `path(n)` no file holds — `last` when every one before it is taken.
+template <typename Path>
+int first_free(FileSystem& fs, int from, int last, Path&& path) {
+    for (int n = from; n < last; ++n)
+        if (!fs.file_exists(path(n))) return n;
+    return last;
+}
+
 // Does `dir` hold a file with this extension, in any case?
 inline bool folder_has_extension(FileSystem& fs, const std::string& dir, const std::string& ext) {
     for (const FileInfo& f : fs.list_files(dir)) {

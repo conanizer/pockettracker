@@ -30,11 +30,8 @@ std::string pad4(int v) {
 }  // namespace
 
 std::string unique_render_path(FileSystem& fs, const std::string& dir, const std::string& safeName) {
-    for (int index = 1; index < 10000; ++index) {
-        const std::string path = dir + "/" + safeName + "_" + pad4(index) + ".wav";
-        if (!fs.file_exists(path)) return path;
-    }
-    return dir + "/" + safeName + "_9999.wav";
+    const auto path = [&](int n) { return dir + "/" + safeName + "_" + pad4(n) + ".wav"; };
+    return path(first_free(fs, 1, 9999, path));
 }
 
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
@@ -64,11 +61,8 @@ bool collect_folder_exists(FileSystem& fs, const std::string& folder) {
 }
 
 std::string collect_free_folder_name(FileSystem& fs, const std::string& folder) {
-    for (int n = 2; n < 1000; ++n) {
-        const std::string name = folder + "_" + std::to_string(n);
-        if (!collect_folder_exists(fs, name)) return name;
-    }
-    return folder + "_999";
+    const auto path = [&](int n) { return fs.songs_directory() + "/" + numbered_name(folder, n); };
+    return numbered_name(folder, first_free(fs, 2, 999, path));
 }
 
 namespace {
@@ -329,12 +323,7 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
 // ─── SONG selection → RESAMPLE ─────────────────────────────────────────────────────────────────
 
 std::string resample_base_name(FileSystem& fs) {
-    const std::string dir = fs.resampled_directory();
-    for (int index = 1; index < 10000; ++index) {
-        const std::string base = "Resample_" + pad4(index);
-        if (!fs.file_exists(dir + "/" + base + ".wav")) return base;
-    }
-    return "Resample_9999";
+    return path_stem(unique_render_path(fs, fs.resampled_directory(), "Resample"));
 }
 
 ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,

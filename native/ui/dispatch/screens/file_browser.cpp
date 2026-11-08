@@ -10,6 +10,7 @@
 #include "common/load_progress.h"       // load_cancelled
 
 #include <algorithm>
+#include <climits>
 #include <string>
 #include <vector>
 
@@ -514,12 +515,9 @@ void InputDispatcher::browser_paste() {
 
         // De-duplicate: "kick.wav" → "kick_2.wav" → "kick_3.wav". Never overwrite.
         if (fs_.file_exists(target)) {
-            const std::string ext  = path_extension(name);
-            const std::string base = path_stem(name);
-            for (int n = 2;; ++n) {
-                target = dest + "/" + base + "_" + std::to_string(n) + (ext.empty() ? "" : "." + ext);
-                if (!fs_.file_exists(target)) break;
-            }
+            const std::string dotExt = path_extension(name).empty() ? "" : "." + path_extension(name);
+            const auto at = [&](int n) { return dest + "/" + numbered_name(path_stem(name), n) + dotExt; };
+            target = at(first_free(fs_, 2, INT_MAX, at));
         }
 
         const bool ok = b.fileClipboardIsCut ? fs_.move_file(src, target) : fs_.copy_file(src, target);

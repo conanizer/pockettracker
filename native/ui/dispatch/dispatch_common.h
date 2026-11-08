@@ -6,6 +6,7 @@
 #include "ui/filesystem.h"
 
 #include <algorithm>
+#include <climits>
 #include <string>
 
 namespace pt::ui {
@@ -42,9 +43,8 @@ inline int page_clamping(int value, int direction, int count) {
 
 /** `base`, or the first free `base_2`, `base_3`, … — a WAV name in `dir` that nothing holds yet. */
 inline std::string free_wav_stem(FileSystem& fs, const std::string& dir, const std::string& base) {
-    std::string stem = base;
-    for (int n = 2; fs.file_exists(dir + "/" + stem + ".wav"); ++n) stem = base + "_" + std::to_string(n);
-    return stem;
+    const auto path = [&](int n) { return dir + "/" + numbered_name(base, n) + ".wav"; };
+    return numbered_name(base, first_free(fs, 1, INT_MAX, path));
 }
 
 /** The 20 characters a slot's name is cut to when it is taken from a file. One writer, two readers. */
