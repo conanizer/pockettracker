@@ -69,11 +69,6 @@ class StdFileSystem : public FileSystem {
     std::string privateRoot_;  // the app's own files
 };
 
-// ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
-
-// `[^a-zA-Z0-9_-.]` → '_'. A folder name takes no dot (`allow_dot` false): "a.b" reads as a file.
-std::string path_sanitize(const std::string& name, bool allow_dot);
-
 // The app's folder when the shell does not say: `$POCKETTRACKER_HOME`, else Documents\PocketTracker
 // (Windows, as Explorer resolves it), $HOME/Documents/PocketTracker (macOS),
 // $XDG_DATA_HOME or ~/.local/share/PocketTracker (Linux), else ./PocketTracker.

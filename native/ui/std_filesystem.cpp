@@ -81,17 +81,6 @@ std::string documents_directory() {
 
 // ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
 
-std::string path_sanitize(const std::string& name, bool allow_dot) {
-    std::string out;
-    out.reserve(name.size());
-    for (char c : name) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-                        c == '_' || c == '-' || (allow_dot && c == '.');
-        out.push_back(ok ? c : '_');
-    }
-    return out;
-}
-
 std::string default_app_root() {
     if (const char* home = env_or_null("POCKETTRACKER_HOME")) return home;
 
@@ -220,7 +209,7 @@ bool StdFileSystem::rename_file(const std::string& path, const std::string& new_
     const bool dir = is_directory(path);
     const std::string ext = dir ? std::string() : path_extension(path);
 
-    std::string safe = path_sanitize(new_base_name, /*allow_dot=*/true);
+    std::string safe = safe_name(new_base_name, /*keepDot=*/true);
     if (safe.empty()) return false;
 
     // Keep the original extension, unless the typed name already ends in it.
@@ -241,7 +230,7 @@ bool StdFileSystem::rename_file(const std::string& path, const std::string& new_
 }
 
 std::string StdFileSystem::create_folder(const std::string& parent, const std::string& folder_name) {
-    const std::string safe = path_sanitize(folder_name, /*allow_dot=*/false);
+    const std::string safe = safe_name(folder_name);   // no dot: "a.b" reads as a file
     if (safe.empty()) return "";
 
     const fs::path target = fs::path(parent) / safe;

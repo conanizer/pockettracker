@@ -1,9 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_PATH_PARTS_H
 #define POCKETTRACKER_SONGCORE_PATH_PARTS_H
 
-// A path's parts, split at the last `/` or `\` and at the name's last `.` — for songcore and the UI
-// alike. ⚠️ Not `std::filesystem::path`: here `.bashrc` has the extension "bashrc", and the browser
-// filters on it.
+// A path's parts, split at the last `/` or `\` and at the name's last `.`, and a name made safe for a
+// file — for songcore and the UI alike. ⚠️ Not `std::filesystem::path`: here `.bashrc` has the
+// extension "bashrc", and the browser filters on it.
 
 #include <string>
 
@@ -38,6 +38,25 @@ inline std::string path_extension(const std::string& path) {
     const std::string name = path_name(path);
     const size_t      dot  = name.find_last_of('.');
     return dot == std::string::npos ? std::string() : name.substr(dot + 1);
+}
+
+// A typed name as a file name every disk takes: letters, digits, `-`, `_` and spaces stay, anything
+// else becomes `_` (a dot too, unless `keepDot`). No space at either end — FAT and Windows drop a
+// trailing one — and at most `maxLen`. The caller supplies a fallback for an empty one (`.pts` alone is
+// a hidden dotfile).
+inline std::string safe_name(const std::string& name, bool keepDot = false,
+                             size_t maxLen = std::string::npos) {
+    std::string out;
+    for (const char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                        c == '_' || c == '-' || c == ' ' || (keepDot && c == '.');
+        out += ok ? c : '_';
+    }
+    const size_t first = out.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    out = out.substr(first, maxLen);
+    out.erase(out.find_last_not_of(' ') + 1);
+    return out;
 }
 
 }  // namespace songcore

@@ -64,7 +64,7 @@ inline int seed_groove_bank(FileSystem& fs) {
     const std::vector<songcore::GrooveBankEntry>& bank = songcore::groove_bank();
     int written = 0;
     for (int i = 0; i < static_cast<int>(bank.size()); ++i) {
-        const std::string safe = safe_file_name(bank[static_cast<size_t>(i)].name);
+        const std::string safe = safe_name(bank[static_cast<size_t>(i)].name);
         const std::string path = dir + "/" + (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
         if (fs.file_exists(path)) continue;
 

@@ -695,7 +695,7 @@ void SampleEditSession::chop() {
     if (slices.empty()) return;
 
     // A slice becomes a file name, sanitized like every other the app writes.
-    const std::string base = safe_file_name(se.sampleName.empty() ? "SAMPLE" : se.sampleName);
+    const std::string base = safe_name(se.sampleName.empty() ? "SAMPLE" : se.sampleName);
 
     // Samples/Chops/<base>/ — its own folder, so a 32-slice break does not bury the sample directory.
     const std::string samples = fs_.samples_directory();

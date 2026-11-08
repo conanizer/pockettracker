@@ -131,7 +131,7 @@ void InputDispatcher::theme_row_action() {
     switch (s_.themeEditor.cursorChannel) {
         case 1: {   // SAVE — name it, then write it
             // ⚠️ Opens without closing the editor (QWERTY is above THEME). Seeded with the sanitized name.
-            const std::string seed = safe_file_name(s_.theme.name);
+            const std::string seed = safe_name(s_.theme.name);
             open_qwerty(QwertyContext::THEME_SAVE, seed.empty() ? "THEME" : seed, "SAVE THEME:",
                         fs_.themes_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
@@ -150,7 +150,7 @@ void InputDispatcher::theme_row_action() {
 
 void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized filename (empty → THEME.ptt), raw name inside.
-    const std::string safe = safe_file_name(typed_text);
+    const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("THEME") : safe) + ".ptt";
     const std::string path = dir + "/" + file;
 

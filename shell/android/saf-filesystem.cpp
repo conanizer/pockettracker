@@ -748,11 +748,11 @@ bool SafFileSystem::rename_file(const std::string& path, const std::string& new_
     if (!is_pt_path(path)) return priv_.rename_file(path, new_base_name);
     if (is_granted_tree(path)) return false;   // see delete_path — the tree itself is the user's
 
-    // `StdFileSystem::rename_file`'s rule via `path_sanitize`: keep the extension, never clobber.
+    // `StdFileSystem::rename_file`'s rule: keep the extension, never clobber.
     const bool        dir = is_directory(path);
     const std::string ext = dir ? std::string() : pt::ui::path_extension(path);
 
-    const std::string safe = pt::ui::path_sanitize(new_base_name, /*allow_dot=*/true);
+    const std::string safe = pt::ui::safe_name(new_base_name, /*keepDot=*/true);
     if (safe.empty()) return false;
 
     std::string finalName = safe;
@@ -785,7 +785,7 @@ std::string SafFileSystem::create_folder(const std::string& parent, const std::s
     const Lock lock(mu_);
     if (!is_pt_path(parent)) return priv_.create_folder(parent, folder_name);
 
-    const std::string safe = pt::ui::path_sanitize(folder_name, /*allow_dot=*/false);
+    const std::string safe = pt::ui::safe_name(folder_name);   // no dot: "a.b" reads as a file
     if (safe.empty()) return std::string();
 
     const std::string target = parent + "/" + safe;

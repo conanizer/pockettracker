@@ -67,7 +67,7 @@ void InputDispatcher::scale_row_action() {
     switch (scale_name_action(s_.scaleCursor.row, s_.scaleCursor.column)) {
         case ScaleNameAction::SAVE: {
             // Seeded with the sanitized display name — what the file will be called.
-            const std::string seed = safe_file_name(songcore::scale_display_name(scale));
+            const std::string seed = safe_name(songcore::scale_display_name(scale));
             open_qwerty(QwertyContext::SCALE_SAVE, seed.empty() ? "SCALE" : seed, "SAVE SCALE:",
                         fs_.scales_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
@@ -84,7 +84,7 @@ void InputDispatcher::scale_row_action() {
 
 void InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized filename (empty → SCALE.pts), raw name inside.
-    const std::string safe = safe_file_name(typed_text);
+    const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("SCALE") : safe) + ".pts";
 
     songcore::Scale& slot = host_.edit_project().scales[static_cast<size_t>(s_.currentScale)];
@@ -111,7 +111,7 @@ void InputDispatcher::groove_row_action() {
     switch (groove_file_action(s_.groovePanel.row, s_.groovePanel.column)) {
         case GrooveFileAction::SAVE: {
             // Seeded with the sanitized display name — what the file will be called.
-            const std::string seed = safe_file_name(songcore::groove_display_name(groove));
+            const std::string seed = safe_name(songcore::groove_display_name(groove));
             open_qwerty(QwertyContext::GROOVE_SAVE, seed.empty() ? "GROOVE" : seed, "SAVE GROOVE:",
                         fs_.grooves_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
@@ -128,7 +128,7 @@ void InputDispatcher::groove_row_action() {
 
 void InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
     // As for scales (empty → GROOVE.ptg).
-    const std::string safe = safe_file_name(typed_text);
+    const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
 
     songcore::Groove& slot = host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)];

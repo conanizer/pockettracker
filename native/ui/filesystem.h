@@ -150,20 +150,8 @@ class FileSystem {
 using songcore::path_extension;
 using songcore::path_name;
 using songcore::path_stem;
+using songcore::safe_name;
 using songcore::to_lower_ascii;
-
-// A name as a FAT32-safe filename: anything outside `[A-Za-z0-9_]` → `_`. The caller supplies a
-// fallback for an empty one (`.pts` alone is a hidden dotfile).
-inline std::string safe_file_name(const std::string& name) {
-    std::string out;
-    out.reserve(name.size());
-    for (const char c : name) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '_';
-        out += ok ? c : '_';
-    }
-    return out;
-}
 
 // Does `dir` hold a file with this extension, in any case?
 inline bool folder_has_extension(FileSystem& fs, const std::string& dir, const std::string& ext) {

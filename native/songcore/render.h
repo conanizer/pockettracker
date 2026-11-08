@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "engine_setup.h"
+#include "path_parts.h"   // safe_name
 #include "model.h"
 #include "traversal.h"
 #include "wav_writer.h"
@@ -207,17 +208,8 @@ inline int adjacent_section_start(const Project& project, int row, int delta) {
 
 // ─── Stems: which ones a project has (the files are ui/project_actions.h) ───────────────────────
 
-// The project name made safe for a filename: `[^a-zA-Z0-9_\-]` → `_`, at most 32 chars.
-inline std::string safe_project_name(const std::string& name) {
-    std::string out;
-    for (char ch : name) {
-        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-                        (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
-        out += ok ? ch : '_';
-        if (out.size() >= 32) break;
-    }
-    return out;
-}
+// The project name as a file name: `safe_name`, at most 32 characters.
+inline std::string safe_project_name(const std::string& name) { return safe_name(name, false, 32); }
 
 // The project's name as a file or folder name. ⚠️ Never empty: ".ptp" alone is a dotfile the browser
 // never lists.
