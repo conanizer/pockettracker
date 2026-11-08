@@ -42,74 +42,104 @@ auto* cc_slot(Ins& ins, int slot) {
                : nullptr;
 }
 
-const char* cell_label(Cell cell, int cc_slot_index) {
-    static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
-    switch (cell) {
-        case Cell::NAME:         return "NAME";
-        case Cell::VOL:          return "VOL";
-        case Cell::PAN:          return "PAN";
-        case Cell::TSP:          return "TSP";
-        case Cell::TIC:          return "TIC";
-        case Cell::ROOT:         return "ROOT";
-        case Cell::DETUNE:       return "DETUNE";
-        case Cell::DRIVE:        return "DRIVE";
-        case Cell::FILTER:       return "FILTER";
-        case Cell::CRUSH:        return "CRUSH";
-        case Cell::FREQ:         return "FREQ";
-        case Cell::DOWNSAMPLE:   return "DWNSMPL";
-        case Cell::RES:          return "RES";
-        case Cell::REV:          return "REV";
-        case Cell::DEL:          return "DEL";
-        case Cell::EQ:           return "EQ";
-        case Cell::PATCH:        return "PATCH";
-        case Cell::SLICE:        return "SLICE";
-        case Cell::LOOP:         return "LOOP";
-        case Cell::START:        return "START";
-        case Cell::LOOP_START:   return "LOOP ST";
-        case Cell::END:          return "END";
-        case Cell::LOOP_END:     return "LOOP END";
-        case Cell::REVERSE:      return "REVERSE";
-        case Cell::MIDI_CHANNEL: return "CHAN";
-        case Cell::MIDI_BANK:    return "BANK";
-        case Cell::MIDI_PROGRAM: return "PROG";
-        case Cell::MIDI_LENGTH:  return "LEN";
-        case Cell::CC_NUMBER:    return CC_LABELS[clamp(cc_slot_index, 0, 3)];
-        case Cell::CC_VALUE:     return "VAL";
-        case Cell::MIDI_BEND:    return "BEND";
-        // drawn by their own rows
-        case Cell::NONE:
-        case Cell::TYPE:
-        case Cell::SOURCE_LOAD:
-        case Cell::SOURCE_EDIT:
-        case Cell::PRESET_SAVE:
-        case Cell::PRESET_LOAD:
-            return "";
-    }
-    return "";
+// ─── The cells that are one plain field ──────────────────────────────────────────────────────────
+// A byte (00-FF), a nibble (0-F) or an on/off flag: its label, its field, its A+B value and the knob a
+// MIDI mapping learns from it. Every other cell is written out in each switch below.
+
+enum class FieldKind { BYTE, NIBBLE, FLAG };
+
+struct FieldCell {
+    Cell                 cell;
+    const char*          label;
+    FieldKind            kind;
+    int Instrument::*    number;   // BYTE, NIBBLE
+    bool Instrument::*   flag;     // FLAG
+    int                  def;
+    songcore::MapDestId  knob;
+};
+
+constexpr FieldCell byte_cell(Cell c, const char* label, int Instrument::* f, int def,
+                              songcore::MapDestId knob = songcore::MapDestId::NONE) {
+    return {c, label, FieldKind::BYTE, f, nullptr, def, knob};
+}
+constexpr FieldCell nibble_cell(Cell c, const char* label, int Instrument::* f,
+                                songcore::MapDestId knob) {
+    return {c, label, FieldKind::NIBBLE, f, nullptr, 0, knob};
+}
+constexpr FieldCell flag_cell(Cell c, const char* label, bool Instrument::* f) {
+    return {c, label, FieldKind::FLAG, nullptr, f, 0, songcore::MapDestId::NONE};
+}
+
+using D = songcore::MapDestId;
+constexpr FieldCell FIELD_CELLS[] = {
+    byte_cell(Cell::DETUNE,      "DETUNE",   &Instrument::detune,       0x80, D::INS_DETUNE),
+    byte_cell(Cell::TIC,         "TIC",      &Instrument::tableTicRate, 0x06),
+    // On EXTERNAL VOL and PAN are velocity and CC 10, the two that survive the cable.
+    byte_cell(Cell::VOL,         "VOL",      &Instrument::volume,       0xFF, D::INS_VOL),
+    byte_cell(Cell::PAN,         "PAN",      &Instrument::pan,          0x80, D::INS_PAN),
+    flag_cell(Cell::TSP,         "TSP",      &Instrument::transposeEnabled),
+    byte_cell(Cell::DRIVE,       "DRIVE",    &Instrument::drive,        0x00, D::INS_DRIVE),
+    nibble_cell(Cell::CRUSH,     "CRUSH",    &Instrument::crush,              D::INS_CRUSH),
+    byte_cell(Cell::FREQ,        "FREQ",     &Instrument::filterCut,    0x00, D::INS_CUT),
+    nibble_cell(Cell::DOWNSAMPLE, "DWNSMPL", &Instrument::downsample,         D::INS_DWN),
+    byte_cell(Cell::RES,         "RES",      &Instrument::filterRes,    0x00, D::INS_RES),
+    byte_cell(Cell::REV,         "REV",      &Instrument::reverbSend,   0x00, D::INS_REV),
+    byte_cell(Cell::DEL,         "DEL",      &Instrument::delaySend,    0x00, D::INS_DLY),
+    // ⚠️ START and END are not bounded against each other: a byte wraps at its limits, so a floor
+    // would fling END to FF mid-trim. An inverted pair has a defined sound.
+    byte_cell(Cell::START,       "START",    &Instrument::sampleStart,  0x00),
+    byte_cell(Cell::LOOP_START,  "LOOP ST",  &Instrument::loopStart,    0x00),
+    byte_cell(Cell::END,         "END",      &Instrument::sampleEnd,    0xFF),
+    byte_cell(Cell::LOOP_END,    "LOOP END", &Instrument::loopEnd,      0xFF),
+    flag_cell(Cell::REVERSE,     "REVERSE",  &Instrument::reverse),
+    // LEN 00 is gate-to-next, a mode, not empty: A+B resets to it.
+    byte_cell(Cell::MIDI_LENGTH, "LEN",      &Instrument::midiLen,      0x00),
+};
+
+const FieldCell* field_cell(Cell cell) {
+    for (const FieldCell& f : FIELD_CELLS)
+        if (f.cell == cell) return &f;
+    return nullptr;
 }
 
 const char* on_off(bool v) { return v ? "on" : "off"; }
 
+const char* cell_label(Cell cell, int cc_slot_index) {
+    static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
+    if (const FieldCell* f = field_cell(cell)) return f->label;
+    switch (cell) {
+        case Cell::NAME:         return "NAME";
+        case Cell::ROOT:         return "ROOT";
+        case Cell::FILTER:       return "FILTER";
+        case Cell::EQ:           return "EQ";
+        case Cell::PATCH:        return "PATCH";
+        case Cell::SLICE:        return "SLICE";
+        case Cell::LOOP:         return "LOOP";
+        case Cell::MIDI_CHANNEL: return "CHAN";
+        case Cell::MIDI_BANK:    return "BANK";
+        case Cell::MIDI_PROGRAM: return "PROG";
+        case Cell::CC_NUMBER:    return CC_LABELS[clamp(cc_slot_index, 0, 3)];
+        case Cell::CC_VALUE:     return "VAL";
+        case Cell::MIDI_BEND:    return "BEND";
+        default:                 return "";   // the table's, or drawn by their own rows
+    }
+}
+
 std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState& s) {
     const Instrument& ins = s.instrument;
+    if (const FieldCell* f = field_cell(cell)) {
+        switch (f->kind) {
+            case FieldKind::BYTE:   return hex2(ins.*f->number);
+            case FieldKind::NIBBLE: return hex1(ins.*f->number);
+            case FieldKind::FLAG:   return on_off(ins.*f->flag);
+        }
+    }
     switch (cell) {
         case Cell::NAME:
             // "______" until something is loaded or named; the generated "INSTxx" is never shown.
             return songcore::instrument_has_default_name(ins) ? "______" : ins.name;
-        case Cell::VOL:        return hex2(ins.volume);
-        case Cell::PAN:        return hex2(ins.pan);
-        case Cell::TSP:        return on_off(ins.transposeEnabled);
-        case Cell::TIC:        return hex2(ins.tableTicRate);
         case Cell::ROOT:       return note_name(ins.root);
-        case Cell::DETUNE:     return hex2(ins.detune);
-        case Cell::DRIVE:      return hex2(ins.drive);
         case Cell::FILTER:     return ins.filterType;
-        case Cell::CRUSH:      return hex1(ins.crush);
-        case Cell::FREQ:       return hex2(ins.filterCut);
-        case Cell::DOWNSAMPLE: return hex1(ins.downsample);
-        case Cell::RES:        return hex2(ins.filterRes);
-        case Cell::REV:        return hex2(ins.reverbSend);
-        case Cell::DEL:        return hex2(ins.delaySend);
         case Cell::PATCH: {
             // "3/128 Acoustic Grand": the 1-based position in the patch list, then its name.
             const std::string num = (s.sfPresetCount > 0) ? std::to_string(s.sfPresetIndex + 1) + "/" +
@@ -119,17 +149,11 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
         }
         case Cell::SLICE:      return slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))];
         case Cell::LOOP:       return ins.loopMode;
-        case Cell::START:      return hex2(ins.sampleStart);
-        case Cell::LOOP_START: return hex2(ins.loopStart);
-        case Cell::END:        return hex2(ins.sampleEnd);
-        case Cell::LOOP_END:   return hex2(ins.loopEnd);
-        case Cell::REVERSE:    return on_off(ins.reverse);
         // CHAN is stored 0-15 and shown 1-16.
         case Cell::MIDI_CHANNEL: return dec2(clamp(ins.midiChannel, 0, 15) + 1);
         // 14-bit, so four hex digits.
         case Cell::MIDI_BANK:    return ins.midiBank < 0 ? "----" : hex_padded(ins.midiBank, 4);
         case Cell::MIDI_PROGRAM: return midi_opt(ins.midiProgram);
-        case Cell::MIDI_LENGTH:  return hex2(ins.midiLen);
         // Semitones, in decimal like the device's own menu, so the two can be set alike.
         case Cell::MIDI_BEND:    return dec2(ins.midiBendRange);
         case Cell::CC_NUMBER: {
@@ -140,17 +164,10 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
             const auto* slot = cc_slot(ins, cc_slot_index);
             return slot ? midi_opt(slot->value) : "";
         }
-        // EQ has its own painter; the rest are drawn by their own rows
-        case Cell::EQ:
-        case Cell::NONE:
-        case Cell::TYPE:
-        case Cell::SOURCE_LOAD:
-        case Cell::SOURCE_EDIT:
-        case Cell::PRESET_SAVE:
-        case Cell::PRESET_LOAD:
+        // EQ has its own painter; the rest are the table's or drawn by their own rows.
+        default:
             return "";
     }
-    return "";
 }
 
 }  // namespace
@@ -293,6 +310,14 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     const InstrumentRow r    = instrument_row(ins.instrumentType, s.cursorRow);
     const Cell          cell = instrument_cell_at(ins.instrumentType, s.cursorRow, s.cursorColumn);
 
+    if (const FieldCell* f = field_cell(cell)) {
+        switch (f->kind) {
+            case FieldKind::BYTE:   return cc::plain_byte(ins.*f->number, f->def);
+            case FieldKind::NIBBLE: return cc::hex_nibble(ins.*f->number, f->def);
+            case FieldKind::FLAG:   return cc::toggle_binary(ins.*f->flag);
+        }
+    }
+
     switch (cell) {
         case Cell::NONE:
             return cc::none();
@@ -310,11 +335,6 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             const bool empty = (ins.root == Note::EMPTY());
             return cc::note(empty ? 0 : songcore::note_to_midi(ins.root), empty);
         }
-        case Cell::DETUNE: return cc::plain_byte(ins.detune, 0x80);
-        case Cell::TIC:    return cc::plain_byte(ins.tableTicRate, 0x06);
-        case Cell::VOL:    return cc::plain_byte(ins.volume, 0xFF);
-        case Cell::TSP:    return cc::toggle_binary(ins.transposeEnabled);
-        case Cell::PAN:    return cc::plain_byte(ins.pan, 0x80);
 
         case Cell::PATCH: {
             // The SF2's own list length; 0 with no SoundFont.
@@ -322,14 +342,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             return cc::hex_byte(s.sfPresetIndex, 0, maxIdx);
         }
 
-        case Cell::DRIVE:      return cc::plain_byte(ins.drive, 0x00);
         case Cell::FILTER:     return cc::toggle_ternary(ins.filterType, filter_types());
-        case Cell::CRUSH:      return cc::hex_nibble(ins.crush, /*def=*/0);
-        case Cell::FREQ:       return cc::plain_byte(ins.filterCut, 0x00);
-        case Cell::DOWNSAMPLE: return cc::hex_nibble(ins.downsample, /*def=*/0);
-        case Cell::RES:        return cc::plain_byte(ins.filterRes, 0x00);
-        case Cell::REV:        return cc::plain_byte(ins.reverbSend, 0x00);
-        case Cell::DEL:        return cc::plain_byte(ins.delaySend, 0x00);
 
         case Cell::EQ:         return cc::eq_slot(ins.eqSlot);
 
@@ -344,13 +357,6 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             if (!s.allowOscLoop) c.maxValue = static_cast<int>(loop_modes().size()) - 2;
             return c;
         }
-        // ⚠️ START and END are not bounded against each other: a HEX_BYTE wraps at its limits, so a
-        // floor would fling END to FF mid-trim. An inverted pair has a defined sound.
-        case Cell::START:      return cc::plain_byte(ins.sampleStart, 0x00);
-        case Cell::LOOP_START: return cc::plain_byte(ins.loopStart, 0x00);
-        case Cell::END:        return cc::plain_byte(ins.sampleEnd, 0xFF);
-        case Cell::LOOP_END:   return cc::plain_byte(ins.loopEnd, 0xFF);
-        case Cell::REVERSE:    return cc::toggle_binary(ins.reverse);
 
         // Steps the stored 0-15, wrapping as the wire does.
         case Cell::MIDI_CHANNEL:
@@ -362,8 +368,6 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             return c;
         }
         case Cell::MIDI_PROGRAM: return midi_opt_context(ins.midiProgram, 127);
-        // LEN 00 is gate-to-next, a mode, not empty: A+B resets to it.
-        case Cell::MIDI_LENGTH:  return cc::plain_byte(ins.midiLen, 0x00);
         case Cell::MIDI_BEND: {
             CursorContext c = cc::hex_byte(ins.midiBendRange, songcore::MIDI_BEND_RANGE_MIN,
                                            songcore::MIDI_BEND_RANGE_MAX, -1, false, false, false,
@@ -379,58 +383,17 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             const auto* slot = cc_slot(ins, r.ccSlot);
             return slot ? midi_opt_context(slot->value, 127) : cc::none();
         }
+        default:
+            return cc::none();   // the table's
     }
-    return cc::none();
 }
 
 // ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
 
 songcore::MapTarget InstrumentEditorModule::map_target(const InstrumentEditorState& s) const {
-    using songcore::MapDestId;
-    switch (instrument_cell_at(s.type(), s.cursorRow, s.cursorColumn)) {
-        case Cell::DETUNE:     return {MapDestId::INS_DETUNE, 0};
-        // On EXTERNAL: velocity and CC 10, the two that survive the cable.
-        case Cell::VOL:        return {MapDestId::INS_VOL, 0};
-        case Cell::PAN:        return {MapDestId::INS_PAN, 0};
-        case Cell::DRIVE:      return {MapDestId::INS_DRIVE, 0};
-        case Cell::CRUSH:      return {MapDestId::INS_CRUSH, 0};
-        case Cell::FREQ:       return {MapDestId::INS_CUT, 0};
-        case Cell::DOWNSAMPLE: return {MapDestId::INS_DWN, 0};
-        case Cell::RES:        return {MapDestId::INS_RES, 0};
-        case Cell::REV:        return {MapDestId::INS_REV, 0};
-        case Cell::DEL:        return {MapDestId::INS_DLY, 0};
-
-        // Switches, modes, slots and boundaries — nothing a knob sweeps.
-        case Cell::NONE:
-        case Cell::TYPE:
-        case Cell::SOURCE_LOAD:
-        case Cell::SOURCE_EDIT:
-        case Cell::NAME:
-        case Cell::PRESET_SAVE:
-        case Cell::PRESET_LOAD:
-        case Cell::TSP:
-        case Cell::TIC:
-        case Cell::ROOT:
-        case Cell::FILTER:
-        case Cell::EQ:
-        case Cell::PATCH:
-        case Cell::SLICE:
-        case Cell::LOOP:
-        case Cell::START:
-        case Cell::LOOP_START:
-        case Cell::END:
-        case Cell::LOOP_END:
-        case Cell::REVERSE:
-        case Cell::MIDI_CHANNEL:
-        case Cell::MIDI_BANK:
-        case Cell::MIDI_PROGRAM:
-        case Cell::MIDI_LENGTH:
-        case Cell::MIDI_BEND:
-        case Cell::CC_NUMBER:
-        case Cell::CC_VALUE:
-            return {};
-    }
-    return {};
+    // Switches, modes, slots and boundaries have no knob — nothing a knob sweeps.
+    const FieldCell* f = field_cell(instrument_cell_at(s.type(), s.cursorRow, s.cursorColumn));
+    return f ? songcore::MapTarget{f->knob, 0} : songcore::MapTarget{};
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────────────────────────
@@ -443,9 +406,17 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
     const bool isSet = (action.type == ActionType::SET_VALUE);
     const int  v     = action.value;
 
-    const auto b255 = [&](int& field) { if (isSet) field = clamp(v, 0, 255); };
-    const auto b15  = [&](int& field) { if (isSet) field = clamp(v, 0, 15); };
-    const auto flag = [&](bool& field) { if (isSet) field = (v == 1); };
+    const Cell cell = instrument_cell_at(ins.instrumentType, row, col);
+    if (const FieldCell* f = field_cell(cell)) {
+        if (!isSet) return r;
+        switch (f->kind) {
+            case FieldKind::BYTE:   ins.*f->number = clamp(v, 0, 255); break;
+            case FieldKind::NIBBLE: ins.*f->number = clamp(v, 0, 15);  break;
+            case FieldKind::FLAG:   ins.*f->flag   = (v == 1);         break;
+        }
+        return r;
+    }
+
     const auto pick = [&](std::string& field, const std::vector<std::string>& list) {
         if (isSet && v >= 0 && v < static_cast<int>(list.size())) field = list[static_cast<size_t>(v)];
     };
@@ -453,16 +424,11 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
 
     const int ccSlot = instrument_row(ins.instrumentType, row).ccSlot;
 
-    switch (instrument_cell_at(ins.instrumentType, row, col)) {
+    switch (cell) {
         case Cell::ROOT:
             if (isSet) ins.root = songcore::note_from_midi(v);
             else if (action.type == ActionType::DELETE) ins.root = Note::C4();
             break;
-        case Cell::DETUNE:     b255(ins.detune);       break;
-        case Cell::TIC:        b255(ins.tableTicRate); break;
-        case Cell::VOL:        b255(ins.volume);       break;
-        case Cell::TSP:        flag(ins.transposeEnabled); break;
-        case Cell::PAN:        b255(ins.pan);          break;
 
         // Only the engine has read the SF2's list, so the dispatcher resolves index `v`.
         case Cell::PATCH:
@@ -472,27 +438,14 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
             }
             break;
 
-        case Cell::DRIVE:      b255(ins.drive);                    break;
         case Cell::FILTER:     pick(ins.filterType, filter_types()); break;
-        case Cell::CRUSH:      b15(ins.crush);                     break;
-        case Cell::FREQ:       b255(ins.filterCut);                break;
-        case Cell::DOWNSAMPLE: b15(ins.downsample);                break;
-        case Cell::RES:        b255(ins.filterRes);                break;
-        case Cell::REV:        b255(ins.reverbSend);               break;
-        case Cell::DEL:        b255(ins.delaySend);                break;
         case Cell::EQ:         optional(ins.eqSlot, 127);          break;
         case Cell::SLICE:      if (isSet) ins.slicingMode = clamp(v, 0, 2); break;
         case Cell::LOOP:       pick(ins.loopMode, loop_modes());   break;
-        case Cell::START:      b255(ins.sampleStart);              break;
-        case Cell::LOOP_START: b255(ins.loopStart);                break;
-        case Cell::END:        b255(ins.sampleEnd);                break;
-        case Cell::LOOP_END:   b255(ins.loopEnd);                  break;
-        case Cell::REVERSE:    flag(ins.reverse);                  break;
 
         case Cell::MIDI_CHANNEL: if (isSet) ins.midiChannel = clamp(v, 0, 15); break;  // stored 0-15
         case Cell::MIDI_BANK:    optional(ins.midiBank, 16383);   break;
         case Cell::MIDI_PROGRAM: optional(ins.midiProgram, 127);  break;
-        case Cell::MIDI_LENGTH:  b255(ins.midiLen);               break;
         case Cell::MIDI_BEND:
             if (isSet) ins.midiBendRange = clamp(v, songcore::MIDI_BEND_RANGE_MIN, songcore::MIDI_BEND_RANGE_MAX);
             break;
@@ -503,14 +456,8 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
             if (auto* slot = cc_slot(ins, ccSlot)) optional(slot->value, 127);
             break;
 
-        // The dispatcher's: host verbs, not field writes.
-        case Cell::NONE:
-        case Cell::TYPE:
-        case Cell::SOURCE_LOAD:
-        case Cell::SOURCE_EDIT:
-        case Cell::NAME:
-        case Cell::PRESET_SAVE:
-        case Cell::PRESET_LOAD:
+        // TYPE, NAME and the buttons are the dispatcher's: host verbs, not field writes.
+        default:
             break;
     }
     return r;

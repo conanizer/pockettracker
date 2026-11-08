@@ -1,8 +1,8 @@
 #pragma once
 
 // The INSTRUMENT screen: one table per instrument type of what each row is and which cell sits in
-// each column. The cursor walks it, the module draws it, and everything else switches on the cell —
-// with no `default`, so a new cell warns at every switch.
+// each column. The cursor walks it and the module draws it; a cell that is one plain field is a row of
+// the module's FIELD_CELLS, and the rest are switched on.
 //   NAME   — columns 1 / 2 / 3: TYPE, then the source LOAD and EDIT where the type has them.
 //   TRIPLE — columns 1 / 3 / 5.   DUAL — columns 1 / 3.   SINGLE — column 1.
 //   SOURCE — the .pti preset's SAVE + LOAD, columns 2 / 3.   SPACER — skipped.
