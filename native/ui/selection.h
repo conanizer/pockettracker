@@ -46,8 +46,7 @@ struct Selection {
 
     // L+B: select the cell, widen within the window (CELL → ROW → SCREEN → CELL), leave after it.
     // `lastTapMs` is stamped on every path, so a slow double-tap re-opens on CELL.
-    void handle_select_b(long long now_ms, int cursorRow, int cursorColumn, int maxColumn,
-                         int maxRow = 15) {
+    void handle_select_b(long long now_ms, int cursorRow, int cursorColumn, int maxColumn, int maxRow) {
         if (scope == SelectionScope::NONE) {
             scope = SelectionScope::CELL;
             init_for_scope(cursorRow, cursorColumn, maxColumn, maxRow);

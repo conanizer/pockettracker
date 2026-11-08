@@ -126,7 +126,7 @@ bool InputDispatcher::instrument_open_at_cursor(bool peek) {
     const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
 
     const InstrumentCell cell =
-        instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn);
+        instrument_cell_at(ins.instrumentType, s_.instrumentCursor.row, s_.instrumentCursor.column);
     if (peek) {
         return cell == InstrumentCell::SOURCE_LOAD || cell == InstrumentCell::SOURCE_EDIT ||
                cell == InstrumentCell::PRESET_SAVE || cell == InstrumentCell::PRESET_LOAD;
@@ -181,7 +181,7 @@ bool InputDispatcher::pool_load_into_empty_slot(bool peek) {
 bool InputDispatcher::on_instrument_type_cell() const {
     if (s_.currentScreen != ScreenType::INSTRUMENT) return false;
     const Instrument& ins = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
-    return instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn) ==
+    return instrument_cell_at(ins.instrumentType, s_.instrumentCursor.row, s_.instrumentCursor.column) ==
            InstrumentCell::TYPE;
 }
 
@@ -230,8 +230,8 @@ void InputDispatcher::toggle_instrument_type(int delta) {
 CursorContext InputDispatcher::instrument_context() const {
     const Project& p = *s_.project;
     InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-    is.cursorRow     = s_.instrumentCursorRow;
-    is.cursorColumn  = s_.instrumentCursorColumn;
+    is.cursorRow     = s_.instrumentCursor.row;
+    is.cursorColumn  = s_.instrumentCursor.column;
     // The PRESET row's range is the SF2's own list length.
     is.sfPresetName  = s_.sfPresetName;
     is.sfPresetCount = s_.sfPresetCount;
@@ -243,8 +243,8 @@ CursorContext InputDispatcher::instrument_context() const {
 bool InputDispatcher::instrument_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     const InstrumentInputResult r = instrument_.handle_input(
-        p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursorRow,
-        s_.instrumentCursorColumn, action);
+        p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursor.row,
+        s_.instrumentCursor.column, action);
 
     // The PRESET row: only the engine knows the SF2's list, so the index is resolved here.
     if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);
@@ -254,8 +254,8 @@ bool InputDispatcher::instrument_edit(const InputAction& action) {
 songcore::MapTarget InputDispatcher::instrument_knob() const {
     const Project& p = *s_.project;
     InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-    is.cursorRow    = s_.instrumentCursorRow;
-    is.cursorColumn = s_.instrumentCursorColumn;
+    is.cursorRow    = s_.instrumentCursor.row;
+    is.cursorColumn = s_.instrumentCursor.column;
     // The module holds the instrument by reference and never knew its number — finished here.
     songcore::MapTarget t = instrument_.map_target(is);
     t.scope = static_cast<uint8_t>(s_.currentInstrument);

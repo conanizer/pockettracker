@@ -13,6 +13,7 @@
 
 #include "ui/app_state.h"
 #include "ui/effects_row_layout.h"
+#include "ui/grid_cursor.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/midi_map_editor.h"
@@ -25,6 +26,17 @@ namespace pt::ui {
 // ─── INSTRUMENT ──────────────────────────────────────────────────────────────────────────────────
 
 namespace detail {
+
+// One step of ±1 over 0..count−1, wrapping at both ends.
+inline int wrap_step(int v, int delta, int count) {
+    return delta < 0 ? (v > 0 ? v - 1 : count - 1) : (v < count - 1 ? v + 1 : 0);
+}
+
+// One step of ±1, not taken past lo going down or past hi going up.
+inline void nudge(int& v, int delta, int lo, int hi) {
+    if (delta < 0 && v > lo) v--;
+    if (delta > 0 && v < hi) v++;
+}
 
 // Which row table the cursor is walking.
 inline songcore::InstrumentType instrument_type_of(const AppState& s) {
@@ -123,10 +135,10 @@ inline void move_pool_selection(AppState& s, int delta) {
 
 // Put the INSTRUMENT cursor back on a cell after the instrument under it changed type.
 inline void snap_instrument_cursor(AppState& s) {
-    const InstrumentCursor c = instrument_nearest_cell(detail::instrument_type_of(s), s.instrumentCursorRow,
-                                                       s.instrumentCursorColumn);
-    s.instrumentCursorRow    = c.row;
-    s.instrumentCursorColumn = c.column;
+    const InstrumentCursor c = instrument_nearest_cell(detail::instrument_type_of(s), s.instrumentCursor.row,
+                                                       s.instrumentCursor.column);
+    s.instrumentCursor.row    = c.row;
+    s.instrumentCursor.column = c.column;
 }
 
 
@@ -155,10 +167,10 @@ inline void sample_editor_step_col(AppState& s, int delta) {
 
 inline void instrument_step_row(AppState& s, int delta) {
     const songcore::InstrumentType ty = instrument_type_of(s);
-    const int oldRow = s.instrumentCursorRow;
-    s.instrumentCursorRow    = instrument_row_step(ty, oldRow, delta);
-    s.instrumentCursorColumn =
-        instrument_column_for(ty, s.instrumentCursorRow, oldRow, s.instrumentCursorColumn);
+    const int oldRow = s.instrumentCursor.row;
+    s.instrumentCursor.row    = instrument_row_step(ty, oldRow, delta);
+    s.instrumentCursor.column =
+        instrument_column_for(ty, s.instrumentCursor.row, oldRow, s.instrumentCursor.column);
 }
 
 // MODS: the other slot of the pair; the row clamps to its depth.
@@ -172,397 +184,188 @@ inline void mod_select_side(AppState& s, int side) {
 // PHRASE: the 16-row loop. Under NAV = SONG, off either end the pointer moves to the next filled
 // chain row (a chain with one filled row answers `from`).
 inline void phrase_step_row(AppState& s, int delta) {
-    const int edge = delta < 0 ? 0 : 15;
-    if (s.settings.navSongRelative && s.cursorRow == edge) {
-        const int from = pointer_chain_row(s);
+    const int edge = delta < 0 ? 0 : PHRASE_GRID.maxRow;
+    int& row = s.phraseCursor.row;
+    if (s.settings.navSongRelative && row == edge) {
+        const int from = s.chainCursor.row;
         const int to   = songcore::next_chain_row(*s.project, s.currentChain, from, delta,
                                                  /*wrap=*/true);
-        if (to != from) { set_pointer_chain_row(s, to); refresh_song_relative_refs(s); }
+        if (to != from) { s.chainCursor.row = to; refresh_song_relative_refs(s); }
     }
-    if (delta < 0) s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
-    else           s.cursorRow = (s.cursorRow < 15) ? s.cursorRow + 1 : 0;
+    row = wrap_step(row, delta, PHRASE_GRID.maxRow + 1);
 }
 
 }  // namespace detail
 
-inline void move_cursor_up(AppState& s) {
+// ─── Each screen's step: `dr` and `dc` are −1, 0 or +1, one of them 0 ───────────────────────────────
+namespace detail {
+
+// SONG's rows and columns clamp; the window follows the row.
+inline void song_step(AppState& s, int dr, int dc) {
+    nudge(s.songCursor.row, dr, 0, SONG_GRID.maxRow);
+    nudge(s.songCursor.column, dc, 1, SONG_GRID.maxColumn);
+    if (dr) scroll_song_to_row(s, s.songCursor.row);
+}
+
+// CHAIN and TABLE: rows wrap, columns clamp.
+inline void grid_step(AppState& s, const GridCursor& g, int dr, int dc) {
+    CursorPosition& c = s.*g.cursor;
+    if (dr) c.row = wrap_step(c.row, dr, g.maxRow + 1);
+    nudge(c.column, dc, 1, g.maxColumn);
+}
+
+inline void phrase_step(AppState& s, int dr, int dc) {
+    if (dr) phrase_step_row(s, dr);
+    nudge(s.phraseCursor.column, dc, 1, PHRASE_GRID.maxColumn);
+}
+
+// The panel wraps within itself and the tick row stays put; RIGHT from any tick row enters the panel,
+// LEFT walks the panel's cells, then back to the tick column.
+inline void groove_step(AppState& s, int dr, int dc) {
+    const bool inPanel = s.grooveCursor.column == GROOVE_COL_PANEL;
+    if (dr && inPanel) {
+        s.groovePanel.row    = wrap_step(s.groovePanel.row, dr, GROOVE_PANEL_ROWS);
+        s.groovePanel.column = 0;
+    } else if (dr) {
+        s.grooveCursor.row = wrap_step(s.grooveCursor.row, dr, 16);
+    } else if (dc > 0 && !inPanel) {
+        s.grooveCursor.column = GROOVE_COL_PANEL;
+    } else if (dc > 0) {
+        nudge(s.groovePanel.column, +1, 0, groove_panel_cell_count(s.groovePanel.row) - 1);
+    } else if (dc < 0 && inPanel) {
+        if (s.groovePanel.column > 0) s.groovePanel.column--;
+        else                          s.grooveCursor.column = GROOVE_COL_TICK;
+    }
+}
+
+// Only the NAME row has columns.
+inline void scale_step(AppState& s, int dr, int dc) {
+    if (dr) s.scaleCursor.row = wrap_step(s.scaleCursor.row, dr, SCALE_ROW_COUNT);
+    if (s.scaleCursor.row == SCALE_NAME_ROW) nudge(s.scaleCursor.column, dc, 0, SCALE_NAME_COL_COUNT - 1);
+}
+
+inline void instrument_step(AppState& s, int dr, int dc) {
+    if (dr) { instrument_step_row(s, dr); return; }
+    const songcore::InstrumentType ty = instrument_type_of(s);
+    int& column = s.instrumentCursor.column;
+    if (dc < 0) column = std::min(column, instrument_left_column(ty, s.instrumentCursor.row, column));
+    if (dc > 0) column = std::max(column, instrument_right_column(ty, s.instrumentCursor.row, column));
+}
+
+// Up out of a pair: the bottom of the pair above; down off a pair's bottom: the top of the next.
+inline void mods_step(AppState& s, int dr, int dc) {
+    if (dc) { mod_select_side(s, dc < 0 ? 0 : 1); return; }
+    const int rows = mod_slot_rows(s, s.modCursorPair, s.modCursorSide);
+    if (dr < 0 && s.modCursorRow > 0) {
+        s.modCursorRow--;
+    } else if (dr < 0 && s.modCursorPair > 0) {
+        s.modCursorPair = 0;
+        s.modCursorRow  = std::max(0, mod_slot_rows(s, 0, s.modCursorSide) - 1);
+    } else if (dr > 0 && s.modCursorRow < rows - 1) {
+        s.modCursorRow++;
+    } else if (dr > 0 && s.modCursorPair < 1) {
+        s.modCursorPair = 1;
+        s.modCursorRow  = 0;
+    }
+}
+
+inline void pool_step(AppState& s, int dr, int dc) {
+    if (dr) move_pool_selection(s, dr);
+    nudge(s.poolCursorColumn, dc, 0, 4);
+}
+
+// Tracks on row 0, a ring with the master; the sends on row 1; the master strip down column 8.
+inline void mixer_step(AppState& s, int dr, int dc) {
+    int& row = s.mixerMasterRow;
+    int& col = s.mixerCursorColumn;
+    if (dr < 0) {
+        if (row == 1 && (col == 0 || col == 1)) { row = 0; col = 0; }   // out of a send onto the first track
+        else if (row > 0) row--;                                         // up the master strip
+    } else if (dr > 0) {
+        if (row == 0 && col < 8)        { row = 1; col = 0; }   // any track meter → the REV send
+        else if (col == 8 && row < 3)   row++;                  // MIX → EQ → OTT|DUST → LIM
+    } else if (row == 0) {
+        col = wrap_step(col, dc, 9);
+    } else if (dc < 0) {
+        if (row == 1 && col == 1) col = 0;                  // DEL → REV
+        else if (col == 8)        { row = 1; col = 1; }     // the master strip exits onto the DEL send
+    } else {
+        if (row == 1 && col == 0)      col = 1;             // REV → DEL
+        else if (row == 1 && col == 1) col = 8;             // DEL → the master strip, at the EQ row
+    }
+}
+
+// One drawn line per step, clamped; no column: LEFT/RIGHT move to the row beside.
+inline void effects_step(AppState& s, int dr, int dc) {
+    if (dr) s.effectsCursorRow = effects_next_row(s.effectsCursorRow, dr);
+    if (dc) s.effectsCursorRow = effects_step_column(s.effectsCursorRow, dc);
+}
+
+// Column 0 is the label; a row change snaps the column to 1.
+inline void project_step(AppState& s, int dr, int dc) {
+    if (dr) s.projectCursor = {project_next_visible_row(s.projectCursor.row, dr, s.caps), 1};
+    nudge(s.projectCursor.column, dc, 1, project_row_max_column(static_cast<ProjectRow>(s.projectCursor.row)));
+}
+
+// Two columns at most; a row change snaps to the first.
+inline void settings_step(AppState& s, int dr, int dc) {
+    CursorPosition& c = s.settingsCursor;
+    if (dr) c = {settings_next_visible_row(c.row, dr, s.caps), 1};
+    if (dc < 0) c.column = 1;
+    if (dc > 0 && settings_row_has_second_column(static_cast<SettingsRow>(c.row), s.caps,
+                                                 s.settings.skinCount > 0, s.settings.oneHanded))
+        c.column = std::max(c.column, 2);
+}
+
+inline void midi_step(AppState& s, int dr, int) {
+    if (dr) s.midiCursor = {wrap_step(s.midiCursor.row, dr, MIDI_ROW_COUNT), 1};
+}
+
+// The column is carried, then clamped: ADD has one cell, and not every destination has a SCOPE cell.
+inline void midi_map_step(AppState& s, int dr, int dc) {
+    if (!s.project) return;
+    const songcore::Project& p = *s.project;
+    CursorPosition& c = s.midiMapCursor;
+    if (dr) {
+        c.row    = wrap_step(c.row, dr, midi_map_row_count(p));
+        c.column = midi_map_clamp_column(p, c.row, c.column);
+    } else if (dc < 0 && c.column > 1) {
+        c.column = midi_map_clamp_column(p, c.row, c.column - 1, /*prefer=*/-1);
+    } else if (dc > 0 && c.column < midi_map_max_column(p, c.row)) {
+        c.column = midi_map_clamp_column(p, c.row, c.column + 1, /*prefer=*/+1);
+    }
+}
+
+inline void sample_editor_step(AppState& s, int dr, int dc) {
+    if (dr) sample_editor_step_row(s, dr);
+    if (dc) sample_editor_step_col(s, dc);
+}
+
+}  // namespace detail
+
+inline void move_cursor(AppState& s, NavDir dir) {
+    const int dr = dir == NavDir::UP ? -1 : dir == NavDir::DOWN ? 1 : 0;
+    const int dc = dir == NavDir::LEFT ? -1 : dir == NavDir::RIGHT ? 1 : 0;
+    using namespace detail;
     switch (s.currentScreen) {
-        case ScreenType::SAMPLE_EDITOR:
-            detail::sample_editor_step_row(s, -1);
-            break;
-
-        case ScreenType::SONG:
-            if (s.cursorRow > 0) {
-                s.cursorRow--;
-                if (s.cursorRow < s.songScrollPosition) s.songScrollPosition = s.cursorRow;
-            }
-            break;
-        case ScreenType::TABLE:
-            s.tableCursorRow = (s.tableCursorRow > 0) ? s.tableCursorRow - 1 : 15;
-            break;
-        // The panel wraps within itself; the tick row stays put.
-        case ScreenType::GROOVE:
-            if (s.grooveCursorColumn == GROOVE_COL_PANEL) {
-                s.groovePanelRow =
-                    (s.groovePanelRow > 0) ? s.groovePanelRow - 1 : GROOVE_PANEL_ROWS - 1;
-                s.groovePanelColumn = 0;
-            } else {
-                s.grooveCursorRow = (s.grooveCursorRow > 0) ? s.grooveCursorRow - 1 : 15;
-            }
-            break;
-        case ScreenType::SCALE:
-            s.scaleCursorRow =
-                (s.scaleCursorRow > 0) ? s.scaleCursorRow - 1 : SCALE_ROW_COUNT - 1;
-            break;
-
-        case ScreenType::INSTRUMENT:
-            detail::instrument_step_row(s, -1);
-            break;
-
-        case ScreenType::MODS:
-            // Up out of a pair: the bottom of the pair above.
-            if (s.modCursorRow > 0) {
-                s.modCursorRow--;
-            } else if (s.modCursorPair > 0) {
-                s.modCursorPair = 0;
-                const int rows  = detail::mod_slot_rows(s, 0, s.modCursorSide);
-                s.modCursorRow  = rows - 1 < 0 ? 0 : rows - 1;
-            }
-            break;
-
-        case ScreenType::INST_POOL:
-            detail::move_pool_selection(s, -1);
-            break;
-
-        case ScreenType::MIXER:
-            // Out of a send, UP lands on the first track.
-            if (s.mixerMasterRow == 1 && (s.mixerCursorColumn == 0 || s.mixerCursorColumn == 1)) {
-                s.mixerMasterRow    = 0;
-                s.mixerCursorColumn = 0;
-            } else if (s.mixerMasterRow > 0) {
-                s.mixerMasterRow--;   // up the master strip
-            }
-            break;
-
-        // One drawn line per step; clamps (ui/effects_row_layout.h).
-        case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, -1);
-            break;
-
-        case ScreenType::PROJECT:
-            s.projectCursorRow    = project_next_visible_row(s.projectCursorRow, -1, s.caps);
-            s.projectCursorColumn = 1;
-            break;
-
-        case ScreenType::SETTINGS:
-            s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, -1, s.caps);
-            s.settingsCursorColumn = 1;
-            break;
-
-        case ScreenType::MIDI:
-            s.midiCursorRow    = (s.midiCursorRow > 0) ? s.midiCursorRow - 1 : MIDI_ROW_COUNT - 1;
-            s.midiCursorColumn = 1;
-            break;
-
-        // The column is carried, then clamped (ADD has one cell; some destinations have no scope cell).
-        case ScreenType::MIDI_MAP:
-            if (s.project) {
-                const int rows = midi_map_row_count(*s.project);
-                s.midiMapCursorRow = (s.midiMapCursorRow > 0) ? s.midiMapCursorRow - 1 : rows - 1;
-                s.midiMapCursorColumn =
-                    midi_map_clamp_column(*s.project, s.midiMapCursorRow, s.midiMapCursorColumn);
-            }
-            break;
-
-        case ScreenType::PHRASE:
-            detail::phrase_step_row(s, -1);
-            break;
-
-        default:
-            s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
-            break;
+        case ScreenType::SONG:          song_step(s, dr, dc); break;
+        case ScreenType::CHAIN:         grid_step(s, CHAIN_GRID, dr, dc); break;
+        case ScreenType::PHRASE:        phrase_step(s, dr, dc); break;
+        case ScreenType::TABLE:         grid_step(s, TABLE_GRID, dr, dc); break;
+        case ScreenType::GROOVE:        groove_step(s, dr, dc); break;
+        case ScreenType::SCALE:         scale_step(s, dr, dc); break;
+        case ScreenType::INSTRUMENT:    instrument_step(s, dr, dc); break;
+        case ScreenType::MODS:          mods_step(s, dr, dc); break;
+        case ScreenType::INST_POOL:     pool_step(s, dr, dc); break;
+        case ScreenType::MIXER:         mixer_step(s, dr, dc); break;
+        case ScreenType::EFFECTS:       effects_step(s, dr, dc); break;
+        case ScreenType::PROJECT:       project_step(s, dr, dc); break;
+        case ScreenType::SETTINGS:      settings_step(s, dr, dc); break;
+        case ScreenType::MIDI:          midi_step(s, dr, dc); break;
+        case ScreenType::MIDI_MAP:      midi_map_step(s, dr, dc); break;
+        case ScreenType::SAMPLE_EDITOR: sample_editor_step(s, dr, dc); break;
+        case ScreenType::FILE_BROWSER:  break;   // its own handler moves it
     }
-}
-
-inline void move_cursor_down(AppState& s) {
-    switch (s.currentScreen) {
-        case ScreenType::SAMPLE_EDITOR:
-            detail::sample_editor_step_row(s, +1);
-            break;
-
-        case ScreenType::SONG:
-            if (s.cursorRow < 255) {
-                s.cursorRow++;
-                if (s.cursorRow >= s.songScrollPosition + 16) s.songScrollPosition = s.cursorRow - 15;
-            }
-            break;
-        case ScreenType::TABLE:
-            s.tableCursorRow = (s.tableCursorRow < 15) ? s.tableCursorRow + 1 : 0;
-            break;
-        case ScreenType::GROOVE:
-            if (s.grooveCursorColumn == GROOVE_COL_PANEL) {
-                s.groovePanelRow =
-                    (s.groovePanelRow < GROOVE_PANEL_ROWS - 1) ? s.groovePanelRow + 1 : 0;
-                s.groovePanelColumn = 0;
-            } else {
-                s.grooveCursorRow = (s.grooveCursorRow < 15) ? s.grooveCursorRow + 1 : 0;
-            }
-            break;
-        case ScreenType::SCALE:
-            s.scaleCursorRow =
-                (s.scaleCursorRow < SCALE_ROW_COUNT - 1) ? s.scaleCursorRow + 1 : 0;
-            break;
-
-        case ScreenType::INSTRUMENT:
-            detail::instrument_step_row(s, +1);
-            break;
-
-        case ScreenType::MODS: {
-            const int rows = detail::mod_slot_rows(s, s.modCursorPair, s.modCursorSide);
-            if (s.modCursorRow < rows - 1) {
-                s.modCursorRow++;
-            } else if (s.modCursorPair < 1) {
-                s.modCursorPair = 1;
-                s.modCursorRow  = 0;
-            }
-            break;
-        }
-
-        case ScreenType::INST_POOL:
-            detail::move_pool_selection(s, +1);
-            break;
-
-        case ScreenType::MIXER:
-            if (s.mixerMasterRow == 0 && s.mixerCursorColumn < 8) {
-                s.mixerMasterRow    = 1;   // any track meter → the REV send
-                s.mixerCursorColumn = 0;
-            } else if (s.mixerCursorColumn == 8 && s.mixerMasterRow < 3) {
-                s.mixerMasterRow++;   // MIX → EQ → OTT|DUST → LIM
-            }
-            break;
-
-        case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, +1);
-            break;
-
-        case ScreenType::PROJECT:
-            s.projectCursorRow    = project_next_visible_row(s.projectCursorRow, +1, s.caps);
-            s.projectCursorColumn = 1;
-            break;
-
-        case ScreenType::SETTINGS:
-            s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, +1, s.caps);
-            s.settingsCursorColumn = 1;
-            break;
-
-        case ScreenType::MIDI:
-            s.midiCursorRow    = (s.midiCursorRow < MIDI_ROW_COUNT - 1) ? s.midiCursorRow + 1 : 0;
-            s.midiCursorColumn = 1;
-            break;
-
-        case ScreenType::MIDI_MAP:
-            if (s.project) {
-                const int rows = midi_map_row_count(*s.project);
-                s.midiMapCursorRow = (s.midiMapCursorRow < rows - 1) ? s.midiMapCursorRow + 1 : 0;
-                s.midiMapCursorColumn =
-                    midi_map_clamp_column(*s.project, s.midiMapCursorRow, s.midiMapCursorColumn);
-            }
-            break;
-
-        case ScreenType::PHRASE:
-            detail::phrase_step_row(s, +1);
-            break;
-
-        default:
-            s.cursorRow = (s.cursorRow < 15) ? s.cursorRow + 1 : 0;
-            break;
-    }
-}
-
-// The leftmost column on the shared cursor's screens (column 0 is the gutter).
-inline int min_cursor_column(ScreenType s) {
-    switch (s) {
-        case ScreenType::SONG:
-        case ScreenType::CHAIN:
-        case ScreenType::PHRASE: return 1;
-        default: return 0;
-    }
-}
-
-// The rightmost; SONG's is a track number.
-inline int max_cursor_column(ScreenType s) {
-    switch (s) {
-        case ScreenType::SONG:   return 8;  // 8 tracks
-        case ScreenType::CHAIN:  return 2;  // phrase, transpose
-        case ScreenType::PHRASE: return 9;  // note, vel, inst, 3 × (fx type, fx value)
-        default: return 0;
-    }
-}
-
-inline void move_cursor_left(AppState& s) {
-    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
-        detail::sample_editor_step_col(s, -1);
-        return;
-    }
-    switch (s.currentScreen) {
-        case ScreenType::TABLE:
-            if (s.tableCursorColumn > 1) s.tableCursorColumn--;
-            return;
-
-        // Only the NAME row has columns.
-        case ScreenType::SCALE:
-            if (s.scaleCursorRow == SCALE_NAME_ROW && s.scaleCursorColumn > 0) s.scaleCursorColumn--;
-            return;
-
-        // The panel's cells, then back to the tick column.
-        case ScreenType::GROOVE:
-            if (s.grooveCursorColumn != GROOVE_COL_PANEL) return;
-            if (s.groovePanelColumn > 0) {
-                s.groovePanelColumn--;
-            } else {
-                s.grooveCursorColumn = GROOVE_COL_TICK;
-            }
-            return;
-
-        case ScreenType::INSTRUMENT: {
-            const int minColumn = detail::instrument_left_column(
-                detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
-            if (s.instrumentCursorColumn > minColumn) s.instrumentCursorColumn = minColumn;
-            return;
-        }
-
-        case ScreenType::MODS:
-            detail::mod_select_side(s, 0);
-            return;
-
-        case ScreenType::INST_POOL:
-            if (s.poolCursorColumn > 0) s.poolCursorColumn--;
-            return;
-
-        case ScreenType::MIXER:
-            if (s.mixerMasterRow == 0) {
-                s.mixerCursorColumn = (s.mixerCursorColumn > 0) ? s.mixerCursorColumn - 1 : 8;
-            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 1) {
-                s.mixerCursorColumn = 0;   // DEL → REV
-            } else if (s.mixerCursorColumn == 8) {
-                s.mixerMasterRow    = 1;   // the master strip exits onto the DEL send
-                s.mixerCursorColumn = 1;
-            }
-            return;
-
-        case ScreenType::PROJECT:   // column 0 is the label
-            if (s.projectCursorColumn > 1) s.projectCursorColumn--;
-            return;
-
-        case ScreenType::SETTINGS:   // two columns at most
-            s.settingsCursorColumn = 1;
-            return;
-
-        case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_step_column(s.effectsCursorRow, -1);
-            return;
-
-        case ScreenType::MIDI:
-            return;
-
-        // Through the clamp: the SCOPE cell is not drawn on every destination.
-        case ScreenType::MIDI_MAP:
-            if (s.project && s.midiMapCursorColumn > 1)
-                s.midiMapCursorColumn = midi_map_clamp_column(
-                    *s.project, s.midiMapCursorRow, s.midiMapCursorColumn - 1, /*prefer=*/-1);
-            return;
-
-        default:
-            break;
-    }
-    const int minColumn = min_cursor_column(s.currentScreen);
-    if (s.cursorColumn > minColumn) s.cursorColumn--;
-}
-
-inline void move_cursor_right(AppState& s) {
-    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
-        detail::sample_editor_step_col(s, +1);
-        return;
-    }
-    switch (s.currentScreen) {
-        case ScreenType::TABLE:
-            if (s.tableCursorColumn < 8) s.tableCursorColumn++;
-            return;
-
-        case ScreenType::SCALE:
-            if (s.scaleCursorRow == SCALE_NAME_ROW &&
-                s.scaleCursorColumn < SCALE_NAME_COL_COUNT - 1)
-                s.scaleCursorColumn++;
-            return;
-
-        // RIGHT from any tick row enters the panel, on the panel's own last row.
-        case ScreenType::GROOVE:
-            if (s.grooveCursorColumn != GROOVE_COL_PANEL) {
-                s.grooveCursorColumn = GROOVE_COL_PANEL;
-            } else if (s.groovePanelColumn < groove_panel_cell_count(s.groovePanelRow) - 1) {
-                s.groovePanelColumn++;
-            }
-            return;
-
-        case ScreenType::INSTRUMENT: {
-            const int maxColumn = detail::instrument_right_column(
-                detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
-            if (s.instrumentCursorColumn < maxColumn) s.instrumentCursorColumn = maxColumn;
-            return;
-        }
-
-        case ScreenType::MODS:
-            detail::mod_select_side(s, 1);
-            return;
-
-        case ScreenType::INST_POOL:
-            if (s.poolCursorColumn < 4) s.poolCursorColumn++;
-            return;
-
-        case ScreenType::MIXER:
-            if (s.mixerMasterRow == 0) {
-                s.mixerCursorColumn = (s.mixerCursorColumn < 8) ? s.mixerCursorColumn + 1 : 0;
-            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 0) {
-                s.mixerCursorColumn = 1;   // REV → DEL
-            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 1) {
-                s.mixerCursorColumn = 8;   // DEL → the master strip, at the EQ row
-            }
-            return;
-
-        case ScreenType::PROJECT: {
-            const int max = project_row_max_column(static_cast<ProjectRow>(s.projectCursorRow));
-            if (s.projectCursorColumn < max) s.projectCursorColumn++;
-            return;
-        }
-
-        case ScreenType::SETTINGS: {
-            const SettingsRow row = static_cast<SettingsRow>(s.settingsCursorRow);
-            const bool hasSkins   = s.settings.skinCount > 0;
-            if (settings_row_has_second_column(row, s.caps, hasSkins, s.settings.oneHanded) &&
-                s.settingsCursorColumn < 2)
-                s.settingsCursorColumn = 2;
-            return;
-        }
-
-        case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_step_column(s.effectsCursorRow, +1);
-            return;
-
-        case ScreenType::MIDI:
-            return;
-
-        case ScreenType::MIDI_MAP:
-            if (s.project &&
-                s.midiMapCursorColumn < midi_map_max_column(*s.project, s.midiMapCursorRow))
-                s.midiMapCursorColumn = midi_map_clamp_column(
-                    *s.project, s.midiMapCursorRow, s.midiMapCursorColumn + 1, /*prefer=*/+1);
-            return;
-
-        default:
-            break;
-    }
-    const int maxColumn = max_cursor_column(s.currentScreen);
-    if (s.cursorColumn < maxColumn) s.cursorColumn++;
 }
 
 }  // namespace pt::ui

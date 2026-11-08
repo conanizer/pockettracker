@@ -22,17 +22,17 @@ GestureResult InputDispatcher::map_picker_layer(Gesture g) {
 
 void InputDispatcher::open_map_picker() {
     s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
-        s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
+        s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursor.row)].dest));
 }
 
 bool InputDispatcher::on_map_dest_cell() const {
     if (s_.currentScreen != ScreenType::MIDI_MAP) return false;
     const Project& p = *s_.project;
-    if (s_.midiMapCursorRow < 0 ||
-        s_.midiMapCursorRow >= static_cast<int>(p.midiMappings.size()))
+    if (s_.midiMapCursor.row < 0 ||
+        s_.midiMapCursor.row >= static_cast<int>(p.midiMappings.size()))
         return false;   // the ADD row — a plain A is its whole behaviour
-    return s_.midiMapCursorColumn == static_cast<int>(MapCol::GROUP) ||
-           s_.midiMapCursorColumn == static_cast<int>(MapCol::PARAM);
+    return s_.midiMapCursor.column == static_cast<int>(MapCol::GROUP) ||
+           s_.midiMapCursor.column == static_cast<int>(MapCol::PARAM);
 }
 
 void InputDispatcher::apply_map_picker_choice() {
@@ -42,7 +42,7 @@ void InputDispatcher::apply_map_picker_choice() {
 
     Project& p = host_.edit_project();
     // ⚠️ `take_dest`, not a field write: a new destination brings its own RANGE and clears its SCOPE.
-    if (songcore::take_dest(p.midiMappings[static_cast<size_t>(s_.midiMapCursorRow)], *d))
+    if (songcore::take_dest(p.midiMappings[static_cast<size_t>(s_.midiMapCursor.row)], *d))
         mark_dirty_and_arm_autosave();
 
     // No cursor clamp needed: the picker opens only on GROUP and PARAM, which every destination has.

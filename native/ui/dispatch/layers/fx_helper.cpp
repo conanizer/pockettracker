@@ -11,9 +11,9 @@ namespace {
 // The phrase step or table row under the cursor, handed to `fn`; nothing on any other screen.
 template <class P, class F> void with_fx_row(const AppState& s, P& p, F fn) {
     if (s.currentScreen == ScreenType::PHRASE)
-        fn(p.phrases[static_cast<size_t>(s.currentPhrase)].steps[static_cast<size_t>(s.cursorRow)]);
+        fn(p.phrases[static_cast<size_t>(s.currentPhrase)].steps[static_cast<size_t>(s.phraseCursor.row)]);
     else if (s.currentScreen == ScreenType::TABLE)
-        fn(p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursorRow)]);
+        fn(p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursor.row)]);
 }
 
 }  // namespace
@@ -46,8 +46,8 @@ void InputDispatcher::open_fx_helper() {
 
 bool InputDispatcher::on_fx_type_column() const {
     switch (s_.currentScreen) {
-        case ScreenType::PHRASE: return is_fx_type_column(s_.cursorColumn, PHRASE_FX_COLUMN);
-        case ScreenType::TABLE:  return is_fx_type_column(s_.tableCursorColumn, TABLE_FX_COLUMN);
+        case ScreenType::PHRASE: return is_fx_type_column(s_.phraseCursor.column, PHRASE_FX_COLUMN);
+        case ScreenType::TABLE:  return is_fx_type_column(s_.tableCursor.column, TABLE_FX_COLUMN);
         default:                 return false;
     }
 }
@@ -70,8 +70,8 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
 // ─── A on an empty command cell ──────────────────────────────────────────────────────────────────
 
 int InputDispatcher::fx_slot_at_cursor() const {
-    if (s_.currentScreen == ScreenType::PHRASE) return fx_slot_of_column(s_.cursorColumn, PHRASE_FX_COLUMN);
-    if (s_.currentScreen == ScreenType::TABLE)  return fx_slot_of_column(s_.tableCursorColumn, TABLE_FX_COLUMN);
+    if (s_.currentScreen == ScreenType::PHRASE) return fx_slot_of_column(s_.phraseCursor.column, PHRASE_FX_COLUMN);
+    if (s_.currentScreen == ScreenType::TABLE)  return fx_slot_of_column(s_.tableCursor.column, TABLE_FX_COLUMN);
     return 0;
 }
 
@@ -108,9 +108,9 @@ bool InputDispatcher::fx_insert_last(bool peek) {
 bool InputDispatcher::cursor_cell_empty() const {
     if (cursor_context().capabilities.isEmpty) return true;
     // PHRASE's V and I play nothing without a note, and are drawn dimmed.
-    if (s_.currentScreen == ScreenType::PHRASE && (s_.cursorColumn == 2 || s_.cursorColumn == 3))
+    if (s_.currentScreen == ScreenType::PHRASE && (s_.phraseCursor.column == 2 || s_.phraseCursor.column == 3))
         return !songcore::step_has_note(s_.project->phrases[static_cast<size_t>(s_.currentPhrase)]
-                                            .steps[static_cast<size_t>(s_.cursorRow)]);
+                                            .steps[static_cast<size_t>(s_.phraseCursor.row)]);
     const int slot = fx_slot_at_cursor();
     if (slot == 0) return false;
     int type = songcore::FX_NONE;

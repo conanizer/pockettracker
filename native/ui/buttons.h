@@ -81,4 +81,19 @@ struct ButtonEvent {
     ButtonMods   mods;
 };
 
+inline constexpr uint16_t button_bit(Button b) { return static_cast<uint16_t>(1u << static_cast<unsigned>(b)); }
+
+// What a press did with the buttons held beside it, for ONE HAND (ui/sticky_buttons.h): the held buttons
+// its chord used, and what becomes of their locks once it is over. Ordered: a later press only raises it.
+enum class ChordEnd : uint8_t {
+    KEEP,      // repeated (any with the D-pad, MUTE/SOLO, audition), or no chord at all
+    ASK_L_R,   // L+R: let go once it has nothing left to clear
+    WIDEN,     // L+B: L waits out the widen window
+    LET_GO,    // done in one go: delete, cut, paste, clone, LIVE's queue and stop, the browser's chords
+};
+struct Chord {
+    ChordEnd end  = ChordEnd::KEEP;
+    uint16_t uses = 0;   // button_bit()s
+};
+
 }  // namespace pt::ui

@@ -5,8 +5,8 @@
 // cloning, the FX helper, previews. SDL input → `button_mapper.h` (which handler) → here (what it does).
 //
 // ⚠️ The modal rule: whatever sits over the screen (a load, a dialog, the keyboard, an editor, a picker)
-// owns the buttons while up. Their order is written once, in `LAYERS` (ui/dispatch/route.cpp); a gesture
-// the top layer does not answer is swallowed there. Then the screen's row in `SCREENS` is asked.
+// owns the buttons while up. Their order is written once, in `OVERLAYS` (ui/overlays.h); a gesture the
+// top layer does not answer is swallowed there. Then the screen's row in `SCREENS` is asked.
 // The THEME and EQ editors let START and SELECT through, so a band can be swept across an audition.
 //
 // The clock is injected (`set_now()` once a frame) so tests can move time.
@@ -18,6 +18,8 @@
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
 #include "ui/dispatch/gesture.h"
+#include "ui/grid_cursor.h"
+#include "ui/overlays.h"
 #include "ui/song_pointer.h"     // NAV = SONG — the ctor clamps the pointer onto a real cell
 #include "ui/filesystem.h"
 #include "ui/midi_ports.h"
@@ -52,17 +54,6 @@
 #include <vector>
 
 namespace pt::ui {
-
-/** The cursor of a screen that takes a selection: where it is, and how far a selection reaches. */
-struct GridCursor {
-    int AppState::*row;
-    int AppState::*column;
-    int maxRow;     // 255 on SONG: a selection spans the arrangement, not the 16 rows shown
-    int maxColumn;  // the rightmost selectable column — a ROW-scope selection ends there
-    // A+D-pad over a selection steps every selected column, not just the cursor's: on SONG each column
-    // is a track of the same chain numbers; elsewhere each column is a different parameter.
-    bool stepsAllColumns = false;
-};
 
 class InputDispatcher {
   public:
@@ -222,8 +213,7 @@ class InputDispatcher {
     // The gate every LIVE gesture asks: LIVE mode, on SONG, nothing on top.
     // ⚠️ The mapper's L+START / R+START are global; ungated they would queue from the sample editor.
     bool live_song_gesture() const {
-        return host_.live_mode() && s_.currentScreen == ScreenType::SONG &&
-               !top_layer();
+        return host_.live_mode() && s_.currentScreen == ScreenType::SONG && !top_overlay(s_);
     }
 
     // Bit N set where track N has a chain on `songRow`.
@@ -304,8 +294,6 @@ class InputDispatcher {
 
     // Close it, whether the load finished, failed or was cancelled.
     void end_load();
-
-    bool load_running() const { return s_.loading.running; }
 
     // A load answers no button: the pump reads the cancel itself.
     GestureResult loading_layer(Gesture) { return GestureResult::TAKEN; }
@@ -465,8 +453,7 @@ class InputDispatcher {
     // Where the first A of an A,A landed; it counts only if the cursor did not move.
     bool         hasInsertPos_ = false;
     ScreenType   insertScreen_ = ScreenType::PHRASE;
-    int          insertRow_    = 0;
-    int          insertCol_    = 0;
+    CursorPosition insertAt_{};
 
     // ── The spine ────────────────────────────────────────────────────────────────────────────────
 
@@ -503,9 +490,6 @@ class InputDispatcher {
     // ⚠️ No timed kill — A's release is its only end, so call it only from an A handler.
     void preview_held_note();
     bool heldNotePreview_ = false;
-
-    // The track the cursor last left SONG on — only ever a tie-break, so a stale one cannot misroute.
-    int remembered_song_track() const;
 
     // The mixer channel an audition borrows, or -1 (unity gain): the song cell you came through, while
     // it still holds a chain — never "the first track that plays it".
@@ -545,43 +529,30 @@ class InputDispatcher {
     bool on_map_dest_cell() const;
     void apply_map_picker_choice();
 
-    bool qwerty_open() const { return s_.qwerty.isOpen; }
-    bool fx_helper_open() const { return s_.fxHelper.isOpen; }
-    bool map_picker_open() const { return s_.mapPicker.isOpen; }
-
     // ── The layer stack ──────────────────────────────────────────────────────────────────────────
-    // A gesture a layer does not answer is swallowed, so a new layer is one row in `LAYERS` plus its
-    // handler. The FX picker is not a modal but owns the buttons the same way.
-    struct Layer {
-        bool (InputDispatcher::*isOpen)() const;
-        GestureResult (InputDispatcher::*handle)(Gesture);
-    };
-    // Top first; the order, and why, is in ui/dispatch/route.cpp.
-    static const Layer LAYERS[];
+    // A gesture a layer does not answer is swallowed, so a new layer is one row in `OVERLAYS` plus its
+    // case here.
+    GestureResult layer_handle(Overlay o, Gesture g);
 
-    const Layer* top_layer() const;   // or null
-
-    // One screen: its buttons, the cell under its cursor, an edit there, what a knob would map
-    // (null: nothing), and its grid (null: no selection).
+    // One screen: its buttons, the cell under its cursor, an edit there, and what a knob would map
+    // (null: nothing).
     struct ScreenHandler {
         ScreenType id;
         GestureResult (InputDispatcher::*handle)(Gesture);
         CursorContext (InputDispatcher::*context)() const;
         bool (InputDispatcher::*edit)(const InputAction&);
         songcore::MapTarget (InputDispatcher::*knob)() const;
-        const GridCursor* grid;
     };
     static const ScreenHandler SCREENS[];
 
     const ScreenHandler* screen() const;   // the current screen's row, or null
-    const GridCursor* grid() const;        // null where there is no selection
+    const GridCursor* grid() const { return grid_of(s_.currentScreen); }   // null: no selection
 
     // Offer `g` to the top layer, then the screen. True when one took it and the gesture's body must
     // not run.
     bool route(Gesture g);
 
     // The confirm dialog: A and B answer it; everything else is inert but the audition's stop.
-    bool confirm_open() const { return s_.confirm.is_open(); }
     GestureResult confirm_layer(Gesture g);
 
     void confirm_accept();
@@ -621,11 +592,10 @@ class InputDispatcher {
 
     // ── The send editor (ui/dispatch/layers/send_editor.cpp) — an overlay too ──
 
-    bool send_editor_open() const { return send_editor_up(s_); }
     // …with no keyboard or EQ editor over it.
     bool send_editor_on_top() const {
-        const Layer* top = top_layer();
-        return top && top->handle == &InputDispatcher::send_editor_layer;
+        const OverlayRow* top = top_overlay(s_);
+        return top && top->id == Overlay::SEND;
     }
     GestureResult send_editor_layer(Gesture g);
 
@@ -638,7 +608,6 @@ class InputDispatcher {
     // ── The theme editor (ui/dispatch/layers/theme.cpp), over SETTINGS ──
     // ⚠️ SAVE raises the keyboard on top of it, so QWERTY sits above THEME in the layer stack.
 
-    bool theme_open() const { return theme_editor_up(s_); }
     GestureResult theme_layer(Gesture g);
 
     // The roll's seed starts from the clock, so each opening walks a different sequence.
@@ -689,8 +658,6 @@ class InputDispatcher {
     // PROJECT → EXPORT → MIX / STEMS. The range starts on the SONG cursor's section, SONG END on AUTO.
     // REPEAT is kept between openings.
     void open_render_dialog(RenderDialogState::Output output);
-
-    bool render_dialog_open() const { return s_.renderDialog.isOpen; }
 
     GestureResult render_dialog_layer(Gesture g);
 
@@ -938,7 +905,6 @@ class InputDispatcher {
     bool          sample_editor_edit(const InputAction& action);
 
     // "ARE YOU SURE?" on B over a modified sample: A discards and leaves, B stays.
-    bool sample_close_open() const { return on_sample_editor() && s_.sampleEditor.showConfirmClose; }
     GestureResult sample_close_layer(Gesture g);
 
     // SELECTION: the D-pad drags the selection instead of moving a cursor.
@@ -968,7 +934,6 @@ class InputDispatcher {
 
     // ── The TSTRETCH box (ui/dispatch/layers/stretch_editor.cpp) ─────────────────────────────────
 
-    bool stretch_editor_open() const { return stretch_editor_up(s_); }
     GestureResult stretch_editor_layer(Gesture g);
     void open_stretch_editor();
     void stretch_editor_edit(InputAction (*fn)(const CursorContext&));

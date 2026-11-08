@@ -879,7 +879,7 @@ void FrameLoop::handle_input(Uint64 now) {
 
     dispatch.set_now(static_cast<long long>(now));
 
-    const auto to_mapper    = [&](const ui::ButtonEvent& ev) { ui::handle_button(ev, dispatch, mapper, now); };
+    const auto to_mapper    = [&](const ui::ButtonEvent& ev) { return ui::handle_button(ev, dispatch, mapper, now); };
     const auto l_r_has_more = [&] { return dispatch.l_r_has_more(); };
     // Turned off: what it still holds is let go.
     if (!oneHanded) sticky.release_all(to_mapper);

@@ -11,6 +11,7 @@
 #include "audio-engine.h"
 #include "songcore/host.h"
 #include "ui/app_state.h"
+#include "ui/grid_cursor.h"
 #include "ui/layout.h"   // screen_label
 
 namespace ptshell {
@@ -24,13 +25,15 @@ inline void print_status_line(songcore::SongcoreHost& host, AudioEngine& engine,
                               const LoopCounts& n) {
     const pt::ui::TrackPlayhead&   t0 = state.playheads[0];
     const AudioEngine::BlockTiming bt = engine.getBlockTiming();
+    const pt::ui::GridCursor*      g  = pt::ui::grid_of(state.currentScreen);
+    const pt::ui::CursorPosition   at = g ? state.*g->cursor : pt::ui::CursorPosition{};
     std::printf(
         "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
         "   drew %lld skip %lld same %lld poll %lld   cpu %d.%d%% max %d.%d%% late %lld\n",
         host.is_playing() ? "play" : "stop",
         static_cast<long long>(engine.getCurrentFrame()), t0.songRow, t0.chainRow,
         t0.step, engine.getActiveVoiceCount(), pt::ui::screen_label(state.currentScreen),
-        state.cursorRow, state.cursorColumn, n.presented, n.skipped, n.drawn - n.presented, n.polls,
+        at.row, at.column, n.presented, n.skipped, n.drawn - n.presented, n.polls,
         bt.meanLoad / 10, bt.meanLoad % 10, bt.worstLoad / 10, bt.worstLoad % 10,
         static_cast<long long>(bt.lateBlocks));
     std::fflush(stdout);  // block-buffered to a pipe otherwise

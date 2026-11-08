@@ -1,7 +1,8 @@
 #pragma once
 
-// The combo matrix: a button event plus the modifiers held at that instant → one named handler.
-// A template so a test can drive it with a recording stub; in the app `Dispatcher` is `InputDispatcher`.
+// The combo matrix: a button event plus the modifiers held at that instant → one named handler, and the
+// chord it made (for ONE HAND). A template so a test can drive it with a recording stub; in the app
+// `Dispatcher` is `InputDispatcher`.
 
 #include "ui/buttons.h"
 
@@ -33,8 +34,11 @@ struct MapperState {
 // ⚠️ Modifiers come from the event, never a poll: a frame's events arrive at once, and a poll would
 // see the frame's end (B-then-A in one frame would delete on the B press).
 template <class Dispatcher>
-void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_t now) {
+Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_t now) {
     const ButtonMods& m = e.mods;
+    constexpr uint16_t A = button_bit(Button::A), B = button_bit(Button::B), L = button_bit(Button::L_SHIFT),
+                       R = button_bit(Button::R_SHIFT), SELECT = button_bit(Button::SELECT);
+    const auto one_go = [](uint16_t uses) { return Chord{ChordEnd::LET_GO, uses}; };
 
     // R's state for MIDI learn ("hold R, turn a knob"). ⚠️ Above every early return, or R could stay held.
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
@@ -51,12 +55,12 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             if (e.button == Button::R_SHIFT) {
                 ms.rComboArmed = false;
                 d.on_r_combo_commit();
-                return;
+                return {};
             }
             if ((e.button == Button::A || e.button == Button::B) && m.r) {
                 ms.rComboArmed = false;
                 d.on_r_combo_revert();
-                return;
+                return {};
             }
         }
         if (e.button == Button::A) {
@@ -78,7 +82,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                 d.on_select();
             }
         }
-        return;
+        return {};
     }
 
     // The full help overlay: any press closes it and is consumed — it covers the editor, so a press
@@ -87,7 +91,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         ms.selectPressedAlone = false;
         d.on_help_dismiss();
         if (e.button != Button::START && !m.a) d.on_stop_preview();
-        return;
+        return {};
     }
 
     // Any press but SELECT puts the compact panel away and falls through — it swallows nothing.
@@ -103,12 +107,12 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     if (m.a && !m.l && !m.r) {
         switch (e.button) {
             // Each cancels the deferred A: it was a combo.
-            case Button::B:          ms.aPressedAlone = false; d.on_a_b();     return;   // delete / reset
-            case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return;   // +16 / +1 octave (or the FX helper)
-            case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −16 / −1 octave
-            case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return;   // +1
-            case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return;   // −1
-            case Button::START:      ms.aPressedAlone = false; d.on_a_start(); return;   // audition
+            case Button::B:          ms.aPressedAlone = false; d.on_a_b();     return one_go(A);   // delete / reset
+            case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return {};   // +16 / +1 octave (or the FX helper)
+            case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return {};   // −16 / −1 octave
+            case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return {};   // +1
+            case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return {};   // −1
+            case Button::START:      ms.aPressedAlone = false; d.on_a_start(); return {};   // audition
             default: break;
         }
     }
@@ -117,9 +121,9 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ⚠️ The mods include the button being pressed: on SELECT+R, R's press has already set `m.r`.
     if (m.select && !m.l && (!m.r || e.button == Button::R_SHIFT)) {
         switch (e.button) {
-            case Button::A:       d.on_select_a(); return;   // rename     (opens the keyboard)
-            case Button::B:       d.on_select_b(); return;   // delete     (arms the confirm)
-            case Button::R_SHIFT: d.on_select_r(); return;   // new folder (opens the keyboard)
+            case Button::A:       d.on_select_a(); return one_go(SELECT);   // rename     (opens the keyboard)
+            case Button::B:       d.on_select_b(); return one_go(SELECT);   // delete     (arms the confirm)
+            case Button::R_SHIFT: d.on_select_r(); return one_go(SELECT);   // new folder (opens the keyboard)
             default: break;
         }
     }
@@ -128,10 +132,10 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     if (m.b && !m.l && !m.r && !m.a) {
         switch (e.button) {
             // Each cancels the deferred B, or B+RIGHT in the EQ editor would close it on release.
-            case Button::DPAD_LEFT:  ms.bPressedAlone = false; d.on_b_left();  return;   // prev item / EQ slot −1
-            case Button::DPAD_RIGHT: ms.bPressedAlone = false; d.on_b_right(); return;   // next item / EQ slot +1
-            case Button::DPAD_UP:    ms.bPressedAlone = false; d.on_b_up();    return;   // SONG / pool: page up
-            case Button::DPAD_DOWN:  ms.bPressedAlone = false; d.on_b_down();  return;   // SONG / pool: page down
+            case Button::DPAD_LEFT:  ms.bPressedAlone = false; d.on_b_left();  return {};   // prev item / EQ slot −1
+            case Button::DPAD_RIGHT: ms.bPressedAlone = false; d.on_b_right(); return {};   // next item / EQ slot +1
+            case Button::DPAD_UP:    ms.bPressedAlone = false; d.on_b_up();    return {};   // SONG / pool: page up
+            case Button::DPAD_DOWN:  ms.bPressedAlone = false; d.on_b_down();  return {};   // SONG / pool: page down
             default: break;
         }
     }
@@ -141,9 +145,9 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         switch (e.button) {
             case Button::SELECT:   // reserved: consumed, not passed down
             case Button::A:
-            case Button::B:       return;
+            case Button::B:       return {};
             case Button::L_SHIFT:
-            case Button::R_SHIFT: d.on_l_r(); return;
+            case Button::R_SHIFT: d.on_l_r(); return {ChordEnd::ASK_L_R, L | R};
             default: break;
         }
     }
@@ -151,24 +155,24 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ── L+B+A: clone — before L+A, which would paste ─────────────────────────────────────────────
     if (m.l && m.b && !m.r && e.button == Button::A) {
         d.on_l_b_a();
-        return;
+        return one_go(L | B);
     }
 
     // ── L + … : selection and the clipboard ──────────────────────────────────────────────────────
     if (m.l && !m.r) {
         switch (e.button) {
-            case Button::A:     d.on_l_a(); return;   // cut (in a selection) / paste (outside one)
-            case Button::B:     d.on_l_b(); return;   // enter selection, then widen it
-            case Button::START: d.on_l_start(); return;   // LIVE's row queue; never play/stop
+            case Button::A:     d.on_l_a(); return one_go(L);   // cut (in a selection) / paste (outside one)
+            case Button::B:     d.on_l_b(); return {ChordEnd::WIDEN, L};   // enter selection, then widen it
+            case Button::START: d.on_l_start(); return one_go(L);   // LIVE's row queue; never play/stop
             default: break;
         }
         // L + a direction fills rows — L alone, so a held clipboard chord cannot fire it.
         if (!m.a && !m.b && !m.select) {
             switch (e.button) {
-                case Button::DPAD_UP:    d.on_l_up();    return;
-                case Button::DPAD_DOWN:  d.on_l_down();  return;
-                case Button::DPAD_LEFT:  d.on_l_left();  return;
-                case Button::DPAD_RIGHT: d.on_l_right(); return;
+                case Button::DPAD_UP:    d.on_l_up();    return {};
+                case Button::DPAD_DOWN:  d.on_l_down();  return {};
+                case Button::DPAD_LEFT:  d.on_l_left();  return {};
+                case Button::DPAD_RIGHT: d.on_l_right(); return {};
                 default: break;
             }
         }
@@ -177,14 +181,14 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ── R + DPAD: move between screens ───────────────────────────────────────────────────────────
     if (m.r && !m.l) {
         switch (e.button) {
-            case Button::DPAD_UP:    d.on_r_up();    return;
-            case Button::DPAD_DOWN:  d.on_r_down();  return;
-            case Button::DPAD_LEFT:  d.on_r_left();  return;
-            case Button::DPAD_RIGHT: d.on_r_right(); return;
+            case Button::DPAD_UP:    d.on_r_up();    return {};
+            case Button::DPAD_DOWN:  d.on_r_down();  return {};
+            case Button::DPAD_LEFT:  d.on_r_left();  return {};
+            case Button::DPAD_RIGHT: d.on_r_right(); return {};
             // MUTE and SOLO. ⚠️ Both arm the latch even where nothing happens: a chord armed on SONG
             // and released on MIXER must still be closed out.
-            case Button::A:          d.on_r_a(); ms.rComboArmed = true; return;
-            case Button::B:          ms.bPressedAlone = false; d.on_r_b(); ms.rComboArmed = true; return;
+            case Button::A:          d.on_r_a(); ms.rComboArmed = true; return {};
+            case Button::B:          ms.bPressedAlone = false; d.on_r_b(); ms.rComboArmed = true; return {};
             // ⚠️ R arriving second: half the time B lands first. Where R+B mutes, B is held
             // (`defer_b_to_release`) so it can still be claimed here — `bPressedAlone`, not `m.b`,
             // because a B that already acted must not also be a chord.
@@ -194,8 +198,8 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                     d.on_r_b();
                     ms.rComboArmed = true;
                 }
-                return;
-            case Button::START:      d.on_r_start(); return;   // LIVE's stop; the song from below SONG
+                return {};
+            case Button::START:      d.on_r_start(); return one_go(R);   // LIVE's stop; the song from below SONG
             default: break;
         }
     }
@@ -207,7 +211,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             ms.aPressedAlone = true;
             ms.lastAPress    = 0;
             d.on_a_deferred();   // a deferred tap aimed at the playhead reads it now
-            return;
+            return {};
         }
         if (now - ms.lastAPress < 300) {
             ms.lastAPress = 0;   // so a triple-tap is not two double-taps
@@ -216,28 +220,28 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             ms.lastAPress = now;
             d.on_button_a();
         }
-        return;
+        return {};
     }
 
     // ── B ────────────────────────────────────────────────────────────────────────────────────────
     if (e.button == Button::B && !m.l && !m.r && !m.a) {
         if (d.defer_b_to_release()) {
             ms.bPressedAlone = true;
-            return;
+            return {};
         }
         d.on_button_b();
-        return;
+        return {};
     }
 
     // Before the no-modifier guard: SELECT's own press sets `m.select`. SELECT only arms here.
     if (e.button == Button::SELECT && !m.l && !m.r && !m.a && !m.b) {
         ms.selectPressedAlone = true;
-        return;
+        return {};
     }
-    if (e.button == Button::START && !m.l && !m.r && !m.a && !m.b && !m.select) { d.on_start(); return; }
+    if (e.button == Button::START && !m.l && !m.r && !m.a && !m.b && !m.select) { d.on_start(); return {}; }
 
     // ── The plain D-pad ──────────────────────────────────────────────────────────────────────────
-    if (m.l || m.r || m.a || m.b || m.select) return;
+    if (m.l || m.r || m.a || m.b || m.select) return {};
 
     switch (e.button) {
         case Button::DPAD_UP:    d.on_dpad_up();    break;
@@ -246,6 +250,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         case Button::DPAD_RIGHT: d.on_dpad_right(); break;
         default: break;
     }
+    return {};
 }
 
 }  // namespace pt::ui

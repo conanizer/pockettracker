@@ -100,24 +100,24 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
             // currentScreen is still PHRASE, so cursor_context() is its cell. A -1 is clamped on arrival.
             if (!cursor_context().capabilities.isEmpty) {
                 s_.lastEditedInstrument = p.phrases[static_cast<size_t>(s_.currentPhrase)]
-                                              .steps[static_cast<size_t>(s_.cursorRow)]
+                                              .steps[static_cast<size_t>(s_.phraseCursor.row)]
                                               .instrument;
             }
             break;
 
         case ScreenType::CHAIN: {
             const int ref = p.chains[static_cast<size_t>(s_.currentChain)]
-                                .phraseRefs[static_cast<size_t>(s_.cursorRow)];
+                                .phraseRefs[static_cast<size_t>(s_.chainCursor.row)];
             if (ref >= 0) s_.lastEditedPhrase = ref;
             break;
         }
 
         case ScreenType::SONG: {
             // The column is the track, 1-based; a track's chainRefs may be shorter than 256 rows.
-            const auto& refs = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)].chainRefs;
-            if (s_.cursorRow < static_cast<int>(refs.size()) &&
-                refs[static_cast<size_t>(s_.cursorRow)] >= 0) {
-                s_.lastEditedChain = refs[static_cast<size_t>(s_.cursorRow)];
+            const auto& refs = p.tracks[static_cast<size_t>(s_.songCursor.column - 1)].chainRefs;
+            if (s_.songCursor.row < static_cast<int>(refs.size()) &&
+                refs[static_cast<size_t>(s_.songCursor.row)] >= 0) {
+                s_.lastEditedChain = refs[static_cast<size_t>(s_.songCursor.row)];
             }
             break;
         }
@@ -184,7 +184,7 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
                     if (col >= 1 && col <= 8) out[count++] = col - 1;
                 return;
             }
-            if (s_.cursorColumn >= 1 && s_.cursorColumn <= 8) out[count++] = s_.cursorColumn - 1;
+            if (s_.songCursor.column >= 1 && s_.songCursor.column <= 8) out[count++] = s_.songCursor.column - 1;
             return;
         }
         case ScreenType::MIXER:
@@ -274,7 +274,7 @@ void InputDispatcher::on_r_a() {
 
 // Is R+A/R+B a MUTE/SOLO here? Asked by the chord and by the deferred B alike.
 bool InputDispatcher::mute_solo_chord_live() const {
-    if (top_layer()) return false;   // a modal owns the buttons while it is up
+    if (top_overlay(s_)) return false;   // a modal owns the buttons while it is up
     return s_.currentScreen == ScreenType::SONG || s_.currentScreen == ScreenType::MIXER;
 }
 
@@ -308,7 +308,7 @@ void InputDispatcher::on_r_combo_revert() {
 // ─── R+B on PHRASE / TABLE: switch commands off ──────────────────────────────────────────────────
 
 bool InputDispatcher::fx_off_chord_live() const {
-    if (top_layer()) return false;
+    if (top_overlay(s_)) return false;
     return s_.currentScreen == ScreenType::PHRASE || s_.currentScreen == ScreenType::TABLE;
 }
 
@@ -321,8 +321,8 @@ void InputDispatcher::toggle_fx_off() {
     // Either column of a slot names it.
     const int  fx1Col  = onTable ? TABLE_FX_COLUMN : PHRASE_FX_COLUMN;
 
-    int top  = onTable ? s_.tableCursorRow    : s_.cursorRow;
-    int left = onTable ? s_.tableCursorColumn : s_.cursorColumn;
+    int top  = (s_.*grid()->cursor).row;
+    int left = (s_.*grid()->cursor).column;
     int bottom = top, right = left;
     if (s_.selection.active) {
         const SelectionBounds b = s_.selection.bounds();

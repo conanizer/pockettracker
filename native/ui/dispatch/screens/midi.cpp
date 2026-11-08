@@ -38,7 +38,7 @@ GestureResult InputDispatcher::midi_map_screen(Gesture g) {
 // ─── What A does ─────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::midi_action() {
-    switch (static_cast<MidiRow>(s_.midiCursorRow)) {
+    switch (static_cast<MidiRow>(s_.midiCursor.row)) {
         case MidiRow::PANIC:
             // Every owed note-off, through the consumer — the panic STOP sends.
             host_.midi_out().panic();
@@ -74,14 +74,14 @@ void InputDispatcher::midi_action() {
 void InputDispatcher::clamp_midi_map_cursor() {
     const songcore::Project& p    = host_.project();
     const int                rows = midi_map_row_count(p);   // always ≥ 1 — the ADD row
-    s_.midiMapCursorRow    = std::clamp(s_.midiMapCursorRow, 0, rows - 1);
-    s_.midiMapCursorColumn = midi_map_clamp_column(p, s_.midiMapCursorRow, s_.midiMapCursorColumn);
+    s_.midiMapCursor.row    = std::clamp(s_.midiMapCursor.row, 0, rows - 1);
+    s_.midiMapCursor.column = midi_map_clamp_column(p, s_.midiMapCursor.row, s_.midiMapCursor.column);
 }
 
 void InputDispatcher::midi_map_action() {
     // Only the ADD row answers a bare A; the cells above are A+DPAD cells.
     songcore::Project& p = host_.edit_project();
-    if (s_.midiMapCursorRow != static_cast<int>(p.midiMappings.size())) return;
+    if (s_.midiMapCursor.row != static_cast<int>(p.midiMappings.size())) return;
     if (static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX) return;
 
     // A new row points at the first destination (track 1's fader) over its whole range.
@@ -102,8 +102,8 @@ CursorContext InputDispatcher::midi_context() const {
     MidiState ms{*s_.project, s_.settings, s_.midiOutDeviceNames, s_.midiInDeviceNames};
     ms.lastCcChannel  = s_.midiInCcChannel;
     ms.clockBpm       = s_.midiClockBpm;
-    ms.cursorRow      = s_.midiCursorRow;
-    ms.cursorColumn   = s_.midiCursorColumn;
+    ms.cursorRow      = s_.midiCursor.row;
+    ms.cursorColumn   = s_.midiCursor.column;
     ms.deviceIndex    = s_.midiOutDeviceIndex;
     ms.inDeviceIndex  = s_.midiInDeviceIndex;
     ms.autoOffsetMs   = s_.midiAutoOffsetMs;
@@ -116,7 +116,7 @@ CursorContext InputDispatcher::midi_context() const {
 bool InputDispatcher::midi_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     const MidiInputResult r =
-        midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
+        midi_.handle_input(p, s_.settings, s_.midiCursor.row, s_.midiCursor.column,
                            s_.midiOutDeviceNames, s_.midiInDeviceNames, action);
     // The side effects the module cannot perform — it has no port.
     if (r.deviceChanged)   midiPorts_.apply_out();
@@ -132,8 +132,8 @@ bool InputDispatcher::midi_edit(const InputAction& action) {
 CursorContext InputDispatcher::midi_map_context() const {
     const Project& p = *s_.project;
     MidiMapState mm{p};
-    mm.cursorRow    = s_.midiMapCursorRow;
-    mm.cursorColumn = s_.midiMapCursorColumn;
+    mm.cursorRow    = s_.midiMapCursor.row;
+    mm.cursorColumn = s_.midiMapCursor.column;
     return midiMap_.cursor_context(mm);
 }
 
@@ -141,8 +141,8 @@ CursorContext InputDispatcher::midi_map_context() const {
 // parameter until a knob turns.
 bool InputDispatcher::midi_map_edit(const InputAction& action) {
     Project& p = host_.edit_project();
-    const MidiMapInputResult r = midiMap_.handle_input(p, s_.midiMapCursorRow,
-                                                       s_.midiMapCursorColumn, action);
+    const MidiMapInputResult r = midiMap_.handle_input(p, s_.midiMapCursor.row,
+                                                       s_.midiMapCursor.column, action);
     // A delete leaves the cursor one past the end — the ADD row, where it should land.
     if (r.rowDeleted) clamp_midi_map_cursor();
     return r.modified;

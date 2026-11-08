@@ -2,8 +2,8 @@
 
 // NAV = SONG: the pointer is the cell, not the item. `currentChain` and `currentPhrase` are read off
 // the SONG and CHAIN cursors:
-//     currentChain  = tracks[songCursorColumn − 1].chainRefs[songCursorRow]
-//     currentPhrase = chains[currentChain].phraseRefs[chainCursorRow]
+//     currentChain  = tracks[songCursor.column − 1].chainRefs[songCursor.row]
+//     currentPhrase = chains[currentChain].phraseRefs[chainCursor.row]
 // (Under NAV = POOL they are the state.) They are still written, by `refresh_song_relative_refs`,
 // wherever the pointer moves. ⚠️ An empty cell leaves the old value: −1 would be read out of bounds.
 
@@ -15,33 +15,12 @@
 
 namespace pt::ui {
 
-// On the screen that owns a cursor the live one is the answer; elsewhere the saved copy. The setters
-// apply the same test.
-inline int pointer_song_row(const AppState& s) {
-    return (s.currentScreen == ScreenType::SONG) ? s.cursorRow : s.songCursorRow;
-}
-inline int pointer_track(const AppState& s) {
-    return ((s.currentScreen == ScreenType::SONG) ? s.cursorColumn : s.songCursorColumn) - 1;
-}
-inline int pointer_chain_row(const AppState& s) {
-    return (s.currentScreen == ScreenType::CHAIN) ? s.cursorRow : s.chainCursorRow;
-}
+// The SONG cursor's track, 0-based (its column is 1-based).
+inline int pointer_track(const AppState& s) { return s.songCursor.column - 1; }
 
-// `track` is 0-based; the cursor column it writes is 1-based.
 inline void set_pointer_song_cell(AppState& s, int songRow, int track) {
-    if (s.currentScreen == ScreenType::SONG) {
-        s.cursorRow    = songRow;
-        s.cursorColumn = track + 1;
-    } else {
-        s.songCursorRow    = songRow;
-        s.songCursorColumn = track + 1;
-    }
+    s.songCursor = {songRow, track + 1};
     scroll_song_to_row(s, songRow);
-}
-
-inline void set_pointer_chain_row(AppState& s, int chainRow) {
-    if (s.currentScreen == ScreenType::CHAIN) s.cursorRow      = chainRow;
-    else                                      s.chainCursorRow = chainRow;
 }
 
 // Re-read `currentChain` / `currentPhrase` off the pointer; a no-op under NAV = POOL.
@@ -49,12 +28,12 @@ inline void refresh_song_relative_refs(AppState& s) {
     if (!s.settings.navSongRelative || s.project == nullptr) return;
     const songcore::Project& p = *s.project;
 
-    const int chainId = songcore::chain_at(p, pointer_track(s), pointer_song_row(s));
+    const int chainId = songcore::chain_at(p, pointer_track(s), s.songCursor.row);
     if (chainId >= 0) {
         s.currentChain    = chainId;
         s.lastEditedChain = chainId;
     }
-    const int phraseId = songcore::phrase_at(p, s.currentChain, pointer_chain_row(s));
+    const int phraseId = songcore::phrase_at(p, s.currentChain, s.chainCursor.row);
     if (phraseId >= 0) {
         s.currentPhrase    = phraseId;
         s.lastEditedPhrase = phraseId;
@@ -68,9 +47,9 @@ inline bool song_relative_entry_allowed(const AppState& s, ScreenType to) {
     const songcore::Project& p = *s.project;
     switch (to) {
         case ScreenType::CHAIN:
-            return songcore::chain_at(p, pointer_track(s), pointer_song_row(s)) >= 0;
+            return songcore::chain_at(p, pointer_track(s), s.songCursor.row) >= 0;
         case ScreenType::PHRASE:
-            return songcore::phrase_at(p, s.currentChain, pointer_chain_row(s)) >= 0;
+            return songcore::phrase_at(p, s.currentChain, s.chainCursor.row) >= 0;
         default:
             return true;
     }
@@ -82,7 +61,7 @@ inline void clamp_song_pointer(AppState& s) {
     if (!s.settings.navSongRelative || s.project == nullptr) return;
     const songcore::Project& p = *s.project;
 
-    if (songcore::chain_at(p, pointer_track(s), pointer_song_row(s)) < 0) {
+    if (songcore::chain_at(p, pointer_track(s), s.songCursor.row) < 0) {
         const int trackCount = static_cast<int>(p.tracks.size());
         int longest = 0;
         for (const songcore::Track& t : p.tracks)
@@ -96,10 +75,10 @@ inline void clamp_song_pointer(AppState& s) {
                 }
     }
 
-    const int chainId = songcore::chain_at(p, pointer_track(s), pointer_song_row(s));
-    if (chainId >= 0 && songcore::phrase_at(p, chainId, pointer_chain_row(s)) < 0) {
+    const int chainId = songcore::chain_at(p, pointer_track(s), s.songCursor.row);
+    if (chainId >= 0 && songcore::phrase_at(p, chainId, s.chainCursor.row) < 0) {
         for (int row = 0; row < songcore::CHAIN_ROWS; ++row)
-            if (songcore::phrase_at(p, chainId, row) >= 0) { set_pointer_chain_row(s, row); break; }
+            if (songcore::phrase_at(p, chainId, row) >= 0) { s.chainCursor.row = row; break; }
     }
 
     refresh_song_relative_refs(s);

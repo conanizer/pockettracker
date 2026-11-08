@@ -19,8 +19,8 @@ GestureResult InputDispatcher::project_screen(Gesture g) {
 
         // ⚠️ Tap tempo: a second A within 300 ms arrives as A_A; without this every other fast tap is lost.
         case Gesture::A_A:
-            if (s_.projectCursorRow != static_cast<int>(ProjectRow::TEMPO) ||
-                s_.projectCursorColumn != 2)
+            if (s_.projectCursor.row != static_cast<int>(ProjectRow::TEMPO) ||
+                s_.projectCursor.column != 2)
                 return GestureResult::PASS;
             tap_tempo();
             return GestureResult::TAKEN;
@@ -49,13 +49,13 @@ void InputDispatcher::leave_to(ScreenType back) {
 // ─── What A does ─────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::project_action() {
-    switch (static_cast<ProjectRow>(s_.projectCursorRow)) {
+    switch (static_cast<ProjectRow>(s_.projectCursor.row)) {
         case ProjectRow::NAME:
             // ⚠️ Empty on purpose: NAME is deferred, handled by open_sub_screen_at_cursor.
             break;
 
         case ProjectRow::PROJECT:
-            switch (s_.projectCursorColumn) {
+            switch (s_.projectCursor.column) {
                 case 1: {   // SAVE
                     before_save();
                     const ActionResult r = save_project(host_, fs_, s_);
@@ -88,14 +88,14 @@ void InputDispatcher::project_action() {
 
         case ProjectRow::EXPORT:
             // Both open the RENDER panel; the button picks MIX or STEMS.
-            if (s_.projectCursorColumn == 1)      open_render_dialog(RenderDialogState::Output::MIX);
-            else if (s_.projectCursorColumn == 2) open_render_dialog(RenderDialogState::Output::STEMS);
+            if (s_.projectCursor.column == 1)      open_render_dialog(RenderDialogState::Output::MIX);
+            else if (s_.projectCursor.column == 2) open_render_dialog(RenderDialogState::Output::STEMS);
             break;
 
         case ProjectRow::COMPACT:
-            if (s_.projectCursorColumn == 1)
+            if (s_.projectCursor.column == 1)
                 s_.confirm.open(ConfirmDialogState::Kind::CLEAN_SEQ);
-            else if (s_.projectCursorColumn == 2)
+            else if (s_.projectCursor.column == 2)
                 s_.confirm.open(ConfirmDialogState::Kind::CLEAN_INST);
             break;
 
@@ -127,7 +127,7 @@ void InputDispatcher::project_action() {
         // TAP: the TEMPO row's second cell. ⚠️ The column guard is the feature: plain A also fires on
         // the press of every A+UP.
         case ProjectRow::TEMPO:
-            if (s_.projectCursorColumn == 2) tap_tempo();
+            if (s_.projectCursor.column == 2) tap_tempo();
             break;
 
         // TRANSPOSE is an A+DPAD cell; plain A does nothing.
@@ -145,14 +145,14 @@ void InputDispatcher::tap_tempo() {
 }
 
 void InputDispatcher::settings_action() {
-    switch (static_cast<SettingsRow>(s_.settingsCursorRow)) {
+    switch (static_cast<SettingsRow>(s_.settingsCursor.row)) {
         case SettingsRow::THEME:
             open_theme_editor();
             break;
 
         case SettingsRow::TEMPLATE: {
-            if (s_.settingsCursorColumn != 1 && s_.settingsCursorColumn != 2) break;
-            const ActionResult r = (s_.settingsCursorColumn == 1) ? save_template(host_, fs_)
+            if (s_.settingsCursor.column != 1 && s_.settingsCursor.column != 2) break;
+            const ActionResult r = (s_.settingsCursor.column == 1) ? save_template(host_, fs_)
                                                                   : clear_template(fs_);
             set_status(s_, r.message, r.ok);
             break;
@@ -169,8 +169,8 @@ void InputDispatcher::settings_action() {
 CursorContext InputDispatcher::project_context() const {
     const Project& p = *s_.project;
     ProjectState prs{p};
-    prs.cursorRow    = s_.projectCursorRow;
-    prs.cursorColumn = s_.projectCursorColumn;
+    prs.cursorRow    = s_.projectCursor.row;
+    prs.cursorColumn = s_.projectCursor.column;
     prs.caps         = s_.caps;
     return project_.cursor_context(prs);
 }
@@ -178,14 +178,14 @@ CursorContext InputDispatcher::project_context() const {
 bool InputDispatcher::project_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     return project_
-        .handle_input(p, s_.projectCursorRow, s_.projectCursorColumn, action)
+        .handle_input(p, s_.projectCursor.row, s_.projectCursor.column, action)
         .modified;
 }
 
 CursorContext InputDispatcher::settings_context() const {
     SettingsState ss{s_.settings};
-    ss.cursorRow    = s_.settingsCursorRow;
-    ss.cursorColumn = s_.settingsCursorColumn;
+    ss.cursorRow    = s_.settingsCursor.row;
+    ss.cursorColumn = s_.settingsCursor.column;
     ss.caps         = s_.caps;
     ss.theme        = s_.theme;   // VISUALIZER's value lives on the theme
     return settings_.cursor_context(ss);
@@ -194,8 +194,8 @@ CursorContext InputDispatcher::settings_context() const {
 // ⚠️ SETTINGS edits settings.json, not the song: false, so a change never dirties it.
 bool InputDispatcher::settings_edit(const InputAction& action) {
     const bool navBefore = s_.settings.navSongRelative;
-    settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
-                           s_.settingsCursorColumn, action);
+    settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursor.row,
+                           s_.settingsCursor.column, action);
     // ⚠️ NAV on must land the pointer on a real cell, or the first R+RIGHT is refused silently.
     if (!navBefore && s_.settings.navSongRelative) clamp_song_pointer(s_);
     return false;

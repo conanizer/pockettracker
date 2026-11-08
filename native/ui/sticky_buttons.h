@@ -4,10 +4,10 @@
 // pressed again, so every chord can be played one button at a time. It sits between the input and the
 // mapper, which never knows: a locked button is one whose release has not arrived yet.
 //
-// A lock outlives the chords that are repeated (any with the D-pad, MUTE/SOLO, audition) and lets go
-// after one that is done in one go (delete, cut, paste, clone, selection, the browser's file chords) —
-// on that chord's release, as a hand would. L+R lets go once it has nothing left to clear. L after L+B
-// waits out the widen window, so B again widens the selection.
+// A lock outlives the chords that are repeated and lets go after one done in one go — on that chord's
+// release, as a hand would. Which is which is the mapper's answer (`Chord`, ui/buttons.h). L+R lets go
+// once it has nothing left to clear. L after L+B waits out the widen window, so B again widens the
+// selection.
 
 #include "ui/buttons.h"
 #include "ui/selection.h"   // MULTI_TAP_WINDOW
@@ -28,8 +28,8 @@ public:
     }
 
     // Hands `emit` each event to pass on, with the locked buttons added to its modifiers; a lock's
-    // release and an unlocking press go nowhere. `l_r_has_more()` is asked after an L+R made with a
-    // lock: false lets the lock go.
+    // release and an unlocking press go nowhere. `emit` returns the `Chord` a press made.
+    // `l_r_has_more()` is asked after an L+R made with a lock: false lets the lock go.
     template <class Emit, class More>
     void feed(const ButtonEvent& e, uint64_t now, Emit&& emit, More&& l_r_has_more) {
         Slot& s = slot(e.button);
@@ -53,12 +53,11 @@ public:
             }
             s.downAt = now;
             s.alone  = lockable(e.button);
-            const ButtonEvent out = with_locks(e);
-            emit(out);
+            const Chord chord = emit(with_locks(e));
             for (size_t i = 0; i < COUNT; ++i) {
                 Slot& l = slots_[i];
                 if (!l.locked || l.unlocking) continue;
-                const After a = after_chord(static_cast<Button>(i), e.button, out.mods);
+                const ChordEnd a = (chord.uses & button_bit(static_cast<Button>(i))) ? chord.end : ChordEnd::KEEP;
                 if (a > l.after) {
                     l.after   = a;
                     l.afterBy = e.button;
@@ -69,7 +68,7 @@ public:
 
         if (s.unlocking) {
             s.unlocking = s.locked = s.alone = false;
-            s.after = After::KEEP;
+            s.after = ChordEnd::KEEP;
             emit(with_locks(e));
             return;
         }
@@ -78,7 +77,7 @@ public:
             s.locked = true;
             // A partner that locks too is a bigger chord on the way (L, B, then A clones): keep both.
             for (Slot& l : slots_)
-                if (l.after != After::KEEP && l.afterBy == e.button) l.after = After::KEEP;
+                if (l.after != ChordEnd::KEEP && l.afterBy == e.button) l.after = ChordEnd::KEEP;
             return;
         }
         s.alone = false;
@@ -87,15 +86,15 @@ public:
         // The chord this button made is over: the locks it used up let go, after it.
         for (size_t i = 0; i < COUNT; ++i) {
             Slot& l = slots_[i];
-            if (l.after == After::KEEP || l.afterBy != e.button) continue;
-            const After a = l.after;
-            l.after = After::KEEP;
-            if (a == After::WIDEN) {
+            if (l.after == ChordEnd::KEEP || l.afterBy != e.button) continue;
+            const ChordEnd a = l.after;
+            l.after = ChordEnd::KEEP;
+            if (a == ChordEnd::WIDEN) {
                 // The window runs from B's press, as the selection's own does.
                 const uint64_t until = s.downAt + static_cast<uint64_t>(MULTI_TAP_WINDOW);
                 if (until > now) { l.letGoAt = until; continue; }
             }
-            if (a != After::ASK_L_R || !l_r_has_more()) let_go(i, emit);
+            if (a != ChordEnd::ASK_L_R || !l_r_has_more()) let_go(i, emit);
         }
     }
 
@@ -115,7 +114,7 @@ public:
     void release_all(Emit&& emit) {
         for (size_t i = 0; i < COUNT; ++i) {
             Slot& s = slots_[i];
-            s.after   = After::KEEP;
+            s.after   = ChordEnd::KEEP;
             s.letGoAt = 0;
             if (!s.locked || s.unlocking) continue;   // an unlocking one is still down: its release comes
             s.locked = false;
@@ -143,39 +142,12 @@ public:
     }
 
 private:
-    // What a press does to a lock it chords with. Ordered: a later press only raises it.
-    enum class After { KEEP, ASK_L_R, WIDEN, LET_GO };
-
-    // ⚠️ Mirrors the mapper's matrix (button_mapper.h): a new one-shot chord there needs its case here,
-    // or its lock stays on and has to be pressed off.
-    static After after_chord(Button lock, Button partner, const ButtonMods& m) {
-        if (is_dpad(partner)) return After::KEEP;   // edits, scrolling, screens, fills: repeated
-        switch (lock) {
-            case Button::A:   // A+B deletes; A+START auditions, again and again
-                return partner == Button::B ? After::LET_GO : After::KEEP;
-            case Button::B:   // L+B+A clones; B then A is a plain A
-                return partner == Button::A && m.l ? After::LET_GO : After::KEEP;
-            case Button::L_SHIFT:   // selection, cut/paste, LIVE's queue
-                if (partner == Button::R_SHIFT) return After::ASK_L_R;
-                if (partner == Button::B) return After::WIDEN;
-                return partner == Button::A || partner == Button::START ? After::LET_GO : After::KEEP;
-            case Button::R_SHIFT:   // MUTE and SOLO stay; R+START is one go
-                if (partner == Button::L_SHIFT) return After::ASK_L_R;
-                return partner == Button::START ? After::LET_GO : After::KEEP;
-            case Button::SELECT:    // the browser's rename, delete, new folder
-                return partner == Button::A || partner == Button::B || partner == Button::R_SHIFT
-                           ? After::LET_GO : After::KEEP;
-            default:
-                return After::KEEP;
-        }
-    }
-
     struct Slot {
         uint64_t downAt    = 0;
         bool     alone     = false;          // down with nothing pressed since
         bool     locked    = false;
         bool     unlocking = false;          // locked, and pressed again: up on its release
-        After    after     = After::KEEP;    // what the chord in progress does to this lock…
+        ChordEnd after     = ChordEnd::KEEP; // what the chord in progress does to this lock…
         Button   afterBy   = Button::COUNT;  // …settled on this button's release
         uint64_t letGoAt   = 0;              // L after L+B: lets go then, unless B comes first
     };

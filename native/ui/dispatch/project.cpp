@@ -25,25 +25,21 @@ void InputDispatcher::reset_editing_context() {
     s_.lastEditedNote   = songcore::Note::C4();
     s_.lastEditedVolume = 0x7F;
 
-    // …and every secondary screen's own cursor, or they point into the previous song after a LOAD.
-    for (const ScreenType screen : {ScreenType::SONG, ScreenType::TABLE, ScreenType::GROOVE, ScreenType::SCALE,
-                                    ScreenType::INSTRUMENT, ScreenType::MODS, ScreenType::MIXER})
+    // …and every screen's own cursor, or they point into the previous song after a LOAD.
+    for (const ScreenType screen : {ScreenType::SONG, ScreenType::CHAIN, ScreenType::PHRASE, ScreenType::TABLE,
+                                    ScreenType::GROOVE, ScreenType::SCALE, ScreenType::INSTRUMENT,
+                                    ScreenType::MODS, ScreenType::MIXER})
         reset_screen_cursor(s_, screen);
     s_.songScrollPosition = 0;
     s_.effectsCursorRow   = 0;
-    s_.projectCursorRow = 0; s_.projectCursorColumn = 1;
+    s_.projectCursor      = GRID_HOME;
     // The quantize pointer is an editing aid, not a setting, so it resets with the project.
     s_.grooveQuantize = 0;
-
-    // The REMEMBER slots, or REMEMBER mode restores a cursor from the previous song.
-    s_.songCursorRow = 0;   s_.songCursorColumn = 1;
-    s_.chainCursorRow = 0;  s_.chainCursorColumn = 1;
-    s_.phraseCursorRow = 0; s_.phraseCursorColumn = 1;
 
     // ⚠️ Not the SETTINGS cursor and not poolCursorColumn: both persist on purpose.
     s_.selection = Selection{};
 
-    // ⚠️ Under NAV = SONG those slots are the pointer, and row 0 / track 1 may be empty.
+    // ⚠️ Under NAV = SONG the SONG and CHAIN cursors are the pointer, and row 0 / track 1 may be empty.
     clamp_song_pointer(s_);
 }
 

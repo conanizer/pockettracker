@@ -427,31 +427,31 @@ HelpTopic help_topic(const AppState& s) {
             cell = HelpTopic::SONG_CELL;
             break;
         case ScreenType::CHAIN:
-            cell = (s.cursorColumn == 1) ? HelpTopic::CHAIN_PHRASE : HelpTopic::CHAIN_TRANSPOSE;
+            cell = (s.chainCursor.column == 1) ? HelpTopic::CHAIN_PHRASE : HelpTopic::CHAIN_TRANSPOSE;
             break;
         case ScreenType::PHRASE:
-            cell = phrase_cell_topic(s.cursorColumn);
+            cell = phrase_cell_topic(s.phraseCursor.column);
             break;
         case ScreenType::TABLE:
-            cell = table_cell_topic(s.tableCursorColumn);
+            cell = table_cell_topic(s.tableCursor.column);
             break;
         case ScreenType::INSTRUMENT:
             // ⚠️ Guarded: the tools build an AppState with no project.
             if (s.project != nullptr) {
                 const songcore::Instrument& ins =
                     s.project->instruments[static_cast<size_t>(s.currentInstrument)];
-                cell = instrument_topic(ins.instrumentType, s.instrumentCursorRow,
-                                        s.instrumentCursorColumn);
+                cell = instrument_topic(ins.instrumentType, s.instrumentCursor.row,
+                                        s.instrumentCursor.column);
             }
             break;
         case ScreenType::PROJECT:
-            cell = project_cell_topic(s.projectCursorRow, s.projectCursorColumn);
+            cell = project_cell_topic(s.projectCursor.row, s.projectCursor.column);
             break;
         case ScreenType::GROOVE:
-            cell = groove_cell_topic(s.grooveCursorColumn, s.groovePanelRow, s.groovePanelColumn);
+            cell = groove_cell_topic(s.grooveCursor.column, s.groovePanel.row, s.groovePanel.column);
             break;
         case ScreenType::SCALE:
-            cell = scale_cell_topic(s.scaleCursorRow, s.scaleCursorColumn);
+            cell = scale_cell_topic(s.scaleCursor.row, s.scaleCursor.column);
             break;
         case ScreenType::MODS:
             // Guarded like INSTRUMENT.
@@ -474,22 +474,22 @@ HelpTopic help_topic(const AppState& s) {
             cell = effects_cell_topic(s.effectsCursorRow);
             break;
         case ScreenType::SETTINGS:
-            cell = settings_cell_topic(s.settingsCursorRow, s.settingsCursorColumn);
+            cell = settings_cell_topic(s.settingsCursor.row, s.settingsCursor.column);
             break;
         case ScreenType::SAMPLE_EDITOR:
             cell = sample_editor_cell_topic(s.sampleEditor.cursorRow, s.sampleEditor.cursorCol,
                                             s.sampleEditor.sliceMethod);
             break;
         case ScreenType::MIDI:
-            cell = midi_cell_topic(s.midiCursorRow);
+            cell = midi_cell_topic(s.midiCursor.row);
             break;
 
         // The ADD row, one past the end of the list, is a button with its own topic.
         case ScreenType::MIDI_MAP:
-            cell = (s.project && s.midiMapCursorRow >=
+            cell = (s.project && s.midiMapCursor.row >=
                                      static_cast<int>(s.project->midiMappings.size()))
                        ? HelpTopic::MAP_ADD
-                       : midi_map_cell_topic(s.midiMapCursorColumn);
+                       : midi_map_cell_topic(s.midiMapCursor.column);
             break;
         default:
             break;

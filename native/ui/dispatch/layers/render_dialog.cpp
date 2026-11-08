@@ -48,7 +48,7 @@ void InputDispatcher::open_render_dialog(RenderDialogState::Output output) {
     rd.output    = output;
     rd.cursorRow = static_cast<int>(RenderRow::SONG_START);
     // ⚠️ The SONG screen's SAVED cursor: raised from PROJECT, the live `cursorRow` is PROJECT's.
-    rd.startRow = songcore::song_section_start(host_.project(), s_.songCursorRow);
+    rd.startRow = songcore::song_section_start(host_.project(), s_.songCursor.row);
     rd.endRow   = -1;   // AUTO — follow the section, however it is edited between now and the render
 }
 

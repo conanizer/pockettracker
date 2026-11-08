@@ -22,7 +22,7 @@ bool InputDispatcher::defer_a_to_release() const {
 
     // ⚠️ No cell opens a sub-screen under a layer (else every A in the EQ editor is deferred), except the
     // send editor's own INP EQ and TIME.
-    if (top_layer()) {
+    if (top_overlay(s_)) {
         return send_editor_on_top() &&
                self.effects_release_action(s_.sendEditor.cursorRow, /*peek=*/true);
     }
@@ -65,7 +65,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
     switch (s_.currentScreen) {
         case ScreenType::PROJECT:
             // A opens the keyboard on the release, like every cell that opens something.
-            if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME)) {
+            if (s_.projectCursor.row == static_cast<int>(ProjectRow::NAME)) {
                 if (!peek) open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name,
                                        "PROJECT NAME:", "", PROJECT_NAME_MAX_CHARS);
                 return true;
@@ -74,8 +74,8 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
 
         case ScreenType::INSTRUMENT: {
             const Instrument&    ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-            const InstrumentCell cell = instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow,
-                                                           s_.instrumentCursorColumn);
+            const InstrumentCell cell = instrument_cell_at(ins.instrumentType, s_.instrumentCursor.row,
+                                                           s_.instrumentCursor.column);
 
             if (cell == InstrumentCell::NAME) {
                 if (!peek) {

@@ -32,7 +32,7 @@ void InputDispatcher::set_now(long long now_ms) {
     int keysInstrument = s_.lastEditedInstrument;
     if (s_.currentScreen == ScreenType::PHRASE) {
         const songcore::PhraseStep& step =
-            s_.project->phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+            s_.project->phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.phraseCursor.row)];
         if (songcore::step_has_note(step) && step.instrument >= 0) keysInstrument = step.instrument;
     }
     keysInstrument = std::min(static_cast<int>(s_.project->instruments.size()) - 1, std::max(0, keysInstrument));
@@ -313,26 +313,24 @@ void InputDispatcher::run_midi_learn() {
     mark_dirty_and_arm_autosave();   // nothing to push: a mapping moves nothing until a knob turns
 }
 
-int InputDispatcher::remembered_song_track() const { return s_.songCursorColumn - 1; }
-
 int InputDispatcher::audition_track() const {
     const Project& p = *s_.project;
-    const int track = remembered_song_track();
+    const int track = pointer_track(s_);
     if (track < 0 || track >= static_cast<int>(p.tracks.size())) return -1;
     const std::vector<int>& refs = p.tracks[static_cast<size_t>(track)].chainRefs;
     // ⚠️ chainRefs may be shorter than the 256-row screen.
-    if (s_.songCursorRow < 0 || s_.songCursorRow >= static_cast<int>(refs.size())) return -1;
-    return refs[static_cast<size_t>(s_.songCursorRow)] >= 0 ? track : -1;
+    if (s_.songCursor.row < 0 || s_.songCursor.row >= static_cast<int>(refs.size())) return -1;
+    return refs[static_cast<size_t>(s_.songCursor.row)] >= 0 ? track : -1;
 }
 
 void InputDispatcher::preview_held_note() {
     if (!s_.settings.notePreviewEnabled || s_.selection.active) return;
-    if (s_.currentScreen != ScreenType::PHRASE || s_.cursorColumn != 1) return;
+    if (s_.currentScreen != ScreenType::PHRASE || s_.phraseCursor.column != 1) return;
     if (host_.is_playing()) return;
 
     const Project& p = *s_.project;
     const songcore::PhraseStep& step =
-        p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.phraseCursor.row)];
     if (!songcore::step_has_note(step)) return;
 
     host_.set_preview_track(audition_track());
@@ -355,9 +353,10 @@ void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&
         return;
     }
     const SelectionBounds b     = s_.selection.bounds();
-    int&                  row   = s_.*g->row;
-    int&                  col   = s_.*g->column;
-    const CursorPosition  saved = {row, col};
+    CursorPosition&       cur   = s_.*g->cursor;
+    int&                  row   = cur.row;
+    int&                  col   = cur.column;
+    const CursorPosition  saved = cur;
     const int             c0    = g->stepsAllColumns ? b.topLeftColumn : col;
     const int             c1    = g->stepsAllColumns ? b.bottomRightColumn : col;
 
@@ -366,8 +365,7 @@ void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&
         for (row = b.topLeftRow; row <= b.bottomRightRow; ++row)
             for (col = c0; col <= c1; ++col)
                 if (cursor_context().is_editable()) visit();
-        row = saved.row;
-        col = saved.column;
+        cur = saved;
     };
 
     bool allEmpty = true, any = false;
@@ -391,19 +389,13 @@ void InputDispatcher::dpad_nav(NavDir direction) {
         // The cursor follows the active edge, only when it moved.
         const CursorPosition edge = s_.selection.end;
         if (edge != edgeBefore) {
-            s_.*g->row    = edge.row;
-            s_.*g->column = edge.column;
+            s_.*g->cursor = edge;
             if (s_.currentScreen == ScreenType::SONG) scroll_song_to_row(s_, edge.row);
         }
         return;
     }
 
-    switch (direction) {
-        case NavDir::UP:    move_cursor_up(s_);    break;
-        case NavDir::DOWN:  move_cursor_down(s_);  break;
-        case NavDir::LEFT:  move_cursor_left(s_);  break;
-        case NavDir::RIGHT: move_cursor_right(s_); break;
-    }
+    move_cursor(s_, direction);
 }
 
 // ─── D-pad alone: the layers, then the screen, then this ─────────────────────────────────────────

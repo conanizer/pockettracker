@@ -15,6 +15,7 @@
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
+#include "ui/modules/groove_editor.h"   // GROOVE_COL_TICK
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/render_dialog.h"
 #include "ui/modules/sample_editor.h"
@@ -37,6 +38,10 @@ namespace pt::ui {
 
 class Clipboard;   // only pointed at, for the readout
 
+// Where most screens' cursors start: the first row, the first column after the gutter or the label.
+inline constexpr CursorPosition GRID_HOME{0, 1};
+inline constexpr CursorPosition GROOVE_HOME{0, GROOVE_COL_TICK};
+
 struct AppState {
     // ⚠️ The one Project the host owns, edited in place (`host.edit_project()`) — never a copy.
     songcore::Project* project = nullptr;
@@ -50,27 +55,26 @@ struct AppState {
     // INSTRUMENT reached from the pool: R+LEFT goes back to the pool, not PHRASE.
     bool instrumentFromPool = false;
 
-    // SONG / CHAIN / PHRASE share this cursor; on SONG `cursorColumn` is the track, 1..8.
-    int cursorRow    = 0;
-    int cursorColumn = 1;
+    // Each screen's cursor. On SONG the column is the track, 1..8; column 0 is the gutter on SONG,
+    // CHAIN, PHRASE and TABLE, the label on PROJECT, MIDI, MIDI MAPPING and SETTINGS. REFRESH, NEW and
+    // LOAD put them back where they start (`reset_screen_cursor`).
+    CursorPosition songCursor   = GRID_HOME;
+    CursorPosition chainCursor  = GRID_HOME;
+    CursorPosition phraseCursor = GRID_HOME;
+    CursorPosition tableCursor  = GRID_HOME;   // starts on transpose
 
-    int tableCursorRow    = 0;
-    int tableCursorColumn = 1;  // starts on transpose
-    int grooveCursorRow   = 0;
     // GROOVE: the tick grid and the side panel keep separate rows, so the swing readout stays on the
-    // tick cursor while QNT is set. `grooveCursorColumn` says which has the cursor.
-    int grooveCursorColumn = 1;
-    int groovePanelRow     = 0;
-    int groovePanelColumn  = 0;  // the SAVE/LOAD row only
+    // tick cursor while QNT is set. `grooveCursor.column` says which has the cursor.
+    CursorPosition grooveCursor = GROOVE_HOME;
+    CursorPosition groovePanel{};   // its column is used on the SAVE/LOAD row only
     // How A+DPAD edits a groove step. Never saved; OFF at start and on project load.
-    int grooveQuantize     = 0;
-    int scaleCursorRow    = 0;
-    // SCALE's NAME row only; selection and clipboard see one column of degrees.
-    int scaleCursorColumn = 0;
+    int grooveQuantize = 0;
+
+    // SCALE: the column is used on the NAME row only.
+    CursorPosition scaleCursor{};
 
     // Walks the row table in ui/instrument_row_layout.h.
-    int instrumentCursorRow    = 0;
-    int instrumentCursorColumn = 1;
+    CursorPosition instrumentCursor = GRID_HOME;
 
     // INST.POOL: the row is `currentInstrument` itself.
     int poolCursorColumn = 0;
@@ -87,25 +91,12 @@ struct AppState {
     // EFFECTS: a row is one cell (ui/effects_row_layout.h).
     int effectsCursorRow = 0;
 
-    // The shared cursor on leaving each of its three screens — their column counts differ.
-    int songCursorRow = 0,   songCursorColumn = 1;
-    int chainCursorRow = 0,  chainCursorColumn = 1;
-    int phraseCursorRow = 0, phraseCursorColumn = 1;
-
-    // PROJECT: column 0 is the label (ui/settings_row_layout.h).
-    int projectCursorRow    = 0;
-    int projectCursorColumn = 1;
-
-    int midiCursorRow    = 0;
-    int midiCursorColumn = 1;
-
+    CursorPosition projectCursor = GRID_HOME;   // ui/settings_row_layout.h
+    CursorPosition midiCursor    = GRID_HOME;
     // MIDI MAPPING: one row per mapping plus ADD; clamped on the way in and after every edit.
-    int midiMapCursorRow    = 0;
-    int midiMapCursorColumn = 1;
-
+    CursorPosition midiMapCursor = GRID_HOME;
     // SETTINGS: the row is a SettingsRow (its number), not a position in the filtered list.
-    int settingsCursorRow    = 0;
-    int settingsCursorColumn = 1;
+    CursorPosition settingsCursor = GRID_HOME;
 
     // SONG's first visible row, 0..240 (16 of 256 shown).
     int songScrollPosition = 0;
@@ -271,8 +262,8 @@ struct AppState {
     int          eqSampleRate    = 44100;
 
     // ── The send editor: the reverb's or delay's cells in a box; START passes through ────────────
-    // ⚠️ It stays open under the browser its LOAD raises and under its EQ editor — ask
-    // `send_editor_up` / `send_editor_drawn`, not `isOpen`.
+    // ⚠️ It stays open under the browser its LOAD raises and under its EQ editor — ask `send_editor_up`,
+    // not `isOpen`.
     SendEditorState sendEditor{};
 
     // The theme editor, over SETTINGS; START passes through, so the scope colours can be set against
@@ -368,9 +359,6 @@ inline bool send_editor_up(const AppState& s) {
     return s.sendEditor.isOpen && s.currentScreen != ScreenType::FILE_BROWSER;
 }
 
-// …and is its box drawn? Not under the EQ editor its INP EQ raises.
-inline bool send_editor_drawn(const AppState& s) { return send_editor_up(s) && !s.eq.isOpen; }
-
 // Does the theme editor hold the buttons and the screen? Not under the file browser its LOAD raises.
 inline bool theme_editor_up(const AppState& s) {
     return s.themeEditor.isOpen && s.currentScreen != ScreenType::FILE_BROWSER;
@@ -378,21 +366,6 @@ inline bool theme_editor_up(const AppState& s) {
 
 inline bool stretch_editor_up(const AppState& s) {
     return s.currentScreen == ScreenType::SAMPLE_EDITOR && s.sampleEditor.stretchOpen;
-}
-
-// Is a modal up that dims the whole canvas? The shell then dims the letterbox bars too.
-// The EQ and theme editors replace the module and leave the frame bright, so they are not here.
-inline bool modal_backdrop_active(const AppState& s) {
-    // A load is not here: its strip dims nothing.
-    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
-           s.helpFull || s.renderDialog.isOpen || send_editor_drawn(s) || stretch_editor_up(s);
-}
-
-// A box that waits for an answer: a confirm, ARE YOU SURE?, the render dialog, the keyboard. ONE HAND
-// lets go of its locks when one opens — a locked A or L would garble the answer.
-inline bool modal_question_up(const AppState& s) {
-    return s.confirm.is_open() || s.renderDialog.isOpen || s.qwerty.isOpen ||
-           (s.currentScreen == ScreenType::SAMPLE_EDITOR && s.sampleEditor.showConfirmClose);
 }
 
 // Does a full-screen module own the frame (no furniture)? ⚠️ `draw` and `has_falling_meters` both ask

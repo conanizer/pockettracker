@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "ui/fx_columns.h"
+#include "ui/grid_cursor.h"
 
 namespace pt::ui {
 
@@ -208,8 +209,7 @@ PasteResult Clipboard::paste_phrase_steps(Project& p, int phraseId, int cursorRo
         const int targetRow = cursorRow + item.row;
         const int targetCol = cursorColumn + (item.column - minSourceCol);
 
-        if (targetRow < 0 || targetRow >= 16) continue;
-        if (targetCol < 1 || targetCol > 9) continue;
+        if (!in_grid(PHRASE_GRID, targetRow, targetCol)) continue;
 
         songcore::PhraseStep& step = phrase.steps[static_cast<size_t>(targetRow)];
 
@@ -235,8 +235,7 @@ PasteResult Clipboard::paste_chain_rows(Project& p, int chainId, int cursorRow, 
         const int targetRow = cursorRow + item.row;
         const int targetCol = cursorColumn + (item.column - minSourceCol);
 
-        if (targetRow < 0 || targetRow >= 16) continue;
-        if (targetCol < 1 || targetCol > 2) continue;
+        if (!in_grid(CHAIN_GRID, targetRow, targetCol)) continue;
 
         switch (targetCol) {
             case 1:
@@ -267,8 +266,7 @@ PasteResult Clipboard::paste_song_cells(Project& p, int cursorRow, int cursorCol
         const int targetRow = cursorRow + item.row;
         const int targetCol = cursorColumn + (item.column - minSourceCol);
 
-        if (targetRow < 0 || targetRow >= 256) continue;
-        if (targetCol < 1 || targetCol > 8) continue;
+        if (!in_grid(SONG_GRID, targetRow, targetCol)) continue;
 
         songcore::Track& track = p.tracks[static_cast<size_t>(targetCol - 1)];
 
@@ -292,8 +290,7 @@ PasteResult Clipboard::paste_table_rows(Project& p, int tableId, int cursorRow, 
         const int targetRow = cursorRow + item.row;
         const int targetCol = cursorColumn + (item.column - minSourceCol);
 
-        if (targetRow < 0 || targetRow >= 16) continue;
-        if (targetCol < 1 || targetCol > 8) continue;
+        if (!in_grid(TABLE_GRID, targetRow, targetCol)) continue;
 
         songcore::TableRow& tr = table.rows[static_cast<size_t>(targetRow)];
 

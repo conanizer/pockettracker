@@ -67,7 +67,7 @@ inline Argb with_alpha(Argb c, float alpha) {
 // screen beyond its rect.
 inline constexpr int MODAL_BORDER = 3;
 
-// A modal box: fill and border. The dim behind it is per modal (`modal_backdrop_active`).
+// A modal box: fill and border. The dim behind it is per modal.
 inline void draw_modal_box(Canvas& c, int x, int y, int boxW, int boxH, const Theme& t) {
     c.fill_rect(x, y, boxW, boxH, t.background);
     // Ring 0 is on the box's own rect; the rest step outward.
@@ -75,8 +75,8 @@ inline void draw_modal_box(Canvas& c, int x, int y, int boxW, int boxH, const Th
         c.stroke_rect(x - r, y - r, boxW + 2 * r, boxH + 2 * r, t.textTitle);
 }
 
-// The full-canvas dim. ⚠️ A modal using it belongs in `modal_backdrop_active` too, or the letterbox
-// bars stay bright.
+// The full-canvas dim. ⚠️ A modal using it says `dims` in its row of OVERLAYS (ui/overlays.h), or the
+// letterbox bars stay bright.
 inline void draw_modal_backdrop(Canvas& c) { c.fill_rect(0, 0, DESIGN_W, DESIGN_H, MODAL_BACKDROP); }
 
 // ─── Row background ──────────────────────────────────────────────────────────────────────────────

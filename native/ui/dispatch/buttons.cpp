@@ -51,14 +51,14 @@ void InputDispatcher::on_start() {
     }
     switch (s_.currentScreen) {
         // SONG plays from the cursor row.
-        case ScreenType::SONG:  host_.play_song(s_.cursorRow); break;
+        case ScreenType::SONG:  host_.play_song(s_.songCursor.row); break;
 
         // CHAIN plays on its own track (fader, mute, FX), not channel 1; the remembered song cell breaks a
         // tie.
         case ScreenType::CHAIN:
             host_.play_chain(s_.currentChain,
                              songcore::track_of_chain(*s_.project, s_.currentChain,
-                                                      remembered_song_track()));
+                                                      pointer_track(s_)));
             break;
 
         // No song cursor: the song from the top. MIDI too — its OFFSET and the mapping list's VAL are
@@ -74,7 +74,7 @@ void InputDispatcher::on_start() {
         default:
             host_.play_phrase(s_.currentPhrase,
                               songcore::track_of_phrase(*s_.project, s_.currentPhrase, s_.currentChain,
-                                                        remembered_song_track()));
+                                                        pointer_track(s_)));
             break;
     }
 }
@@ -99,9 +99,9 @@ void InputDispatcher::on_r_start() {
                 host_.stop();
             } else if (host_.live_mode()) {
                 // LIVE has no "all eight": the row launches as a scene, an empty cell silent.
-                host_.play_song_live(pointer_song_row(s_), live_row_mask(pointer_song_row(s_)));
+                host_.play_song_live(s_.songCursor.row, live_row_mask(s_.songCursor.row));
             } else {
-                host_.play_song(pointer_song_row(s_));
+                host_.play_song(s_.songCursor.row);
             }
             break;
         default:

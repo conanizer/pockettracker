@@ -17,7 +17,7 @@ GestureResult InputDispatcher::groove_screen(Gesture g) {
         // The panel's SAVE and LOAD cells. On the tick grid, A on the end-of-pattern marker lays a step
         // down at the default tick count. ⚠️ Only there: on an existing tick a bare A would step it.
         case Gesture::A:
-            if (s_.grooveCursorColumn == GROOVE_COL_PANEL)
+            if (s_.grooveCursor.column == GROOVE_COL_PANEL)
                 groove_row_action();
             else if (cursor_context().capabilities.isEmpty)
                 generic_input(pt::ui::increment);
@@ -64,7 +64,7 @@ void InputDispatcher::scale_row_action() {
     const songcore::Scale& scale =
         host_.project().scales[static_cast<size_t>(s_.currentScale)];
 
-    switch (scale_name_action(s_.scaleCursorRow, s_.scaleCursorColumn)) {
+    switch (scale_name_action(s_.scaleCursor.row, s_.scaleCursor.column)) {
         case ScaleNameAction::SAVE: {
             // Seeded with the sanitized display name — what the file will be called.
             const std::string seed = safe_file_name(songcore::scale_display_name(scale));
@@ -108,7 +108,7 @@ void InputDispatcher::groove_row_action() {
     const songcore::Groove& groove =
         host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
 
-    switch (groove_file_action(s_.groovePanelRow, s_.groovePanelColumn)) {
+    switch (groove_file_action(s_.groovePanel.row, s_.groovePanel.column)) {
         case GrooveFileAction::SAVE: {
             // Seeded with the sanitized display name — what the file will be called.
             const std::string seed = safe_file_name(songcore::groove_display_name(groove));
@@ -150,10 +150,10 @@ void InputDispatcher::save_groove_as(const std::string& dir, const std::string& 
 /** The GROOVE screen's state, assembled once for both the cursor context and the edit. */
 GrooveState InputDispatcher::groove_state(const Project& p) const {
     GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
-    gs.cursorRow    = s_.grooveCursorRow;
-    gs.cursorColumn = s_.grooveCursorColumn;
-    gs.panelRow     = s_.groovePanelRow;
-    gs.panelColumn  = s_.groovePanelColumn;
+    gs.cursorRow    = s_.grooveCursor.row;
+    gs.cursorColumn = s_.grooveCursor.column;
+    gs.panelRow     = s_.groovePanel.row;
+    gs.panelColumn  = s_.groovePanel.column;
     gs.quantize     = s_.grooveQuantize;
     return gs;
 }
@@ -180,8 +180,8 @@ CursorContext InputDispatcher::scale_context() const {
     const Project& p = *s_.project;
     ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
     cs.key          = p.scaleKey;
-    cs.cursorRow    = s_.scaleCursorRow;
-    cs.cursorColumn = s_.scaleCursorColumn;
+    cs.cursorRow    = s_.scaleCursor.row;
+    cs.cursorColumn = s_.scaleCursor.column;
     return scale_.cursor_context(cs);
 }
 
@@ -190,8 +190,8 @@ bool InputDispatcher::scale_edit(const InputAction& action) {
     // ⚠️ The KEY row edits the PROJECT, not the scale handed in; the module returns the new key
     // rather than holding a Project.
     const ScaleInputResult r = scale_.handle_input(
-        p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow,
-        s_.scaleCursorColumn, action);
+        p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursor.row,
+        s_.scaleCursor.column, action);
     if (r.newKey >= 0) p.scaleKey = r.newKey;
     return r.modified;
 }

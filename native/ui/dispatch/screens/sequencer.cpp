@@ -106,12 +106,12 @@ GestureResult InputDispatcher::song_screen(Gesture g) {
 
         // Pages by 16 rows.
         case Gesture::B_UP:
-            s_.cursorRow = std::max(0, s_.cursorRow - 16);
-            scroll_song_to_row(s_, s_.cursorRow);
+            s_.songCursor.row = std::max(0, s_.songCursor.row - 16);
+            scroll_song_to_row(s_, s_.songCursor.row);
             return GestureResult::TAKEN;
         case Gesture::B_DOWN:
-            s_.cursorRow = std::min(255, s_.cursorRow + 16);
-            scroll_song_to_row(s_, s_.cursorRow);
+            s_.songCursor.row = std::min(255, s_.songCursor.row + 16);
+            scroll_song_to_row(s_, s_.songCursor.row);
             return GestureResult::TAKEN;
 
         case Gesture::L_B_A:
@@ -272,11 +272,11 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
 // ─── The selection's clipboard ───────────────────────────────────────────────────────────────────
 
 GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteTarget) {
-    const GridCursor& cursor = *grid();  // only the four grid screens call this
+    const GridCursor&     gc = *grid();  // only the four grid screens call this
+    const CursorPosition& at = s_.*gc.cursor;
     switch (g) {
         case Gesture::L_B:
-            s_.selection.handle_select_b(now_ms_, s_.*cursor.row, s_.*cursor.column,
-                                         cursor.maxColumn, cursor.maxRow);
+            s_.selection.handle_select_b(now_ms_, at.row, at.column, gc.maxColumn, gc.maxRow);
             return GestureResult::TAKEN;
 
         // Inside a selection: B copies, A+B deletes, L+A cuts — and each ends it. Outside one, B does
@@ -300,7 +300,7 @@ GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteT
                 return GestureResult::TAKEN;
             }
             const PasteResult r = clip_.paste(host_.edit_project(), s_.currentScreen, pasteTarget,
-                                              s_.*cursor.row, s_.*cursor.column);
+                                              at.row, at.column);
             if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
             return GestureResult::TAKEN;
         }
@@ -376,24 +376,26 @@ int InputDispatcher::table_clip(ClipOp op, const SelectionBounds& b) {
 void InputDispatcher::arm_double_tap() {
     hasInsertPos_ = true;
     insertScreen_ = s_.currentScreen;
-    insertRow_    = s_.cursorRow;
-    insertCol_    = s_.cursorColumn;
+    insertAt_     = s_.*grid()->cursor;
 }
 
 bool InputDispatcher::take_double_tap() {
     const bool armed = hasInsertPos_ && insertScreen_ == s_.currentScreen &&
-                       insertRow_ == s_.cursorRow && insertCol_ == s_.cursorColumn;
+                       insertAt_ == s_.*grid()->cursor;
     if (armed) hasInsertPos_ = false;
     return armed;
 }
 
 bool InputDispatcher::lay_last_at_cursor() {
     Project&     p   = host_.edit_project();
-    const size_t row = static_cast<size_t>(s_.cursorRow);
+    const GridCursor* g = grid();
+    if (!g) return false;
+    const CursorPosition& at  = s_.*g->cursor;
+    const size_t          row = static_cast<size_t>(at.row);
     switch (s_.currentScreen) {
         case ScreenType::SONG: {
-            if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return false;
-            std::vector<int>& refs = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)].chainRefs;
+            if (at.column < 1 || at.column > 8) return false;
+            std::vector<int>& refs = p.tracks[static_cast<size_t>(at.column - 1)].chainRefs;
             if (row < refs.size() && refs[row] != -1) return false;
             if (refs.size() <= row) refs.resize(row + 1, -1);
             refs[row] = s_.lastEditedChain;
@@ -407,7 +409,7 @@ bool InputDispatcher::lay_last_at_cursor() {
             return true;
         }
         case ScreenType::PHRASE: {
-            if (s_.cursorColumn != 1) return lay_last_fx(/*peek=*/false);
+            if (at.column != 1) return lay_last_fx(/*peek=*/false);
             songcore::PhraseStep& step = p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[row];
             if (step.note != Note::EMPTY()) return false;
             step.note       = s_.lastEditedNote;
@@ -430,15 +432,15 @@ void InputDispatcher::song_insert() {
 }
 
 void InputDispatcher::song_insert_next() {
-    if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
+    if (s_.songCursor.column < 1 || s_.songCursor.column > 8) return;
     Project&         p     = host_.edit_project();
-    songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
+    songcore::Track& track = p.tracks[static_cast<size_t>(s_.songCursor.column - 1)];
 
     const int next = first_free_chain(p, s_.lastEditedChain + 1);
     if (next < 0) return;
 
-    while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow) track.chainRefs.push_back(-1);
-    track.chainRefs[static_cast<size_t>(s_.cursorRow)] = next;
+    while (static_cast<int>(track.chainRefs.size()) <= s_.songCursor.row) track.chainRefs.push_back(-1);
+    track.chainRefs[static_cast<size_t>(s_.songCursor.row)] = next;
     s_.lastEditedChain                                 = next;
     mark_modified();
 }
@@ -457,15 +459,15 @@ void InputDispatcher::chain_insert_next() {
     const int next = first_free_phrase(p, s_.lastEditedPhrase + 1);
     if (next < 0) return;
 
-    chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = next;
-    chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
+    chain.phraseRefs[static_cast<size_t>(s_.chainCursor.row)]      = next;
+    chain.transposeValues[static_cast<size_t>(s_.chainCursor.row)] = s_.lastEditedTranspose;
     s_.lastEditedPhrase                                      = next;
     mark_modified();
 }
 
 void InputDispatcher::phrase_insert() {
     hasInsertPos_ = false;
-    if (s_.cursorColumn != 1 || s_.selection.active) return;   // the NOTE column only
+    if (s_.phraseCursor.column != 1 || s_.selection.active) return;   // the NOTE column only
 
     // A on an existing note inserts nothing, but holding it is how you listen.
     if (lay_last_at_cursor()) {
@@ -483,8 +485,8 @@ void InputDispatcher::phrase_fill(Gesture g) {
         range = {b.topLeftRow, b.bottomRightRow, std::max(1, b.topLeftColumn), b.bottomRightColumn,
                  /*wholeUnit=*/false};
     } else {
-        if (s_.cursorColumn < 1) return;   // the row number is not a cell
-        range = {s_.cursorRow, 15, s_.cursorColumn, s_.cursorColumn, /*wholeUnit=*/true};
+        if (s_.phraseCursor.column < 1) return;   // the row number is not a cell
+        range = {s_.phraseCursor.row, 15, s_.phraseCursor.column, s_.phraseCursor.column, /*wholeUnit=*/true};
     }
 
     Project&          p  = host_.edit_project();
@@ -524,10 +526,10 @@ void InputDispatcher::phrase_fill(Gesture g) {
 }
 
 bool InputDispatcher::phrase_put_note_off() {
-    if (s_.cursorColumn != 1 || s_.selection.active) return false;
+    if (s_.phraseCursor.column != 1 || s_.selection.active) return false;
     songcore::PhraseStep& step = host_.edit_project()
                                      .phrases[static_cast<size_t>(s_.currentPhrase)]
-                                     .steps[static_cast<size_t>(s_.cursorRow)];
+                                     .steps[static_cast<size_t>(s_.phraseCursor.row)];
     if (step.note != Note::EMPTY() && !insertHeld_) return false;   // a note of its own: A+B clears it
     step.note     = Note::OFF();
     insertHeld_   = false;
@@ -541,10 +543,10 @@ bool InputDispatcher::phrase_put_note_off() {
 }
 
 void InputDispatcher::phrase_next_instrument() {
-    if (s_.cursorColumn != 1) return;   // the NOTE column only
+    if (s_.phraseCursor.column != 1) return;   // the NOTE column only
     Project&              p    = host_.edit_project();
     songcore::PhraseStep& step = p.phrases[static_cast<size_t>(s_.currentPhrase)]
-                                     .steps[static_cast<size_t>(s_.cursorRow)];
+                                     .steps[static_cast<size_t>(s_.phraseCursor.row)];
 
     // `instrument_is_free` also skips configured SoundFonts, which have a null sampleFilePath too.
     const int count = static_cast<int>(p.instruments.size());
@@ -560,11 +562,11 @@ void InputDispatcher::phrase_next_instrument() {
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::song_clone_chain() {
-    if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
+    if (s_.songCursor.column < 1 || s_.songCursor.column > 8) return;
     Project&         p     = host_.edit_project();
-    songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
-    const int currentChainId = (s_.cursorRow < static_cast<int>(track.chainRefs.size()))
-                                   ? track.chainRefs[static_cast<size_t>(s_.cursorRow)]
+    songcore::Track& track = p.tracks[static_cast<size_t>(s_.songCursor.column - 1)];
+    const int currentChainId = (s_.songCursor.row < static_cast<int>(track.chainRefs.size()))
+                                   ? track.chainRefs[static_cast<size_t>(s_.songCursor.row)]
                                    : -1;
     if (currentChainId == -1) return;
 
@@ -608,7 +610,7 @@ void InputDispatcher::song_clone_chain() {
     }
     dst.transposeValues = src.transposeValues;
 
-    track.chainRefs[static_cast<size_t>(s_.cursorRow)] = dstChainId;
+    track.chainRefs[static_cast<size_t>(s_.songCursor.row)] = dstChainId;
     s_.lastEditedChain = dstChainId;
     set_status(s_, "CHAIN CLONED", true);
     mark_modified();
@@ -617,14 +619,14 @@ void InputDispatcher::song_clone_chain() {
 void InputDispatcher::chain_clone_phrase() {
     Project&  p               = host_.edit_project();
     Chain&    chain           = p.chains[static_cast<size_t>(s_.currentChain)];
-    const int currentPhraseId = chain.phraseRefs[static_cast<size_t>(s_.cursorRow)];
+    const int currentPhraseId = chain.phraseRefs[static_cast<size_t>(s_.chainCursor.row)];
     if (currentPhraseId == -1) return;
 
     const int next = first_free_phrase(p, currentPhraseId + 1);
     if (next < 0) return;
 
     p.phrases[static_cast<size_t>(next)].steps = p.phrases[static_cast<size_t>(currentPhraseId)].steps;
-    chain.phraseRefs[static_cast<size_t>(s_.cursorRow)] = next;
+    chain.phraseRefs[static_cast<size_t>(s_.chainCursor.row)] = next;
     s_.lastEditedPhrase                                 = next;
     mark_modified();
 }
@@ -639,7 +641,7 @@ void InputDispatcher::phrase_clone() {
     // …and follow the clone, so you are editing the copy. The chain row it came from plays the copy
     // too, as CHAIN's clone does — or leaving PHRASE comes back to the original.
     std::vector<int>& refs = p.chains[static_cast<size_t>(s_.currentChain)].phraseRefs;
-    const int         row  = pointer_chain_row(s_);
+    const int         row  = s_.chainCursor.row;
     if (row >= 0 && row < static_cast<int>(refs.size()) && refs[static_cast<size_t>(row)] == srcPhraseId)
         refs[static_cast<size_t>(row)] = next;
     s_.currentPhrase    = next;
@@ -653,8 +655,8 @@ void InputDispatcher::phrase_clone() {
 // this chain row. Both clamp.
 bool InputDispatcher::song_relative_b_horizontal(int delta) {
     if (!s_.settings.navSongRelative) return false;
-    const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? pointer_chain_row(s_) : -1;
-    const int songRow    = pointer_song_row(s_);
+    const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? s_.chainCursor.row : -1;
+    const int songRow    = s_.songCursor.row;
     const int track      = songcore::next_song_cell_h(*s_.project, songRow, pointer_track(s_), delta,
                                                       requireRow);
     set_pointer_song_cell(s_, songRow, track);
@@ -669,12 +671,12 @@ bool InputDispatcher::song_relative_b_vertical(int delta) {
 
     if (s_.currentScreen == ScreenType::CHAIN) {
         const int track = pointer_track(s_);
-        const int row   = songcore::next_song_cell_v(*s_.project, pointer_song_row(s_), track, delta);
+        const int row   = songcore::next_song_cell_v(*s_.project, s_.songCursor.row, track, delta);
         set_pointer_song_cell(s_, row, track);
     } else {
-        const int row = songcore::next_chain_row(*s_.project, s_.currentChain, pointer_chain_row(s_),
+        const int row = songcore::next_chain_row(*s_.project, s_.currentChain, s_.chainCursor.row,
                                                  delta, /*wrap=*/false);
-        set_pointer_chain_row(s_, row);
+        s_.chainCursor.row = row;
     }
     refresh_song_relative_refs(s_);
     return true;
@@ -685,31 +687,31 @@ bool InputDispatcher::song_relative_b_vertical(int delta) {
 // ⚠️ In LIVE mode START QUEUES the cursor's cell rather than toggling the transport. Stopping is
 // R+START (one channel) or STOP (everything).
 void InputDispatcher::live_launch_cell() {
-    const int track = s_.cursorColumn - 1;   // on SONG the column IS the track, 1-based
+    const int track = s_.songCursor.column - 1;   // on SONG the column IS the track, 1-based
     if (!host_.is_playing()) {
         // Nothing running: this channel starts NOW, with the transport; the other seven begin silent.
-        host_.play_song_live(s_.cursorRow, 1 << track);
+        host_.play_song_live(s_.songCursor.row, 1 << track);
         return;
     }
     // The two-press launch: the first press queues for the chain's end, a second on the same cell for the
     // next phrase boundary. ⚠️ Only while armed, or it cuts short a chain being heard.
     const songcore::LiveSlot q = host_.live_queue(track);
-    const bool               immediate = q.armed() && !q.stop && q.targetRow == s_.cursorRow;
-    host_.queue_live(track, s_.cursorRow, immediate);
+    const bool               immediate = q.armed() && !q.stop && q.targetRow == s_.songCursor.row;
+    host_.queue_live(track, s_.songCursor.row, immediate);
 }
 
 void InputDispatcher::live_launch_row() {
     if (!host_.is_playing()) {
         // From a standing start the row launches together on one downbeat; an empty cell starts silent.
-        host_.play_song_live(s_.cursorRow, live_row_mask(s_.cursorRow));
+        host_.play_song_live(s_.songCursor.row, live_row_mask(s_.songCursor.row));
         return;
     }
-    host_.queue_live_row(s_.cursorRow, live_row_armed(s_.cursorRow));
+    host_.queue_live_row(s_.songCursor.row, live_row_armed(s_.songCursor.row));
 }
 
 void InputDispatcher::live_stop_track() {
     if (!host_.is_playing()) return;   // nothing sounding, nothing to queue a stop for
-    const int track = s_.cursorColumn - 1;
+    const int track = s_.songCursor.column - 1;
     // The launch's two-press promotion: chain end, then next phrase boundary.
     const songcore::LiveSlot sq = host_.live_queue(track);
     host_.queue_live_stop(track, sq.armed() && sq.stop);
@@ -740,14 +742,14 @@ bool InputDispatcher::live_row_armed(int songRow) const {
 CursorContext InputDispatcher::song_context() const {
     const Project& p = *s_.project;
     SongEditorState ss{p};
-    ss.cursorRow   = s_.cursorRow;
-    ss.cursorTrack = s_.cursorColumn;  // on SONG the column IS the track
+    ss.cursorRow   = s_.songCursor.row;
+    ss.cursorTrack = s_.songCursor.column;  // on SONG the column IS the track
     return song_.cursor_context(ss);
 }
 
 bool InputDispatcher::song_edit(const InputAction& action) {
     Project& p = host_.edit_project();
-    const SongInputResult r = song_.handle_input(p, s_.cursorRow, s_.cursorColumn, action);
+    const SongInputResult r = song_.handle_input(p, s_.songCursor.row, s_.songCursor.column, action);
     if (r.hasChain) s_.lastEditedChain = r.lastEditedChain;
     return r.modified;
 }
@@ -755,15 +757,15 @@ bool InputDispatcher::song_edit(const InputAction& action) {
 CursorContext InputDispatcher::chain_context() const {
     const Project& p = *s_.project;
     ChainEditorState cs{p.chains[static_cast<size_t>(s_.currentChain)]};
-    cs.cursorRow    = s_.cursorRow;
-    cs.cursorColumn = s_.cursorColumn;
+    cs.cursorRow    = s_.chainCursor.row;
+    cs.cursorColumn = s_.chainCursor.column;
     return chain_.cursor_context(cs);
 }
 
 bool InputDispatcher::chain_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     const ChainInputResult r = chain_.handle_input(
-        p.chains[static_cast<size_t>(s_.currentChain)], s_.cursorRow, s_.cursorColumn, action);
+        p.chains[static_cast<size_t>(s_.currentChain)], s_.chainCursor.row, s_.chainCursor.column, action);
     if (r.hasPhrase)    s_.lastEditedPhrase    = r.lastEditedPhrase;
     if (r.hasTranspose) s_.lastEditedTranspose = r.lastEditedTranspose;
     return r.modified;
@@ -772,8 +774,8 @@ bool InputDispatcher::chain_edit(const InputAction& action) {
 CursorContext InputDispatcher::phrase_context() const {
     const Project& p = *s_.project;
     PhraseEditorState ps{p.phrases[static_cast<size_t>(s_.currentPhrase)]};
-    ps.cursorRow        = s_.cursorRow;
-    ps.cursorColumn     = s_.cursorColumn;
+    ps.cursorRow        = s_.phraseCursor.row;
+    ps.cursorColumn     = s_.phraseCursor.column;
     ps.effectTypeCount  = visible_effect_type_count();
     // ⚠️ The NOTE cell's scale comes from the project; null reads as chromatic, silently.
     ps.project          = &p;
@@ -784,14 +786,14 @@ CursorContext InputDispatcher::phrase_context() const {
 bool InputDispatcher::phrase_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
-    const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
+    const PhraseInputResult r = phrase_.handle_input(ph, s_.phraseCursor.row, s_.phraseCursor.column, action);
     if (!r.modified) return false;
     remember_fx_at_cursor();
     insertHeld_ = false;
 
     // "Last edited" and the audition: only a step WITH a note is remembered, and only a NOTE
     // edit auditions — dialling a velocity must not retrigger the voice.
-    const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+    const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.phraseCursor.row)];
     if ((r.hasNote || r.hasVolume || r.hasInstrument) && songcore::step_has_note(step)) {
         s_.lastEditedNote       = step.note;
         s_.lastEditedVolume     = step.volume;
@@ -809,8 +811,8 @@ bool InputDispatcher::phrase_edit(const InputAction& action) {
 CursorContext InputDispatcher::table_context() const {
     const Project& p = *s_.project;
     TableState ts{p.tables[static_cast<size_t>(s_.currentTable)]};
-    ts.cursorRow       = s_.tableCursorRow;
-    ts.cursorColumn    = s_.tableCursorColumn;
+    ts.cursorRow       = s_.tableCursor.row;
+    ts.cursorColumn    = s_.tableCursor.column;
     ts.effectTypeCount = visible_effect_type_count();
     return table_.cursor_context(ts);
 }
@@ -818,8 +820,8 @@ CursorContext InputDispatcher::table_context() const {
 bool InputDispatcher::table_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     const bool modified = table_
-        .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursorRow,
-                      s_.tableCursorColumn, action)
+        .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursor.row,
+                      s_.tableCursor.column, action)
         .modified;
     if (modified) remember_fx_at_cursor();
     return modified;

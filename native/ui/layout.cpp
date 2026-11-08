@@ -12,6 +12,7 @@
 #include "ui/modules/fx_helper_overlay.h"
 #include "ui/modules/map_picker_overlay.h"
 #include "ui/modules/render_dialog.h"
+#include "ui/overlays.h"
 #include "ui/song_pointer.h"
 
 namespace pt::ui {
@@ -19,12 +20,6 @@ namespace pt::ui {
 namespace {
 
 constexpr int STATUS_MAX_CHARS = 34;   // one line
-
-// Is an overlay drawn in the editor's place? ⚠️ Mirrors `draw_editor`'s ifs: a new overlay there goes
-// here too, or `has_falling_meters` holds the redraw open for ever.
-bool editor_overlay_up(const AppState& s) {
-    return s.eq.isOpen || theme_editor_up(s);
-}
 }  // namespace
 
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
@@ -43,20 +38,18 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
 
     if (full_screen_module(s)) {
         draw_full_screen(c, s);
-        return;
+    } else {
+        draw_scope_strip(c, s);
+        draw_editor(c, s);
+
+        if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
+
+        // Over the scope strip, unless help has it.
+        if (!s.helpOpen) {
+            draw_status_line(c, s);
+            draw_selection_clipboard(c, s);
+        }
     }
-
-    draw_scope_strip(c, s);
-    draw_editor(c, s);
-
-    if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
-
-    // Over the scope strip, unless help has it.
-    if (!s.helpOpen) {
-        draw_status_line(c, s);
-        draw_selection_clipboard(c, s);
-    }
-
     draw_overlays(c, s);
 }
 
@@ -74,7 +67,6 @@ void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
             helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
                             SampleEditorModule::WAVEFORM_H);
     }
-    if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
 }
 
 // ─── The oscilloscope strip, or the help panel in its place ──────────────────────────────────────
@@ -120,8 +112,8 @@ const songcore::Instrument& current_instrument(const AppState& s) {
 PhraseEditorState phrase_state(const AppState& s) {
     const songcore::Project& p = *s.project;
     PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
-    ps.cursorRow      = s.cursorRow;
-    ps.cursorColumn   = s.cursorColumn;
+    ps.cursorRow      = s.phraseCursor.row;
+    ps.cursorColumn   = s.phraseCursor.column;
     std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ps.playheads));
     ps.selectionMode  = s.selection_mode();
     ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
@@ -130,8 +122,8 @@ PhraseEditorState phrase_state(const AppState& s) {
     // Under NAV = SONG, the chain row and song cell the phrase is seen through; −1 under POOL.
     if (s.settings.navSongRelative) {
         ps.viaChain    = s.currentChain;
-        ps.viaChainRow = pointer_chain_row(s);
-        ps.songRow     = pointer_song_row(s);
+        ps.viaChainRow = s.chainCursor.row;
+        ps.songRow     = s.songCursor.row;
         ps.songTrack   = pointer_track(s);
     }
     return ps;
@@ -139,14 +131,14 @@ PhraseEditorState phrase_state(const AppState& s) {
 
 ChainEditorState chain_state(const AppState& s) {
     ChainEditorState cs{s.project->chains[static_cast<size_t>(s.currentChain)]};
-    cs.cursorRow      = s.cursorRow;
-    cs.cursorColumn   = s.cursorColumn;
+    cs.cursorRow      = s.chainCursor.row;
+    cs.cursorColumn   = s.chainCursor.column;
     std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(cs.playheads));
     cs.selectionMode  = s.selection_mode();
     cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
     cs.theme          = s.theme;
     if (s.settings.navSongRelative) {
-        cs.songRow   = pointer_song_row(s);
+        cs.songRow   = s.songCursor.row;
         cs.songTrack = pointer_track(s);
     }
     return cs;
@@ -154,8 +146,8 @@ ChainEditorState chain_state(const AppState& s) {
 
 SongEditorState song_state(const AppState& s) {
     SongEditorState ss{*s.project};
-    ss.cursorRow      = s.cursorRow;
-    ss.cursorTrack    = s.cursorColumn;
+    ss.cursorRow      = s.songCursor.row;
+    ss.cursorTrack    = s.songCursor.column;
     ss.scrollPosition = s.songScrollPosition;
     std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
     ss.liveMode       = s.liveMode;
@@ -169,8 +161,8 @@ SongEditorState song_state(const AppState& s) {
 
 TableState table_state(const AppState& s) {
     TableState ts{s.project->tables[static_cast<size_t>(s.currentTable)]};
-    ts.cursorRow    = s.tableCursorRow;
-    ts.cursorColumn = s.tableCursorColumn;
+    ts.cursorRow    = s.tableCursor.row;
+    ts.cursorColumn = s.tableCursor.column;
     for (int l = 0; l < TABLE_LANES; ++l) ts.playbackRows[l] = s.tablePlaybackRows[l];
     // The instrument's tic rate: one table can run at two speeds under two instruments.
     ts.ticRate        = current_instrument(s).tableTicRate;
@@ -182,10 +174,10 @@ TableState table_state(const AppState& s) {
 
 GrooveState groove_state(const AppState& s) {
     GrooveState gs{s.project->grooves[static_cast<size_t>(s.currentGroove)]};
-    gs.cursorRow    = s.grooveCursorRow;
-    gs.cursorColumn = s.grooveCursorColumn;
-    gs.panelRow     = s.groovePanelRow;
-    gs.panelColumn  = s.groovePanelColumn;
+    gs.cursorRow    = s.grooveCursor.row;
+    gs.cursorColumn = s.grooveCursor.column;
+    gs.panelRow     = s.groovePanel.row;
+    gs.panelColumn  = s.groovePanel.column;
     gs.quantize     = s.grooveQuantize;
     gs.theme        = s.theme;
     return gs;
@@ -194,8 +186,8 @@ GrooveState groove_state(const AppState& s) {
 ScaleState scale_state(const AppState& s) {
     ScaleState cs{s.project->scales[static_cast<size_t>(s.currentScale)]};
     cs.key          = s.project->scaleKey;
-    cs.cursorRow    = s.scaleCursorRow;
-    cs.cursorColumn = s.scaleCursorColumn;
+    cs.cursorRow    = s.scaleCursor.row;
+    cs.cursorColumn = s.scaleCursor.column;
     // The pitch classes sounding now, from the voices (the sequencer runs ahead), all tracks in one mask.
     for (int i = 0; i < 8; ++i) {
         const songcore::Note n = s.trackNotes[i];
@@ -209,8 +201,8 @@ ScaleState scale_state(const AppState& s) {
 
 InstrumentEditorState instrument_state(const AppState& s) {
     InstrumentEditorState is{current_instrument(s)};
-    is.cursorRow     = s.instrumentCursorRow;
-    is.cursorColumn  = s.instrumentCursorColumn;
+    is.cursorRow     = s.instrumentCursor.row;
+    is.cursorColumn  = s.instrumentCursor.column;
     is.sfPresetName  = s.sfPresetName;
     is.sfPresetCount = s.sfPresetCount;
     is.sfPresetIndex = s.sfPresetIndex;
@@ -259,8 +251,8 @@ EffectState effects_state(const AppState& s) {
 
 ProjectState project_state(const AppState& s) {
     ProjectState prs{*s.project};
-    prs.cursorRow      = s.projectCursorRow;
-    prs.cursorColumn   = s.projectCursorColumn;
+    prs.cursorRow      = s.projectCursor.row;
+    prs.cursorColumn   = s.projectCursor.column;
     prs.isRendering    = s.isRendering;
     prs.renderProgress = s.renderProgress;
     prs.isCollecting    = s.isCollecting;
@@ -274,8 +266,8 @@ ProjectState project_state(const AppState& s) {
 
 SettingsState settings_state(const AppState& s) {
     SettingsState ss{s.settings};
-    ss.cursorRow    = s.settingsCursorRow;
-    ss.cursorColumn = s.settingsCursorColumn;
+    ss.cursorRow    = s.settingsCursor.row;
+    ss.cursorColumn = s.settingsCursor.column;
     ss.layoutText   = s.layoutText;
     ss.skinText     = s.skinText;
     ss.overlayText  = s.overlayText;
@@ -291,8 +283,8 @@ MidiState midi_state(const AppState& s) {
     MidiState ms{*s.project, s.settings, s.midiOutDeviceNames, s.midiInDeviceNames};
     ms.lastCcChannel = s.midiInCcChannel;
     ms.clockBpm      = s.midiClockBpm;
-    ms.cursorRow     = s.midiCursorRow;
-    ms.cursorColumn  = s.midiCursorColumn;
+    ms.cursorRow     = s.midiCursor.row;
+    ms.cursorColumn  = s.midiCursor.column;
     ms.deviceIndex   = s.midiOutDeviceIndex;
     ms.inDeviceIndex = s.midiInDeviceIndex;
     ms.outOpenName   = s.midiOutOpenName;
@@ -307,8 +299,8 @@ MidiState midi_state(const AppState& s) {
 
 MidiMapState midi_map_state(const AppState& s) {
     MidiMapState mm{*s.project};
-    mm.cursorRow    = s.midiMapCursorRow;
-    mm.cursorColumn = s.midiMapCursorColumn;
+    mm.cursorRow    = s.midiMapCursor.row;
+    mm.cursorColumn = s.midiMapCursor.column;
     mm.theme        = s.theme;
     return mm;
 }
@@ -370,19 +362,29 @@ void TrackerLayout::draw_editor(Canvas& c, const AppState& s) {
     }
 }
 
-// Last, over everything — a modal's backdrop dims the whole frame.
+// The boxes over everything, the bottom of the stack first, so the one that owns the buttons is on top.
+// The rest are drawn in their own places: THEME and EQ in the editor's, STRETCH and ARE YOU SURE? by the
+// sample editor, the full help and the load strip over the button locks (`draw`).
 void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
-    draw_fx_helper(c, s.fxHelper, t);
-    draw_map_picker(c, s.mapPicker, t);
-    if (send_editor_drawn(s)) {
-        draw_send_editor(c, s.sendEditor, *s.project, t);
-        // Its cells have help; the panel goes over the strip the backdrop just dimmed.
-        if (s.helpOpen) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+    for (size_t i = overlays_drawn_end(s); i-- > 0;) {
+        if (!OVERLAYS[i].up(s)) continue;
+        switch (OVERLAYS[i].id) {
+            case Overlay::MAP_PICKER: draw_map_picker(c, s.mapPicker, t); break;
+            case Overlay::FX_HELPER:  draw_fx_helper(c, s.fxHelper, t); break;
+            case Overlay::SEND:
+                draw_send_editor(c, s.sendEditor, *s.project, t);
+                // Its cells have help; the panel goes over the strip the backdrop just dimmed.
+                if (s.helpOpen) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+                break;
+            case Overlay::QWERTY:        qwerty_.draw(c, s.qwerty, t); break;
+            case Overlay::RENDER_DIALOG:
+                draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
+                break;
+            case Overlay::CONFIRM: draw_confirm_dialog(c, s.confirm, t); break;
+            default: break;
+        }
     }
-    draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
-    if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
-    draw_confirm_dialog(c, s.confirm, t);
 }
 
 bool TrackerLayout::has_falling_meters(const AppState& s) const {
@@ -393,7 +395,7 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
 
     // ⚠️ Only when the mixer is drawn: under an overlay a falling marker never ages and the loop pins
     // at 60 Hz.
-    if (s.currentScreen == ScreenType::MIXER && !editor_overlay_up(s) && !mixer_.peaks_at_rest())
+    if (s.currentScreen == ScreenType::MIXER && !overlay_in_editor(s) && !mixer_.peaks_at_rest())
         return true;
 
     // The SPECTRUM bars, likewise only while drawn.
@@ -424,25 +426,25 @@ bool TrackerLayout::draw_chord_hint(Canvas& c, const AppState& s) const {
     int key = 0;
     std::string where;   // the root's name, or why there is none
     if (s.currentScreen == ScreenType::PHRASE) {
-        const int slot = fx_slot_of_column(s.cursorColumn, PHRASE_FX_COLUMN);
-        if (slot == 0 || is_fx_type_column(s.cursorColumn, PHRASE_FX_COLUMN)) return false;
+        const int slot = fx_slot_of_column(s.phraseCursor.column, PHRASE_FX_COLUMN);
+        if (slot == 0 || is_fx_type_column(s.phraseCursor.column, PHRASE_FX_COLUMN)) return false;
         const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
-        const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.cursorRow)];
+        const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.phraseCursor.row)];
         if (songcore::fx_slot(step, slot).type != songcore::FX_CHD) return false;
         value = songcore::fx_slot(step, slot).value;
         if (!songcore::note_is_pitch(step.note)) {
             where = "NEEDS A NOTE ON THIS ROW";
         } else {
-            const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.cursorRow, step.instrument);
+            const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.phraseCursor.row, step.instrument);
             root  = ns.snap(songcore::note_to_midi(step.note));
             scale = ns.scale;
             key   = ns.key;
         }
     } else if (s.currentScreen == ScreenType::TABLE) {
-        const int slot = fx_slot_of_column(s.tableCursorColumn, TABLE_FX_COLUMN);
-        if (slot == 0 || is_fx_type_column(s.tableCursorColumn, TABLE_FX_COLUMN)) return false;
+        const int slot = fx_slot_of_column(s.tableCursor.column, TABLE_FX_COLUMN);
+        if (slot == 0 || is_fx_type_column(s.tableCursor.column, TABLE_FX_COLUMN)) return false;
         const songcore::TableRow& r =
-            p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursorRow)];
+            p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursor.row)];
         if (songcore::fx_slot(r, slot).type != songcore::FX_CHD) return false;
         value = songcore::fx_slot(r, slot).value;
         // The row's transpose moves the note the chord is built on: 00-7F up, 80-FF down.

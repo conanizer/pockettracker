@@ -164,30 +164,18 @@ inline NavState nav_state_of(const AppState& s) {
     return NavState{s.currentScreen, s.previousColumn, s.instrumentFromPool};
 }
 
-// A screen's own cursor back to its top-left cell: REFRESH on entry, NEW and LOAD on every screen.
-// SONG, CHAIN and PHRASE share the live cursor.
+// A screen's cursor back to its top-left cell: REFRESH on entry, NEW and LOAD on every screen.
 inline void reset_screen_cursor(AppState& s, ScreenType screen) {
     switch (screen) {
-        case ScreenType::SONG:
-        case ScreenType::CHAIN:
-        case ScreenType::PHRASE:
-            s.cursorRow    = 0;
-            s.cursorColumn = min_cursor_column(screen);
-            break;
-        case ScreenType::TABLE:
-            s.tableCursorRow = 0; s.tableCursorColumn = 1;
-            break;
+        case ScreenType::SONG:       s.songCursor       = GRID_HOME; break;
+        case ScreenType::CHAIN:      s.chainCursor      = GRID_HOME; break;
+        case ScreenType::PHRASE:     s.phraseCursor     = GRID_HOME; break;
+        case ScreenType::TABLE:      s.tableCursor      = GRID_HOME; break;
+        case ScreenType::INSTRUMENT: s.instrumentCursor = GRID_HOME; break;
+        case ScreenType::SCALE:      s.scaleCursor      = {};        break;
         case ScreenType::GROOVE:
-            s.grooveCursorRow    = 0;
-            s.grooveCursorColumn = GROOVE_COL_TICK;
-            s.groovePanelRow     = 0;
-            s.groovePanelColumn  = 0;
-            break;
-        case ScreenType::SCALE:
-            s.scaleCursorRow = 0; s.scaleCursorColumn = 0;
-            break;
-        case ScreenType::INSTRUMENT:
-            s.instrumentCursorRow = 0; s.instrumentCursorColumn = 1;
+            s.grooveCursor = GROOVE_HOME;
+            s.groovePanel  = {};
             break;
         case ScreenType::MODS:
             s.modCursorRow = 0; s.modCursorPair = 0; s.modCursorSide = 0;
@@ -200,19 +188,8 @@ inline void reset_screen_cursor(AppState& s, ScreenType screen) {
     }
 }
 
-// Land on a screen: save and restore the shared cursor (the three screens' column counts differ),
-// point TABLE at the current instrument, keep the pool flag only on INSTRUMENT.
+// Land on a screen: point TABLE at the current instrument, keep the pool flag only on INSTRUMENT.
 inline void go_to_screen(AppState& s, const NavResult& r) {
-    switch (s.currentScreen) {
-        case ScreenType::SONG:
-            s.songCursorRow = s.cursorRow;   s.songCursorColumn = s.cursorColumn;   break;
-        case ScreenType::CHAIN:
-            s.chainCursorRow = s.cursorRow;  s.chainCursorColumn = s.cursorColumn;  break;
-        case ScreenType::PHRASE:
-            s.phraseCursorRow = s.cursorRow; s.phraseCursorColumn = s.cursorColumn; break;
-        default: break;
-    }
-
     s.currentScreen  = r.screen;
     s.previousColumn = r.column;
 
@@ -224,22 +201,12 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
         s.lastEditedTable = s.currentTable;
     }
 
-    // Restore, or refresh (the default). ⚠️ Under NAV = SONG, SONG and CHAIN always restore: their
+    // REFRESH (the default) puts the cursor back on the top-left editable cell; EFFECTS, PROJECT and
+    // SETTINGS keep theirs in both modes. ⚠️ Under NAV = SONG, SONG and CHAIN always keep theirs: their
     // cursors are the pointer, and a refresh would re-aim it.
     const bool pointerScreen = s.settings.navSongRelative &&
                                (r.screen == ScreenType::SONG || r.screen == ScreenType::CHAIN);
-    if (s.settings.cursorRemember || pointerScreen) {
-        switch (r.screen) {
-            case ScreenType::SONG:
-                s.cursorRow = s.songCursorRow;   s.cursorColumn = s.songCursorColumn;   break;
-            case ScreenType::CHAIN:
-                s.cursorRow = s.chainCursorRow;  s.cursorColumn = s.chainCursorColumn;  break;
-            case ScreenType::PHRASE:
-                s.cursorRow = s.phraseCursorRow; s.cursorColumn = s.phraseCursorColumn; break;
-            default: break;   // the rest own their cursors
-        }
-    } else {
-        // Back to the top-left editable cell. EFFECTS, PROJECT and SETTINGS persist in both modes.
+    if (!s.settings.cursorRemember && !pointerScreen) {
         reset_screen_cursor(s, r.screen);
         if (r.screen == ScreenType::INST_POOL) s.poolCursorColumn = 0;   // not currentInstrument: the pool's row
     }
@@ -247,9 +214,9 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     // ⚠️ Bounds checks, in both modes: a remembered cell may not be drawn here. SETTINGS hides rows per
     // platform (row 0 is not drawn on the desktop).
     if (r.screen == ScreenType::SETTINGS &&
-        !settings_row_visible(static_cast<SettingsRow>(s.settingsCursorRow), s.caps)) {
-        s.settingsCursorRow    = settings_first_visible_row(s.caps);
-        s.settingsCursorColumn = 1;
+        !settings_row_visible(static_cast<SettingsRow>(s.settingsCursor.row), s.caps)) {
+        s.settingsCursor.row    = settings_first_visible_row(s.caps);
+        s.settingsCursor.column = 1;
     }
 
     // MIXER: back to the fader above, which exists in every column.
@@ -263,9 +230,9 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     // INSTRUMENT: the layouts differ by type.
     if (r.screen == ScreenType::INSTRUMENT) snap_instrument_cursor(s);
 
-    if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.cursorRow);
+    if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.songCursor.row);
 
-    // Under NAV = SONG the current* refs are read from the cursors just restored.
+    // Under NAV = SONG the current* refs are read off the cursors.
     refresh_song_relative_refs(s);
 }
 
