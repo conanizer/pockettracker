@@ -26,23 +26,35 @@ class SeqPublisher {
     /** The reader. True when `out` now holds a value newer than `seen` (which is updated). */
     bool read(T& out, uint32_t& seen) const {
         for (int attempt = 0; attempt < 4; ++attempt) {
-            const uint32_t s1 = seq_.load(std::memory_order_acquire);
-            if (s1 & 1u) continue;            // a write is in progress: try once more, then keep ours
-            if (s1 == seen) return false;     // nothing new
-            uint64_t words[WORDS];
-            for (size_t i = 0; i < WORDS; ++i) words[i] = words_[i].load(std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_acquire);
-            if (seq_.load(std::memory_order_relaxed) != s1) continue;
-            std::memcpy(&out, words, sizeof out);
-            seen = s1;
+            const uint32_t s = seq_.load(std::memory_order_acquire);
+            if (s & 1u) continue;            // a write is in progress: try once more, then keep ours
+            if (s == seen) return false;     // nothing new
+            if (!copy_at(s, out)) continue;
+            seen = s;
             return true;
         }
         return false;
     }
 
+    /** The reader, once: true when `out` now holds the latest value; false if a write was in the way. */
+    bool try_read(T& out) const {
+        const uint32_t s = seq_.load(std::memory_order_acquire);
+        return !(s & 1u) && copy_at(s, out);
+    }
+
     bool published() const { return seq_.load(std::memory_order_acquire) != 0; }
 
   private:
+    // `out` is written only when no write overlapped the copy.
+    bool copy_at(uint32_t s, T& out) const {
+        uint64_t words[WORDS];
+        for (size_t i = 0; i < WORDS; ++i) words[i] = words_[i].load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (seq_.load(std::memory_order_relaxed) != s) return false;
+        std::memcpy(&out, words, sizeof out);
+        return true;
+    }
+
     static constexpr size_t WORDS = (sizeof(T) + 7) / 8;
     std::atomic<uint32_t> seq_{0};
     std::atomic<uint64_t> words_[WORDS] = {};
@@ -53,21 +65,12 @@ class SeqPublisher {
 // ⚠️ `publish` after EVERY edit, or it is never heard.
 template <typename T, int N>
 class StagedTable {
-    static_assert(std::is_trivially_copyable<T>::value, "published as raw words");
-
   public:
     // The control thread.
     T&       edit(int i) { return staged_[i]; }
     const T& staged(int i) const { return staged_[i]; }
     void publish(int i) {
-        uint64_t words[WORDS] = {0};
-        std::memcpy(words, &staged_[i], sizeof(T));
-        Slot& s = slots_[i];
-        const uint32_t q = s.seq.load(std::memory_order_relaxed);
-        s.seq.store(q + 1, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
-        for (size_t w = 0; w < WORDS; ++w) s.words[w].store(words[w], std::memory_order_relaxed);
-        s.seq.store(q + 2, std::memory_order_release);
+        slots_[i].publish(staged_[i]);
         dirty_[i / 64].fetch_or(uint64_t(1) << (i % 64), std::memory_order_release);
     }
 
@@ -78,32 +81,17 @@ class StagedTable {
             uint64_t bits = dirty_[d].exchange(0, std::memory_order_acquire);
             for (int b = 0; bits != 0; ++b, bits >>= 1) {
                 if (!(bits & 1u)) continue;
-                if (!pull(d * 64 + b)) dirty_[d].fetch_or(uint64_t(1) << b, std::memory_order_relaxed);
+                const int i = d * 64 + b;
+                if (!slots_[i].try_read(live_[i]))   // a write in the way: try at the next block
+                    dirty_[d].fetch_or(uint64_t(1) << b, std::memory_order_relaxed);
             }
         }
     }
 
   private:
-    bool pull(int i) {
-        const Slot& s = slots_[i];
-        const uint32_t q = s.seq.load(std::memory_order_acquire);
-        if (q & 1u) return false;
-        uint64_t words[WORDS];
-        for (size_t w = 0; w < WORDS; ++w) words[w] = s.words[w].load(std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_acquire);
-        if (s.seq.load(std::memory_order_relaxed) != q) return false;
-        std::memcpy(&live_[i], words, sizeof(T));
-        return true;
-    }
-
-    static constexpr size_t WORDS       = (sizeof(T) + 7) / 8;
-    static constexpr int    DIRTY_WORDS = (N + 63) / 64;
-    struct Slot {
-        std::atomic<uint32_t> seq{0};
-        std::atomic<uint64_t> words[WORDS] = {};
-    };
-    T    staged_[N] = {};
-    T    live_[N]   = {};
-    Slot slots_[N];
+    static constexpr int DIRTY_WORDS = (N + 63) / 64;
+    T               staged_[N] = {};
+    T               live_[N]   = {};
+    SeqPublisher<T> slots_[N];
     std::atomic<uint64_t> dirty_[DIRTY_WORDS] = {};
 };
