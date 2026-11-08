@@ -340,6 +340,7 @@ add_library(pt-ui STATIC
         ui/dispatch/screens/scale_groove.cpp
         ui/dispatch/screens/sequencer.cpp
         ui/dispatch/sub_screens.cpp
+        ui/help_topic.cpp
         ui/layout.cpp
         ui/autosave.cpp
         ui/midi_ports.cpp

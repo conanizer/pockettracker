@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "ui/help_topic.h"
+
 namespace pt::ui {
 
 using Argb = uint32_t;  // 0xAARRGGBB
@@ -143,35 +145,36 @@ inline const ThemeColor& theme_color(Argb Theme::* field) {
 
 // ─── The theme editor's rows ─────────────────────────────────────────────────────────────────────
 // Four colours have none: `meterBorder`, `rowPlayback` (a seed), `textCursor` and `textSelection`
-// (unused). ⚠️ A row's position is its number in the help text and the tests: append.
+// (unused). ⚠️ A row's position is its number in the tests: append.
 
 struct ThemeColorRow {
     const char* label;
     Argb Theme::* field;
+    HelpTopic help;
 };
 
 inline const std::vector<ThemeColorRow>& theme_color_rows() {
     static const std::vector<ThemeColorRow> rows = {
-        {"BACKGROUND", &Theme::background},
-        {"ROW 4TH",    &Theme::rowEvery4th},
-        {"ROW CURSOR", &Theme::rowCursor},
-        {"ROW SELECT", &Theme::rowSelection},
-        {"TXT TITLE",  &Theme::textTitle},
-        {"TXT PARAM",  &Theme::textParam},
-        {"TXT VALUE",  &Theme::textValue},
-        {"TXT EMPTY",  &Theme::textEmpty},
-        {"TXT PLAY",   &Theme::textPlayhead},
-        {"VIZ BG",     &Theme::vizBackground},
-        {"VIZ LINE",   &Theme::vizCenterLine},
-        {"VIZ WAVE",   &Theme::vizWave},
-        {"MTR BG",     &Theme::meterBackground},
-        {"MTR LOW",    &Theme::meterLow},
-        {"MTR MID",    &Theme::meterMid},
-        {"MTR HIGH",   &Theme::meterHigh},
-        {"EQ FILL",    &Theme::eqFill},
-        {"EQ BORDER",  &Theme::eqBorder},
-        {"EQ TXT",     &Theme::eqTxt},
-        {"EQ BG",      &Theme::eqBg},
+        {"BACKGROUND", &Theme::background,      HelpTopic::THEME_BACKGROUND},
+        {"ROW 4TH",    &Theme::rowEvery4th,     HelpTopic::THEME_ROW_4TH},
+        {"ROW CURSOR", &Theme::rowCursor,       HelpTopic::THEME_ROW_CURSOR},
+        {"ROW SELECT", &Theme::rowSelection,    HelpTopic::THEME_ROW_SELECT},
+        {"TXT TITLE",  &Theme::textTitle,       HelpTopic::THEME_TXT_TITLE},
+        {"TXT PARAM",  &Theme::textParam,       HelpTopic::THEME_TXT_PARAM},
+        {"TXT VALUE",  &Theme::textValue,       HelpTopic::THEME_TXT_VALUE},
+        {"TXT EMPTY",  &Theme::textEmpty,       HelpTopic::THEME_TXT_EMPTY},
+        {"TXT PLAY",   &Theme::textPlayhead,    HelpTopic::THEME_TXT_PLAY},
+        {"VIZ BG",     &Theme::vizBackground,   HelpTopic::THEME_VIZ_BG},
+        {"VIZ LINE",   &Theme::vizCenterLine,   HelpTopic::THEME_VIZ_LINE},
+        {"VIZ WAVE",   &Theme::vizWave,         HelpTopic::THEME_VIZ_WAVE},
+        {"MTR BG",     &Theme::meterBackground, HelpTopic::THEME_MTR_BG},
+        {"MTR LOW",    &Theme::meterLow,        HelpTopic::THEME_MTR_LOW},
+        {"MTR MID",    &Theme::meterMid,        HelpTopic::THEME_MTR_MID},
+        {"MTR HIGH",   &Theme::meterHigh,       HelpTopic::THEME_MTR_HIGH},
+        {"EQ FILL",    &Theme::eqFill,          HelpTopic::THEME_EQ_FILL},
+        {"EQ BORDER",  &Theme::eqBorder,        HelpTopic::THEME_EQ_BORDER},
+        {"EQ TXT",     &Theme::eqTxt,           HelpTopic::THEME_EQ_TXT},
+        {"EQ BG",      &Theme::eqBg,            HelpTopic::THEME_EQ_BG},
     };
     return rows;
 }

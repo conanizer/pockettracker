@@ -435,59 +435,56 @@ void SampleEditSession::run_op() {
             tap_slice_marker();
             break;
 
-        // ── OPS1: CROP  COPY  CUT  DUPL  PASTE  DEL ──────────────────────────────────────────────
+        // ── The two rows of buttons ──────────────────────────────────────────────────────────────
         case SampleRow::OPS1:
-            switch (se.cursorCol) {
-                case 0:   // CROP — keep the selection, discard the rest
+        case SampleRow::OPS2: {
+            const SampleOpCell* cell = sample_op_at(se.cursorRow, se.cursorCol);
+            if (cell == nullptr) break;
+            switch (cell->op) {
+                case SampleOp::CROP:   // keep the selection, discard the rest
                     if (startF < endF) resizing([&] { return host_.crop_sample(instId, startF, endF); });
                     break;
-                case 1:   // COPY — the ONE op on this row that changes nothing, so it takes no backup
+                case SampleOp::COPY:   // the ONE op that changes nothing, so it takes no backup
                     if (!host_.copy_region(instId, startF, endF)) out_of_memory();
                     break;
-                case 2:   // CUT = copy, then delete
+                case SampleOp::CUT:    // copy, then delete
                     if (startF < endF) resizing([&] {
                         return host_.copy_region(instId, startF, endF) &&
                                host_.delete_sample_region(instId, startF, endF);
                     });
                     break;
-                case 3:   // DUPL = copy the selection and paste it at the END
+                case SampleOp::DUPL:   // copy the selection and paste it at the END
                     if (startF < endF) resizing([&] {
                         return host_.copy_region(instId, startF, endF) &&
                                host_.paste_region(instId, se.totalFrames);
                     });
                     break;
-                case 4:   // PASTE — inserts at the selection's START
+                case SampleOp::PASTE:  // inserts at the selection's START
                     if (host_.clipboard_length() > 0)
                         resizing([&] { return host_.paste_region(instId, startF); });
                     break;
-                case 5:   // DEL
+                case SampleOp::DEL:
                     if (startF < endF)
                         resizing([&] { return host_.delete_sample_region(instId, startF, endF); });
                     break;
-                default: break;
-            }
-            break;
 
-        // ── OPS2: NORM  FADE+  FADE-  SLNC  REV  UNDO ────────────────────────────────────────────
-        case SampleRow::OPS2:
-            switch (se.cursorCol) {
-                case 0: in_place([&] { host_.normalize_sample(instId, startF, endF); }); break;
-                case 1: in_place([&] { host_.fade_in_sample(instId, startF, endF); }); break;
-                case 2: in_place([&] { host_.fade_out_sample(instId, startF, endF); }); break;
-                case 3: in_place([&] { host_.silence_region(instId, startF, endF); }); break;
-                case 4: in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
+                case SampleOp::NORM:     in_place([&] { host_.normalize_sample(instId, startF, endF); }); break;
+                case SampleOp::FADE_IN:  in_place([&] { host_.fade_in_sample(instId, startF, endF); }); break;
+                case SampleOp::FADE_OUT: in_place([&] { host_.fade_out_sample(instId, startF, endF); }); break;
+                case SampleOp::SILENCE:  in_place([&] { host_.silence_region(instId, startF, endF); }); break;
+                case SampleOp::REVERSE:  in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
 
-                case 5: {   // UNDO — one level. Resets the window, loop and markers only when the
-                            // length changed: after NORM, a fade or REV they still fit the audio.
+                case SampleOp::UNDO: {   // one level. Resets the window, loop and markers only when
+                                         // the length changed: after NORM, a fade or REV they still fit.
                     const int lenBefore = se.totalFrames;
                     if (!host_.undo_sample(instId)) { out_of_memory(); break; }
                     refresh_view(host_.sample_length(instId) != lenBefore);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
                     break;
                 }
-                default: break;
             }
             break;
+        }
 
         // ── FX: col 2 is APPLY; the other two are dialled with A+DPAD. ───────────────────────────
         case SampleRow::FX: {

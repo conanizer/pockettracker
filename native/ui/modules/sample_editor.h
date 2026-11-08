@@ -15,6 +15,7 @@
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/help_topic.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -33,6 +34,40 @@ enum class StretchCell { DURATION, BPM, PITCH, GRAIN, PREVIEW, APPLY };
 // The rows the cursor walks, top to bottom. SLICE_AT is there only while slicing is on.
 enum class SampleRow { VIEW, EDIT, SELECTION, SLICE, SLICE_AT, OPS1, OPS2, FX, NAME, FILE };
 inline constexpr int SAMPLE_ROW_COUNT = 10;
+
+// The two rows of buttons, OPS1 then OPS2, by column: what A does, the label, the help.
+enum class SampleOp {
+    CROP, COPY, CUT, DUPL, PASTE, DEL,
+    NORM, FADE_IN, FADE_OUT, SILENCE, REVERSE, UNDO
+};
+struct SampleOpCell {
+    SampleOp    op;
+    const char* label;
+    HelpTopic   help;
+};
+inline constexpr int SAMPLE_OPS_PER_ROW = 6;
+inline constexpr SampleOpCell SAMPLE_OPS[2][SAMPLE_OPS_PER_ROW] = {
+    {{SampleOp::CROP,  "CROP",  HelpTopic::SE_OP_CROP},
+     {SampleOp::COPY,  "COPY",  HelpTopic::SE_OP_COPY},
+     {SampleOp::CUT,   "CUT",   HelpTopic::SE_OP_CUT},
+     {SampleOp::DUPL,  "DUPL",  HelpTopic::SE_OP_DUPL},
+     {SampleOp::PASTE, "PASTE", HelpTopic::SE_OP_PASTE},
+     {SampleOp::DEL,   "DEL",   HelpTopic::SE_OP_DEL}},
+    {{SampleOp::NORM,     "NORM",  HelpTopic::SE_OP_NORM},
+     {SampleOp::FADE_IN,  "FADE+", HelpTopic::SE_OP_FADE_IN},
+     {SampleOp::FADE_OUT, "FADE-", HelpTopic::SE_OP_FADE_OUT},
+     {SampleOp::SILENCE,  "SLNC",  HelpTopic::SE_OP_SILENCE},
+     {SampleOp::REVERSE,  "REV",   HelpTopic::SE_OP_REVERSE},
+     {SampleOp::UNDO,     "UNDO",  HelpTopic::SE_OP_UNDO}},
+};
+
+// The button at (row, column), or null off the two rows.
+inline const SampleOpCell* sample_op_at(SampleRow row, int column) {
+    if (column < 0 || column >= SAMPLE_OPS_PER_ROW) return nullptr;
+    if (row == SampleRow::OPS1) return &SAMPLE_OPS[0][column];
+    if (row == SampleRow::OPS2) return &SAMPLE_OPS[1][column];
+    return nullptr;
+}
 
 // The editor's session state. The audio is in the engine (only the waveform's min/max pairs are
 // here); name, path and slice markers reach the document only when saved.
@@ -223,8 +258,6 @@ public:
     static const std::vector<std::string>& fx_types();         // OTT / DUST / DRIVE / EQ / SYNC
     static const std::vector<std::string>& sync_types();       // RPITCH / TSTRETCH
     static const std::vector<std::string>& slice_methods();    // TRANSIENT / DIVIDE / OFF / MANUAL
-    static const std::vector<std::string>& ops_row1();         // CROP COPY CUT DUPL PASTE DEL
-    static const std::vector<std::string>& ops_row2();         // NORM FADE+ FADE- SLNC REV UNDO
 
     // `fxValue` means something different under each.
     static constexpr int FX_OTT   = 0;

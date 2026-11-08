@@ -65,14 +65,6 @@ const std::vector<std::string>& SampleEditorModule::slice_methods() {
     static const std::vector<std::string> v{"TRANSIENT", "DIVIDE", "OFF", "MANUAL"};
     return v;
 }
-const std::vector<std::string>& SampleEditorModule::ops_row1() {
-    static const std::vector<std::string> v{"CROP", "COPY", "CUT", "DUPL", "PASTE", "DEL"};
-    return v;
-}
-const std::vector<std::string>& SampleEditorModule::ops_row2() {
-    static const std::vector<std::string> v{"NORM", "FADE+", "FADE-", "SLNC", "REV", "UNDO"};
-    return v;
-}
 
 // ─── The rows ────────────────────────────────────────────────────────────────────────────────────
 
@@ -110,7 +102,7 @@ int SampleEditorModule::max_col(SampleRow row, int slice_method) {
         case SampleRow::SLICE:     return slice_has_parameter(slice_method) ? 1 : 0;
         case SampleRow::SLICE_AT:  return 1;
         case SampleRow::OPS1:
-        case SampleRow::OPS2:      return 5;   // six ops per row
+        case SampleRow::OPS2:      return SAMPLE_OPS_PER_ROW - 1;
         case SampleRow::FX:        return 2;   // TYPE / VALUE / APPLY
         case SampleRow::NAME:      return 0;   // the whole row is one cell
         case SampleRow::FILE:      return (slice_method == SLICE_OFF) ? 2 : 3;   // CHOP needs slices
@@ -319,13 +311,13 @@ void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, con
 }
 
 // One op row: six buttons, the one under the cursor lit.
-void draw_ops_row(Canvas& c, int x, int y, const std::vector<std::string>& ops, bool is_cur,
+void draw_ops_row(Canvas& c, int x, int y, const SampleOpCell (&ops)[SAMPLE_OPS_PER_ROW], bool is_cur,
                   int cur_col, const Theme& t) {
     const int ty   = y + TEXT_PADDING;
-    const int colW = SampleEditorModule::WIDTH / static_cast<int>(ops.size());   // ~106px
-    for (size_t i = 0; i < ops.size(); ++i) {
-        const int lx = x + static_cast<int>(i) * colW + 15;
-        draw_cursor_cell(c, ops[i], lx, ty, is_cur && cur_col == static_cast<int>(i), t.textValue, t);
+    const int colW = SampleEditorModule::WIDTH / SAMPLE_OPS_PER_ROW;   // ~106px
+    for (int i = 0; i < SAMPLE_OPS_PER_ROW; ++i) {
+        const int lx = x + i * colW + 15;
+        draw_cursor_cell(c, ops[i].label, lx, ty, is_cur && cur_col == i, t.textValue, t);
     }
 }
 
@@ -413,9 +405,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                          t.textValue, t);
     }
 
-    draw_ops_row(c, x, y + row_y(SampleRow::OPS1), ops_row1(), s.cursorRow == SampleRow::OPS1,
+    draw_ops_row(c, x, y + row_y(SampleRow::OPS1), SAMPLE_OPS[0], s.cursorRow == SampleRow::OPS1,
                  s.cursorCol, t);
-    draw_ops_row(c, x, y + row_y(SampleRow::OPS2), ops_row2(), s.cursorRow == SampleRow::OPS2,
+    draw_ops_row(c, x, y + row_y(SampleRow::OPS2), SAMPLE_OPS[1], s.cursorRow == SampleRow::OPS2,
                  s.cursorCol, t);
 
     {   // FX. Its VALUE cell is the one cell in the app with three vocabularies.
