@@ -30,12 +30,6 @@ struct LoadScope {
     InputDispatcher& d_;
 };
 
-/** A status line — the app's or the browser's own — green when `ok`, red otherwise. */
-template <class S> void set_status(S& s, std::string message, bool ok) {
-    s.statusMessage = std::move(message);
-    s.statusSuccess = ok;
-}
-
 /** B+LEFT/RIGHT through a pool of `count` items, wrapping at both ends. */
 inline int step_wrapping(int value, int delta, int count) {
     return ((value + delta) % count + count) % count;

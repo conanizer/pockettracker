@@ -98,7 +98,7 @@ struct SettingsValues {
     // the first plugged in.
     std::string midiOutDevice = "AUTO";
 
-    // Opened at boot by `InputDispatcher::boot_midi_in_port`.
+    // Opened at boot by `MidiPorts::boot_in`.
     std::string midiInDevice = "AUTO";
 
     // Signed ms; positive = MIDI leaves later than the audio.

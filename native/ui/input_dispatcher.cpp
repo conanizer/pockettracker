@@ -6,7 +6,7 @@
 
 #include "ui/cursor_move.h"
 #include "ui/helpers.h"
-#include "ui/lifecycle.h"
+#include "ui/autosave.h"
 #include "ui/song_pointer.h"
 #include "common/load_progress.h"
 
@@ -20,9 +20,9 @@ namespace pt::ui {
 
 void InputDispatcher::set_now(long long now_ms) {
     now_ms_ = now_ms;
-    run_due_sample_preview_restore();
-    run_due_autosave();
-    run_midi_hotplug();                 // before the dismiss, so its message is seen this frame
+    sampleSession_.run_due_preview_restore(now_ms_);
+    autosave_.run_due(now_ms_, s_.project_dirty());
+    midiPorts_.run_hotplug(now_ms_);    // before the dismiss, so its message is seen this frame
     run_due_status_dismiss();
     run_instrument_entry_push();
     run_selection_recency();
@@ -101,24 +101,7 @@ void InputDispatcher::run_instrument_entry_push() {
 
 // ─── The crash-recovery autosave ─────────────────────────────────────────────────────────────────
 
-void InputDispatcher::run_due_autosave() {
-    if (!autosavePending_ || now_ms_ < autosaveDueAtMs_) return;
-    autosavePending_ = false;
-
-    // ⚠️ A save inside the window does not cancel the deadline; firing anyway would bring the file
-    // back and a false RECOVER WORK? with it.
-    if (!s_.project_dirty()) return;
-
-    before_save();
-    autosave_write(host_, fs_);   // a failure is silent
-}
-
-void InputDispatcher::flush_autosave() {
-    autosavePending_ = false;
-    if (!s_.project_dirty()) return;
-    before_save();
-    autosave_write(host_, fs_);
-}
+void InputDispatcher::flush_autosave() { autosave_.flush(s_.project_dirty()); }
 
 // ─── The status lines' auto-dismiss ──────────────────────────────────────────────────────────────
 
@@ -234,9 +217,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
 void InputDispatcher::mark_dirty_and_arm_autosave() {
     // ⚠️ "The document changed" and nothing else — never bump it to force a redraw.
     s_.projectVersion++;
-
-    autosavePending_ = true;   // re-armed: it writes 3 s after the last edit
-    autosaveDueAtMs_ = now_ms_ + AUTOSAVE_DEBOUNCE_MS;
+    autosave_.arm(now_ms_);
 }
 
 void InputDispatcher::mark_modified(bool table_touched) {

@@ -21,16 +21,16 @@ GestureResult InputDispatcher::stretch_editor_layer(Gesture g) {
 
         case Gesture::A:
             if (se.stretchCursor == StretchCell::PREVIEW) {
-                sample_editor_audition();
+                sampleSession_.audition(now_ms_);
             } else if (se.stretchCursor == StretchCell::APPLY) {
                 se.stretchOpen = false;
                 before_long_operation();
-                apply_sample_sync();
+                sampleSession_.apply_sync();
             }
             break;
 
         // The editor's own START: it plays the sample as these settings would leave it.
-        case Gesture::START: sample_editor_audition(); break;
+        case Gesture::START: sampleSession_.audition(now_ms_); break;
 
         // The settings stay for APPLY on the FX row.
         case Gesture::B: se.stretchOpen = false; break;

@@ -110,8 +110,7 @@ void InputDispatcher::project_action() {
             if (!s_.caps.midi) break;
 
             // ⚠️ Both port lists are read on the way in — a list is only true when read.
-            refresh_midi_devices();
-            refresh_midi_in_devices();
+            midiPorts_.refresh();
             s_.midiStatusText.clear();   // last visit's "TEST SENT" is not this visit's news
             s_.midiReturnScreen = s_.currentScreen;
             go_to_screen(s_, {ScreenType::MIDI, s_.previousColumn});
@@ -138,37 +137,10 @@ void InputDispatcher::project_action() {
 }
 
 void InputDispatcher::tap_tempo() {
-    const long long now = now_ms_;
-
-    // A gap this long is a pause, not a beat — start counting again from this tap.
-    if (tapTempoLastMs_ == 0 || now - tapTempoLastMs_ > TAP_TEMPO_TIMEOUT_MS) {
-        tapTempoLastMs_ = now;
-        tapTempoCount_  = 0;
-        return;
-    }
-
-    const long long gap = now - tapTempoLastMs_;
-    // A bounce: keep the anchor, so the next tap measures from the last real one.
-    if (gap < TAP_TEMPO_MIN_MS) return;
-    tapTempoLastMs_ = now;
-
-    // Shift the ring, newest last; four entries is cheaper than a write cursor.
-    for (int i = TAP_TEMPO_KEEP - 1; i > 0; --i) tapTempoGaps_[i] = tapTempoGaps_[i - 1];
-    tapTempoGaps_[0] = gap;
-    if (tapTempoCount_ < TAP_TEMPO_KEEP) ++tapTempoCount_;
-
-    long long sum = 0;
-    for (int i = 0; i < tapTempoCount_; ++i) sum += tapTempoGaps_[i];
-    const long long meanMs = sum / tapTempoCount_;
-    if (meanMs <= 0) return;
-
-    // Rounded, not truncated, so a 500 ms mean reads 120 and not 119.
-    const int bpm = static_cast<int>((60000 + meanMs / 2) / meanMs);
-
-    Project& p = host_.edit_project();
-    const int clamped = std::clamp(bpm, 20, 999);
-    if (p.tempo == clamped) return;   // no edit, so no dirty bump
-    p.tempo = clamped;
+    const int bpm = tapTempo_.tap(now_ms_);
+    Project& p    = host_.edit_project();
+    if (bpm == 0 || p.tempo == bpm) return;   // no edit, so no dirty bump
+    p.tempo = bpm;
     mark_modified();
 }
 

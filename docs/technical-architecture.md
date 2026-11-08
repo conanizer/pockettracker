@@ -130,6 +130,8 @@ native/                            The portable program
     ├── dispatch/                    …its gesture bodies, and route.cpp: the layer stack and the
     │   ├── layers/                  screen table. One file per modal (dialogs, editors, pickers)
     │   └── screens/                 and per screen: its buttons, cursor and edits
+    ├── midi_ports.*, autosave.*,    What the dispatcher holds but is not a gesture: the MIDI ports,
+    │   sample_edit_session.*        the crash autosave, the sample editor's operations on the sample
     ├── selection.h / clipboard.*    Multi-cell selection and copy/paste
     ├── layout.cpp / .h              Screen composition, top strip, right bar
     ├── theme.h / theme_io.h         Palettes and the theme file

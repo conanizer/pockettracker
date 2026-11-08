@@ -20,7 +20,7 @@ class MidiInBase : public songcore::IMidiIn {
   public:
     // An index, a case-insensitive name fragment, or empty/"list" → a device NAME ("" if none),
     // printing the device list first. ⚠️ It does not open (unlike `MidiOutBase::open_by_spec`): only
-    // the dispatcher's `boot_midi_in_port` opens, once the sink exists.
+    // `MidiPorts::boot_in` opens, once the sink exists.
     std::string resolve_spec(const std::string& spec);
 
     // Bytes the backend delivered, ever, whether or not anything drained them.

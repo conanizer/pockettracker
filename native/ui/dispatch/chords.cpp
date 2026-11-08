@@ -50,7 +50,7 @@ void InputDispatcher::on_a_released() {
 
 void InputDispatcher::on_a_deferred() {
     // The mapper is holding this press; record the playhead now, since it will have moved by release.
-    samplePending_.sliceTapPlayhead = on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f;
+    sampleSession_.note_tap_playhead(on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f);
 }
 
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────

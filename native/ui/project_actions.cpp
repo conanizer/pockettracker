@@ -10,7 +10,7 @@
 #include "common/byte_source.h"   // pt_fopen / pt_remove / pt_rename
 #include "songcore/project_io.h"
 #include "songcore/render.h"
-#include "ui/lifecycle.h"
+#include "ui/autosave.h"
 
 namespace pt::ui {
 

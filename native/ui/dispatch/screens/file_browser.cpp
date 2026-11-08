@@ -434,7 +434,7 @@ void InputDispatcher::browser_confirm() {
         // Back into the editor on the new audio (previousScreen is the editor's return target), rebuilt.
         close_file_browser();
         s_.currentScreen = ScreenType::SAMPLE_EDITOR;
-        init_sample_editor_state();
+        sampleSession_.init();
         return;
     }
 

@@ -42,13 +42,13 @@ void InputDispatcher::midi_action() {
         case MidiRow::PANIC:
             // Every owed note-off, through the consumer — the panic STOP sends.
             host_.midi_out().panic();
-            s_.midiStatusText = port_open() ? "PANIC SENT" : "NO PORT";
+            s_.midiStatusText = midiPorts_.out_open() ? "PANIC SENT" : "NO PORT";
             break;
 
         case MidiRow::TEST: {
             // ⚠️ Straight to the port, past the sequencer: a silent TEST must mean "no cable". The
             // note-off follows at once.
-            if (!port_open()) { s_.midiStatusText = "NO PORT"; break; }
+            if (!midiPorts_.out_open()) { s_.midiStatusText = "NO PORT"; break; }
             const uint8_t on[3]  = {0x90, 60, 100};   // C-4, channel 1, mf
             const uint8_t off[3] = {0x80, 60, 0};
             s_.midiOut->send(on, 3);
@@ -99,12 +99,12 @@ void InputDispatcher::midi_map_action() {
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
 
 CursorContext InputDispatcher::midi_context() const {
-    MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
+    MidiState ms{*s_.project, s_.settings, s_.midiOutDeviceNames, s_.midiInDeviceNames};
     ms.lastCcChannel  = s_.midiInCcChannel;
     ms.clockBpm       = s_.midiClockBpm;
     ms.cursorRow      = s_.midiCursorRow;
     ms.cursorColumn   = s_.midiCursorColumn;
-    ms.deviceIndex    = s_.midiDeviceIndex;
+    ms.deviceIndex    = s_.midiOutDeviceIndex;
     ms.inDeviceIndex  = s_.midiInDeviceIndex;
     ms.autoOffsetMs   = s_.midiAutoOffsetMs;
     ms.caps           = s_.caps;
@@ -117,10 +117,10 @@ bool InputDispatcher::midi_edit(const InputAction& action) {
     Project& p = host_.edit_project();
     const MidiInputResult r =
         midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
-                           s_.midiDeviceNames, s_.midiInDeviceNames, action);
+                           s_.midiOutDeviceNames, s_.midiInDeviceNames, action);
     // The side effects the module cannot perform — it has no port.
-    if (r.deviceChanged)   apply_midi_device();
-    if (r.inDeviceChanged) apply_midi_in_device();
+    if (r.deviceChanged)   midiPorts_.apply_out();
+    if (r.inDeviceChanged) midiPorts_.apply_in();
     if (r.offsetChanged)   host_.set_midi_offset_ms(
                                midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
     if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);

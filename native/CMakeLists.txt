@@ -330,7 +330,6 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/send_editor.cpp
         ui/dispatch/layers/stretch_editor.cpp
         ui/dispatch/layers/theme.cpp
-        ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
         ui/dispatch/screens/file_browser.cpp
         ui/dispatch/screens/instrument.cpp
@@ -342,7 +341,9 @@ add_library(pt-ui STATIC
         ui/dispatch/screens/sequencer.cpp
         ui/dispatch/sub_screens.cpp
         ui/layout.cpp
-        ui/lifecycle.cpp
+        ui/autosave.cpp
+        ui/midi_ports.cpp
+        ui/sample_edit_session.cpp
         ui/std_filesystem.cpp
         ui/settings_store.cpp
         ui/folder_config.cpp

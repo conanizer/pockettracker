@@ -622,7 +622,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        // Rows 3..8: A+DPAD drags a selection edge — the dispatcher's nudge_selection_edge.
+        // Rows 3..8: A+DPAD drags a selection edge — `SampleEditSession::nudge_selection_edge`.
         case 3: case 4: case 5: case 6: case 7: case 8:
             return cc::none();
 
@@ -637,7 +637,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
             }
 
         case 11:
-            // Col 1, the position, has no cell: A+DPAD drags the marker (nudge_slice_marker).
+            // Col 1, the position, has no cell: A+DPAD drags the marker (`SampleEditSession::nudge_slice_marker`).
             if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF)
                 return cc::hex_byte(s.sliceIndex, 0, s.slice_index_ceiling());
             return cc::none();

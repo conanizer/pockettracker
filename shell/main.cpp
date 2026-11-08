@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
     // Dev overrides (the device pick lives in settings.json):
     //   POCKETTRACKER_MIDI_OUT=<index | name fragment>   that port; `list` prints the devices
     //   POCKETTRACKER_MIDI_OFFSET_MS=<-999..999>         MIDI later (+) or earlier (-) than the audio
-    // ⚠️ The override does not open the port: it resolves to a NAME, and `boot_midi_port()` opens it
+    // ⚠️ The override does not open the port: it resolves to a NAME, and `MidiPorts::boot_out()` opens it
     // like the OUTPUT row does — one owner of "which port is open".
 #ifdef PT_HAS_PLATFORM_MIDI_OUT
     ptshell::PlatformMidiOut midiOut;

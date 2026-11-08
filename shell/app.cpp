@@ -288,7 +288,7 @@ bool derive_midi_auto_offset(AudioBackend& audio, const AudioEngine& engine, ui:
 // Opens the ports the settings name — the same code as the MIDI screen's rows — one console line each.
 void open_midi_ports(const AppConfig& cfg, SongcoreHost& host, ui::InputDispatcher& dispatch,
                      const ui::AppState& state) {
-    dispatch.boot_midi_port();
+    dispatch.midi_ports().boot_out();
     if (cfg.midiOut) {
         // ⚠️ The offset in force, which under AUTO is not the stored one.
         std::printf("midi:    OUT %s (offset %+d ms%s, sync %s)\n",
@@ -299,7 +299,7 @@ void open_midi_ports(const AppConfig& cfg, SongcoreHost& host, ui::InputDispatch
     }
 
     // One line whenever a backend exists: "not plugged in" vs "refused" vs "not compiled in".
-    dispatch.boot_midi_in_port();
+    dispatch.midi_ports().boot_in();
     if (cfg.midiIn) {
         std::printf("midi:    IN  %s (%d port(s) enumerated)\n",
                     cfg.midiIn->is_open() ? state.midiInOpenName.c_str() : "OFF",

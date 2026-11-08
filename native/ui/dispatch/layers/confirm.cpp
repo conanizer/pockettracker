@@ -3,7 +3,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "ui/lifecycle.h"        // the crash-recovery autosave — clear / load
+#include "ui/autosave.h"        // the crash-recovery autosave — clear / load
 
 #include <algorithm>
 #include <string>

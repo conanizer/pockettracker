@@ -83,7 +83,7 @@ struct AppConfig {
     std::string         midiOutDevice;   // empty = no override; else the resolved device NAME
 
     // The MIDI input port, borrowed and nullable. ⚠️ The shell never opens it, not even for the env
-    // override: bytes would arrive before `SongcoreHost` exists. `InputDispatcher::boot_midi_in_port`
+    // override: bytes would arrive before `SongcoreHost` exists. `MidiPorts::boot_in`
     // opens the resolved NAME. A `MidiInBase*` so the exit report can ask how many bytes it received.
     MidiInBase* midiIn = nullptr;
     std::string midiInDevice;    // empty = no override; else the resolved device NAME

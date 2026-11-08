@@ -1,4 +1,4 @@
-#include "ui/lifecycle.h"
+#include "ui/autosave.h"
 
 #include "songcore/project_io.h"   // serialize_project
 

@@ -30,6 +30,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pt::ui {
@@ -209,8 +210,8 @@ struct AppState {
     songcore::IMidiOut* midiOut = nullptr;
 
     // The port list after "OFF" and "AUTO", rebuilt on every entry to the screen (hot-plug).
-    std::vector<std::string> midiDeviceNames{"OFF", "AUTO"};
-    int                      midiDeviceIndex = 0;
+    std::vector<std::string> midiOutDeviceNames{"OFF", "AUTO"};
+    int                      midiOutDeviceIndex = 0;
     // The device actually open, "" for none — under AUTO it differs from the setting.
     std::string              midiOutOpenName;
 
@@ -406,6 +407,12 @@ inline bool full_screen_module(const AppState& s) {
 inline void scroll_song_to_row(AppState& s, int row) {
     if (row < s.songScrollPosition)            s.songScrollPosition = row;
     else if (row >= s.songScrollPosition + 16) s.songScrollPosition = row - 15;
+}
+
+// A status line — the app's or the browser's own — green when `ok`, red otherwise.
+template <class S> void set_status(S& s, std::string message, bool ok) {
+    s.statusMessage = std::move(message);
+    s.statusSuccess = ok;
 }
 
 }  // namespace pt::ui

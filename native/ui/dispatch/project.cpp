@@ -2,7 +2,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load
+#include "ui/autosave.h"        // the crash-recovery autosave — write / clear / load
 #include "ui/navigation.h"
 #include "ui/song_pointer.h"
 
@@ -55,9 +55,7 @@ void InputDispatcher::start_new_project() {
     s_.savedProjectVersion = 0;
     s_.projectPath.clear();
 
-    // …and nothing to recover: the autosave and its pending deadline go too.
-    autosavePending_ = false;
-    autosave_clear(fs_);
+    autosave_.discard();   // …and nothing to recover
 
     reset_editing_context();
 
@@ -71,8 +69,7 @@ void InputDispatcher::load_project_done(const std::string& path) {
     s_.savedProjectVersion = 0;
     s_.projectPath         = path;
 
-    autosavePending_ = false;   // …or it fires 3 s from now and re-creates the file this just deleted
-    autosave_clear(fs_);
+    autosave_.discard();
 
     reset_editing_context();
 

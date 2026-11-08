@@ -288,12 +288,12 @@ SettingsState settings_state(const AppState& s) {
 }
 
 MidiState midi_state(const AppState& s) {
-    MidiState ms{*s.project, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
+    MidiState ms{*s.project, s.settings, s.midiOutDeviceNames, s.midiInDeviceNames};
     ms.lastCcChannel = s.midiInCcChannel;
     ms.clockBpm      = s.midiClockBpm;
     ms.cursorRow     = s.midiCursorRow;
     ms.cursorColumn  = s.midiCursorColumn;
-    ms.deviceIndex   = s.midiDeviceIndex;
+    ms.deviceIndex   = s.midiOutDeviceIndex;
     ms.inDeviceIndex = s.midiInDeviceIndex;
     ms.outOpenName   = s.midiOutOpenName;
     ms.inOpenName    = s.midiInOpenName;

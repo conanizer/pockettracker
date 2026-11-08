@@ -14,11 +14,13 @@
 #include "songcore/host.h"
 #include "songcore/midi_map.h"
 #include "ui/app_state.h"
+#include "ui/autosave.h"
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
 #include "ui/dispatch/gesture.h"
 #include "ui/song_pointer.h"     // NAV = SONG — the ctor clamps the pointer onto a real cell
 #include "ui/filesystem.h"
+#include "ui/midi_ports.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/eq_editor.h"
@@ -40,6 +42,8 @@
 #include "ui/modules/table_editor.h"
 #include "ui/phrase_fill.h"
 #include "ui/project_actions.h"
+#include "ui/sample_edit_session.h"
+#include "ui/tap_tempo.h"
 
 #include <functional>
 
@@ -78,7 +82,7 @@ class InputDispatcher {
     // ⚠️ It goes false on the frame that must be drawn: the caller owes the active→idle edge a redraw.
     // A new screen-changing timer belongs in this expression.
     bool has_pending_timed_work() const {
-        return statusDismissAtMs_ != 0 || browserStatusDismissAtMs_ != 0 || autosavePending_;
+        return statusDismissAtMs_ != 0 || browserStatusDismissAtMs_ != 0 || autosave_.pending();
     }
 
     // ── The lifecycle: what only the shell knows. The autosave is otherwise internal ──
@@ -306,13 +310,8 @@ class InputDispatcher {
     // A load answers no button: the pump reads the cancel itself.
     GestureResult loading_layer(Gesture) { return GestureResult::TAKEN; }
 
-    // Open the MIDI port the settings name, once at boot — the same calls the MIDI screen makes.
-    // A port already open (the dev override) is left alone.
-    void boot_midi_port();
-
-    // The same for the input port.
-    // ⚠️ Sink and open are paired here: an open port with no sink drops every byte.
-    void boot_midi_in_port();
+    // The shell opens the ports through it at boot.
+    MidiPorts& midi_ports() { return midiPorts_; }
 
     // The app is back in front: re-list the file browser if it is up — other apps (and Android's folder
     // picker) change directories meanwhile. Only Android and iOS send the event.
@@ -323,13 +322,7 @@ class InputDispatcher {
     songcore::SongcoreHost& host_;
     FileSystem&             fs_;
     long long               now_ms_ = 0;
-    // ── Tap tempo (PROJECT > TEMPO, plain A) ─────────────────────────────────────────────────────
-    static constexpr int       TAP_TEMPO_KEEP       = 4;      // gaps averaged
-    static constexpr long long TAP_TEMPO_TIMEOUT_MS = 3000;   // one beat at 20 BPM; longer starts anew
-    static constexpr long long TAP_TEMPO_MIN_MS     = 60;     // shorter is a bouncing button
-    long long tapTempoLastMs_ = 0;                    // 0 = no tap yet this count
-    long long tapTempoGaps_[TAP_TEMPO_KEEP] = {0};    // ring of the most recent gaps, ms
-    int       tapTempoCount_ = 0;                     // how many are filled (capped at KEEP)
+    TapTempo                tapTempo_{};
 
     long long               loadStartMs_ = 0;       // when the load in flight opened
     long long               lastLoadPaintMs_ = 0;   // …and when it was last drawn
@@ -349,14 +342,8 @@ class InputDispatcher {
     // ⚠️ A handler here is one step, always. A held direction arrives from the shell as more presses,
     // closer together — never a bigger step.
 
-    // ── The autosave ─────────────────────────────────────────────────────────────────────────────
-    // ⚠️ Re-armed on every edit, so it writes 3 s after the last change; a held A+UP edits every 100 ms.
-    bool      autosavePending_ = false;
-    long long autosaveDueAtMs_ = 0;
-
-    static constexpr long long AUTOSAVE_DEBOUNCE_MS = 3000;
-
-    void run_due_autosave();
+    Autosave  autosave_{host_, fs_};
+    MidiPorts midiPorts_{s_, host_};
 
     // ── The status lines' auto-dismiss ───────────────────────────────────────────────────────────
     // A message clears STATUS_DISMISS_MS after it is set. Many sites assign the field, so set_now
@@ -662,9 +649,6 @@ class InputDispatcher {
     }
     void close_theme_editor() { s_.themeEditor = ThemeEditorState{}; }
 
-    // A backend can exist with no port open; "TEST SENT" into a closed one would lie.
-    bool port_open() const { return s_.midiOut != nullptr && s_.midiOut->is_open(); }
-
     // UP/DOWN walk the rows, LEFT/RIGHT the row's channels; both wrap.
     void theme_move_cursor(int d_row, int d_channel);
 
@@ -683,42 +667,6 @@ class InputDispatcher {
     // Write `<dir>/<name>.ptt` (the keyboard's THEME_SAVE).
     // ⚠️ `dir` is a parameter because `qwerty_apply()` clears the keyboard state before dispatching.
     void save_theme_as(const std::string& dir, const std::string& typed_text);
-
-    // ── MIDI ports ───────────────────────────────────────────────────────────────────────────────
-    // Re-list the ports and re-resolve the saved device name (screen entry, and once a second). A name
-    // not in the list shows OFF: the row shows what is open, never what was once wanted.
-    void refresh_midi_devices();
-
-    // Make the port match `settings.midiOutDevice`.
-    // ⚠️ Panics first: the device changes under the same `IMidiOut`, so the owed note-offs must go out
-    // before the old port closes.
-    void apply_midi_device();
-
-    void refresh_midi_in_devices();
-
-    // Make the input port match `settings.midiInDevice`. ⚠️ The order matters: unhook the sink before
-    // closing, reset the parser between (stale running status), hook the sink before opening.
-    void apply_midi_in_device();
-
-    // Close the port and forget the device. OUT panics first.
-    void close_midi_out();
-    void close_midi_in();
-    // Open what the setting asks for (a device, or AUTO's first); false if nothing took.
-    bool open_midi_out();
-    bool open_midi_in();
-
-    // Once a second: close a device that has gone, open one that has arrived.
-    void run_midi_hotplug();
-
-    static constexpr long long MIDI_SCAN_MS = 1000;
-    long long                  midiScanDueMs_ = 0;
-    // Devices that refused to open (another app holds them) — not retried until they leave the list.
-    std::vector<std::string>   midiOutRefused_;
-    std::vector<std::string>   midiInRefused_;
-
-    // MIDI thru on a loopback port (listening where we send) is a feedback loop; derived from the two
-    // names the screen shows, called from both device rows.
-    void update_midi_thru();
 
     // NEW, with the engine sync a fresh project needs.
     void start_new_project();
@@ -818,7 +766,7 @@ class InputDispatcher {
     // A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT.
     void project_action();
 
-    // A on the TEMPO row, in time: averages the last `TAP_TEMPO_KEEP` gaps. The first tap sets nothing.
+    // A on the TEMPO row, in time: the tempo of the last few taps. The first tap sets nothing.
     void tap_tempo();
     // A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) answer it.
     void settings_action();
@@ -980,6 +928,8 @@ class InputDispatcher {
     void save_delay_preset_as(const std::string& dir, const std::string& typed_text);
 
     // ── The sample editor (ui/dispatch/screens/sample_editor.cpp) ────────────────────────────────
+    // What its buttons do to the sample is `sampleSession_`'s; the screen, the keyboard and the browser
+    // it opens are here.
 
     bool on_sample_editor() const { return s_.currentScreen == ScreenType::SAMPLE_EDITOR; }
 
@@ -991,10 +941,6 @@ class InputDispatcher {
     bool sample_close_open() const { return on_sample_editor() && s_.sampleEditor.showConfirmClose; }
     GestureResult sample_close_layer(Gesture g);
 
-    // START toggles the audition of the selection, with the FX row's effect on it (SYNC included).
-    // The one audition a plain press does not silence.
-    void sample_editor_audition();
-
     // Rows 3..8: the D-pad drags the selection instead of moving a cursor.
     bool on_sample_selection_row() const {
         return on_sample_editor() && s_.sampleEditor.cursorRow >= 3 && s_.sampleEditor.cursorRow <= 8;
@@ -1002,15 +948,6 @@ class InputDispatcher {
 
     // INSTRUMENT's EDIT button. Samplers only.
     void open_sample_editor();
-    // B on an unmodified sample: free the undo, drop the scratch slots, go back.
-    void close_sample_editor();
-
-    // Build the editor's session from the sample the engine holds; separate because the editor's LOAD
-    // re-enters on different audio. ⚠️ Must not touch `previousScreen` (the editor's return target).
-    void init_sample_editor_state();
-
-    // A+DPAD on rows 3..8 (why those rows have no CursorContext).
-    void nudge_selection_edge(int64_t delta);
 
     // Row 11's POSITION cell: A+DPAD drags the boundary under the cursor. Col 0 keeps choosing the marker.
     bool on_sample_slice_marker_row() const {
@@ -1019,8 +956,6 @@ class InputDispatcher {
                s_.sampleEditor.sliceMethod != SampleEditorModule::SLICE_OFF;
     }
 
-    void nudge_slice_marker(int64_t delta);
-
     // Row 11 under MANUAL: a plain A is the chop tap, held by the mapper until release.
     // ⚠️ Every other gesture here starts with A held; a tap on the press would add an unasked boundary.
     bool on_slice_tap_cell() const {
@@ -1028,30 +963,8 @@ class InputDispatcher {
                s_.sampleEditor.sliceMethod == SampleEditorModule::SLICE_MANUAL;
     }
 
-    // Put the selection on the slice row 11's cursor points at; every boundary gesture ends here.
-    void select_current_slice();
-
-    // Copy the method's computed boundaries into the hand-placed list, so a nudge has a home.
-    void materialise_manual_markers();
-
-    // A+B on row 11: the marker back where its method would put it.
-    void reset_slice_marker();
-
-    // A on row 11 under MANUAL: cut a boundary at the playhead — START, listen, tap on each hit.
-    void tap_slice_marker();
-
-    // RATE and BIT rebuild the buffer; false (with a message) when memory was refused.
-    bool apply_sample_rate_and_bits();
-
-    // A on rows 13/14/16/18/19 — the ops, the FX apply, the name, the save buttons.
+    // A on rows 11/13/14/16/18/19 — the tap, the ops, the FX apply, the name, the save buttons.
     void sample_editor_confirm();
-
-    // What SYNC would do to the sample now (NONE off SYNC, or when it already fits). APPLY and the
-    // audition both ask here, so START plays what APPLY will write.
-    songcore::SampleSync planned_sample_sync() const;
-
-    // SYNC's APPLY: fit the sample to DURATION by RPITCH or TSTRETCH. The pending PITCH is spent.
-    void apply_sample_sync();
 
     // ── The TSTRETCH box (ui/dispatch/layers/stretch_editor.cpp) ─────────────────────────────────
 
@@ -1060,43 +973,7 @@ class InputDispatcher {
     void open_stretch_editor();
     void stretch_editor_edit(InputAction (*fn)(const CursorContext&));
 
-    // Bake the pending pitch into the buffer and rescale everything in frames — every save calls it,
-    // since a sample is saved as it sounds. False (with a message) when memory was refused: no save.
-    bool bake_pending_pitch();
-
-    // The slice boundaries as WAV cue points: the markers, or DIVIDE's computed cuts.
-    std::vector<int> compute_slice_cue_points() const;
-
-    // Re-read length and waveform after an op. `reset_selection`: the length changed, so the selection,
-    // the sample and loop windows and ⚠️ every slice marker are reset, not clamped.
-    void refresh_sample_view(bool reset_selection);
-
-    // SAVE / SAVE-AS / OVERWRITE: write the WAV, adopt it, leave the editor. False: nothing written.
-    bool save_sample_to(const std::string& path, bool adopt_name);
-
-    // CHOP: every slice to `Samples/Chops/<name>/` as its own WAV.
-    void sample_editor_chop();
-
-    // The slice (start, end) pairs the current method defines.
-    std::vector<std::pair<int64_t, int64_t>> current_slices() const;
-
-    // ⚠️ The audition's deferred half: the preview's window and stripped EQ, sends and mods are read
-    // when the voice triggers, so they are restored later. A second START runs it at once (`force`),
-    // or the first restore would undo the second.
-    void run_due_sample_preview_restore(bool force = false);
-
-    // What the editor's buttons leave for later (not drawn, so not in `s_.sampleEditor`).
-    struct SamplePending {
-        bool      previewRestore     = false;   // run_due_sample_preview_restore
-        long long previewRestoreAtMs = 0;
-        int       previewRestoreInst = 0;
-
-        // The playhead when A went down on the tap cell (0..1, −1 = nothing sounding). Consumed by
-        // `tap_slice_marker`, so a press that became a combo leaves nothing.
-        float sliceTapPlayhead = -1.0f;
-    };
-    SamplePending samplePending_{};
-
+    SampleEditSession  sampleSession_{s_, host_, fs_, [this] { mark_modified(); }};
     SampleEditorModule sample_{};
 };
 
