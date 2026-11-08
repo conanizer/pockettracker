@@ -16,90 +16,11 @@
 
 namespace songcore {
 
-// ⚠️ The table engine keeps its own copy of the effect codes (`audio-defs.h`); this is the one place
-// both lists are visible, so they are made to agree here.
-static_assert(::FX_HOP    == FX_HOP,    "audio-defs.h FX_HOP has drifted from effects.h");
-static_assert(::FX_TIC    == FX_TIC,    "audio-defs.h FX_TIC has drifted from effects.h");
-static_assert(::FX_KILL   == FX_KILL,   "audio-defs.h FX_KILL has drifted from effects.h");
-static_assert(::FX_OFFSET == FX_OFFSET, "audio-defs.h FX_OFFSET has drifted from effects.h");
-static_assert(::FX_THO    == FX_THO,    "audio-defs.h FX_THO has drifted from effects.h");
-static_assert(::FX_VOLUME == FX_VOLUME, "audio-defs.h FX_VOLUME has drifted from effects.h");
-static_assert(::FX_EQN    == FX_EQN,    "audio-defs.h FX_EQN has drifted from effects.h");
-static_assert(::FX_EQM    == FX_EQM,    "audio-defs.h FX_EQM has drifted from effects.h");
-static_assert(::FX_CUT    == FX_CUT,    "audio-defs.h FX_CUT has drifted from effects.h");
-static_assert(::FX_RES    == FX_RES,    "audio-defs.h FX_RES has drifted from effects.h");
-static_assert(::FX_LPF    == FX_LPF,    "audio-defs.h FX_LPF has drifted from effects.h");
-static_assert(::FX_HPF    == FX_HPF,    "audio-defs.h FX_HPF has drifted from effects.h");
-static_assert(::FX_BPF    == FX_BPF,    "audio-defs.h FX_BPF has drifted from effects.h");
-static_assert(::FX_DRV    == FX_DRV,    "audio-defs.h FX_DRV has drifted from effects.h");
-static_assert(::FX_CRU    == FX_CRU,    "audio-defs.h FX_CRU has drifted from effects.h");
-static_assert(::FX_FIN    == FX_FIN,    "audio-defs.h FX_FIN has drifted from effects.h");
-static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from effects.h");
-static_assert(::FX_TIM    == FX_TIM,    "audio-defs.h FX_TIM has drifted from effects.h");
-static_assert(::FX_RND    == FX_RND,    "audio-defs.h FX_RND has drifted from effects.h");
-static_assert(::FX_PAN    == FX_PAN,    "audio-defs.h FX_PAN has drifted from effects.h");
-static_assert(::FX_CHD    == FX_CHD,    "audio-defs.h FX_CHD has drifted from effects.h");
-static_assert(::FX_ARC    == FX_ARC,    "audio-defs.h FX_ARC has drifted from effects.h");
-static_assert(::FX_ARPEGGIO == FX_ARPEGGIO, "audio-defs.h FX_ARPEGGIO has drifted from effects.h");
-static_assert(::FX_RNL    == FX_RNL,    "audio-defs.h FX_RNL has drifted from effects.h");
-static_assert(::FX_CHA    == FX_CHA,    "audio-defs.h FX_CHA has drifted from effects.h");
-static_assert(::FX_INS    == FX_INS,    "audio-defs.h FX_INS has drifted from effects.h");
+// The engine's table rolls cap a command where the editor does.
 static_assert(::tableFxCeiling(FX_INS) == effect_value_max(FX_INS) &&
               ::tableFxCeiling(FX_EQN) == effect_value_max(FX_EQN) &&
               ::tableFxCeiling(FX_CUT) == effect_value_max(FX_CUT),
               "audio-defs.h tableFxCeiling has drifted from effect_value_max");
-
-// CRU's nibble split is spelled on both sides of the seam too; checked over every byte.
-constexpr bool crush_split_matches_the_engine() {
-    for (int v = 0; v <= 255; ++v)
-        if (::crushBitsOf(v) != crush_cmd_bits(v) ||
-            ::crushDownsampleOf(v) != crush_cmd_downsample(v)) return false;
-    return true;
-}
-static_assert(crush_split_matches_the_engine(),
-              "audio-defs.h's CRU nibble split has drifted from effects.h's");
-
-// …and FIN's semitones, which MIDI out bends by.
-constexpr bool fine_tune_matches_the_engine() {
-    for (int v = 0; v <= 255; ++v)
-        if (::fineTuneSemitonesOf(v) != fine_tune_semitones(v)) return false;
-    return true;
-}
-static_assert(fine_tune_matches_the_engine(),
-              "audio-defs.h's FIN semitones have drifted from effects.h's");
-
-// …and table_automation.h's literals, in both directions.
-static_assert(table_automation::FX_AUS_CODE == FX_AUS,
-              "table_automation.h AUS has drifted from effects.h");
-static_assert(table_automation::FX_AUF_CODE == FX_AUF,
-              "table_automation.h AUF has drifted from effects.h");
-static_assert(table_automation::EQ_PRESET_SLOTS == POOL_EQPRESETS,
-              "table_automation.h's preset-slot ceiling has drifted from the pool size");
-
-constexpr bool table_arms_match_the_engine() {
-    for (int i = 0; i < table_automation::ARM_COUNT; ++i) {
-        const int c = table_automation::ARMS[i].code;
-        if (c != ::FX_HOP && c != ::FX_TIC && c != ::FX_KILL && c != ::FX_OFFSET &&
-            c != ::FX_THO && c != ::FX_VOLUME && c != ::FX_EQN && c != ::FX_EQM &&
-            c != ::FX_CUT && c != ::FX_RES &&
-            c != ::FX_LPF && c != ::FX_HPF && c != ::FX_BPF &&
-            c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
-            c != ::FX_LPO && c != ::FX_TIM && c != ::FX_PAN) return false;
-    }
-    return table_automation::has_arm(::FX_HOP)    && table_automation::has_arm(::FX_TIC)  &&
-           table_automation::has_arm(::FX_KILL)   && table_automation::has_arm(::FX_OFFSET) &&
-           table_automation::has_arm(::FX_THO)    && table_automation::has_arm(::FX_VOLUME) &&
-           table_automation::has_arm(::FX_EQN)    && table_automation::has_arm(::FX_EQM)  &&
-           table_automation::has_arm(::FX_CUT)    && table_automation::has_arm(::FX_RES)  &&
-           table_automation::has_arm(::FX_LPF)    && table_automation::has_arm(::FX_HPF)  &&
-           table_automation::has_arm(::FX_BPF)    &&
-           table_automation::has_arm(::FX_DRV)    && table_automation::has_arm(::FX_CRU)  &&
-           table_automation::has_arm(::FX_FIN)    && table_automation::has_arm(::FX_LPO) &&
-           table_automation::has_arm(::FX_TIM)    && table_automation::has_arm(::FX_PAN);
-}
-static_assert(table_arms_match_the_engine(),
-              "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
-              "has an effect the other does not");
 
 // The `rampable` / `eqPreset` flags are derived from the registry, not chosen: a wrong one fails here.
 constexpr bool table_arm_flags_match_the_registry() {

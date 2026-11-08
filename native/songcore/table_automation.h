@@ -13,8 +13,8 @@
 
 namespace table_automation {
 
-// ⚠️ The codes are literals (this header sees neither side's constants); `engine_consumer.h` asserts
-// every row, flags included, against both the engine's arms and the automation registry.
+// The commands a table row runs. `engine_consumer.h` checks every row's flags against the automation
+// registry.
 struct Arm {
     int  code;
     bool rampable;   // the registry admits it → a table AUS to its right can ramp it
@@ -22,30 +22,28 @@ struct Arm {
 };
 
 inline constexpr Arm ARMS[] = {
-    { 0x08, false, false },  // HOP
-    { 0x09, false, false },  // TIC
-    { 0x0B, false, false },  // KIL
-    { 0x0F, false, false },  // OFF — no CC id and no absolute path, so not in the registry
-    { 0x15, false, false },  // THO
-    { 0x16, true,  false },  // VOL
-    { 0x1F, true,  false },  // PAN
-    { 0x23, true,  true  },  // EQN
-    { 0x24, true,  true  },  // EQM
-    { 0x2F, true,  false },  // CUT
-    { 0x30, true,  false },  // RES
-    { 0x33, true,  false },  // LPF
-    { 0x34, true,  false },  // HPF
-    { 0x35, true,  false },  // BPF
-    { 0x37, true,  false },  // DRV
-    { 0x38, false, false },  // CRU — a packed pair, deliberately out of the registry (effects.h)
-    { 0x39, true,  false },  // FIN
-    { 0x3B, false, false },  // LPO — a relative STEP, so a ramp over it has nothing to interpolate
-    { 0x3D, true,  false },  // TIM — the delay's echo time; a ramp over it is the tape swoop
+    { songcore::FX_HOP,    false, false },
+    { songcore::FX_TIC,    false, false },
+    { songcore::FX_KILL,   false, false },
+    { songcore::FX_OFFSET, false, false },  // no CC id and no absolute path, so not in the registry
+    { songcore::FX_THO,    false, false },
+    { songcore::FX_VOLUME, true,  false },
+    { songcore::FX_PAN,    true,  false },
+    { songcore::FX_EQN,    true,  true  },
+    { songcore::FX_EQM,    true,  true  },
+    { songcore::FX_CUT,    true,  false },
+    { songcore::FX_RES,    true,  false },
+    { songcore::FX_LPF,    true,  false },
+    { songcore::FX_HPF,    true,  false },
+    { songcore::FX_BPF,    true,  false },
+    { songcore::FX_DRV,    true,  false },
+    { songcore::FX_CRU,    false, false },  // a packed pair, deliberately out of the registry
+    { songcore::FX_FIN,    true,  false },
+    { songcore::FX_LPO,    false, false },  // a relative STEP, so a ramp over it has nothing to interpolate
+    { songcore::FX_TIM,    true,  false },  // the delay's echo time; a ramp over it is the tape swoop
 };
 inline constexpr int ARM_COUNT = static_cast<int>(sizeof(ARMS) / sizeof(Arm));
 
-inline constexpr int FX_AUS_CODE     = songcore::RAMP_AUS_CODE;
-inline constexpr int FX_AUF_CODE     = songcore::RAMP_AUF_CODE;
 inline constexpr int EQ_PRESET_SLOTS = songcore::RAMP_EQ_PRESET_SLOTS;
 
 inline constexpr const Arm* arm_for(int fxCode) {
@@ -142,7 +140,7 @@ struct TableRampCells {
 
     // Does this FX cell take part? Only AUS and AUF can answer no.
     bool active(int fxType, int row, int slot) const {
-        if (fxType != FX_AUS_CODE && fxType != FX_AUF_CODE) return true;
+        if (fxType != songcore::FX_AUS && fxType != songcore::FX_AUF) return true;
         if (row < 0 || row >= 16 || slot < 1 || slot > 3) return false;
         return used[row][slot];
     }

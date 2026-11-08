@@ -67,7 +67,7 @@ template <typename V> static inline void voiceSetFilterMode(V& v, int type, int 
 
 // LPO. ⚠️ Adds where every other setter assigns — on a table row it walks a step per tic.
 static inline void voiceSlideLoop(Voice& v, int byteValue) {
-    v.loopSlideSixteenths += loopSlideSixteenthsOf(byteValue);
+    v.loopSlideSixteenths += songcore::loop_slide_sixteenths(byteValue);
 }
 static inline void voiceSlideLoop(SoundfontVoice&, int) {}
 
@@ -77,8 +77,8 @@ static inline void voiceSetDrive(IAudioVoice& v, int drive) {
 }
 // Bits high, downsample low, kept apart on the bus: the sampler's downsample is its read, not the module's.
 static inline void voiceSetCrush(IAudioVoice& v, int packed) {
-    v.params.setBase(PARAM_CRUSH,      (float)crushBitsOf(packed));
-    v.params.setBase(PARAM_DOWNSAMPLE, (float)crushDownsampleOf(packed));
+    v.params.setBase(PARAM_CRUSH,      (float)songcore::crush_cmd_bits(packed));
+    v.params.setBase(PARAM_DOWNSAMPLE, (float)songcore::crush_cmd_downsample(packed));
 }
 
 // REV / DEL
@@ -127,7 +127,7 @@ template <typename V> static inline void voiceGlideVol(V& v) {
 // FIN writes PARAM_PITCH's base (zeroed at trigger); the mod half carries transpose, slides and
 // vibrato. ⚠️ Both voice types must read it — the SoundFont voice counts it as active pitch.
 template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
-    v.params.setBase(PARAM_PITCH, fineTuneSemitonesOf(byteValue));
+    v.params.setBase(PARAM_PITCH, songcore::fine_tune_semitones(byteValue));
 }
 
 // A 0-1 CC value back to the 00-FF byte the author typed.

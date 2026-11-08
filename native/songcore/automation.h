@@ -133,7 +133,6 @@ inline bool eq_morph_equal(const ExtEqMorphPayload& a, const ExtEqMorphPayload& 
 
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
 
-static_assert(RAMP_AUS_CODE == FX_AUS && RAMP_AUF_CODE == FX_AUF, "automation_curve.h's AUS/AUF");
 static_assert(RAMP_EQ_PRESET_SLOTS == POOL_EQPRESETS, "automation_curve.h's EQ preset slots");
 
 // One ramp as seen from ONE phrase: `span` and `stepOffset` are the whole ramp's; `ausStep`/`aufStep`

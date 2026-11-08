@@ -5,6 +5,13 @@
 #include "songcore/table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
 #include <cstdint>
 
+using songcore::FX_ARC, songcore::FX_ARPEGGIO, songcore::FX_BPF, songcore::FX_CHA, songcore::FX_CHD,
+      songcore::FX_CRU, songcore::FX_CUT, songcore::FX_DRV, songcore::FX_EQM, songcore::FX_EQN,
+      songcore::FX_FIN, songcore::FX_HOP, songcore::FX_HPF, songcore::FX_INS, songcore::FX_KILL,
+      songcore::FX_LPF, songcore::FX_LPO, songcore::FX_OFFSET, songcore::FX_PAN, songcore::FX_RES,
+      songcore::FX_RND, songcore::FX_RNL, songcore::FX_THO, songcore::FX_TIC, songcore::FX_TIM,
+      songcore::FX_VOLUME;
+
 // A TIC in the LAST row sets its column's rate (FX1 → lane 0 …); a column without one keeps the
 // instrument's. ⚠️ Only this row's TIC is read at the trigger, so it holds from row 0; a TIC anywhere
 // else acts when its lane reaches it.
@@ -318,7 +325,7 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
             const TableRow played = rollTableRow(rows, L.row, lane, chainRngState, rolls[L.row], nvPlays);
             // A CHA that ate this column's AUS turns its ramp off until the row plays again.
             const uint16_t bit = static_cast<uint16_t>(1u << L.row);
-            if (rows[L.row].fx[lane].type == table_automation::FX_AUS_CODE && played.fx[lane].type != table_automation::FX_AUS_CODE)
+            if (rows[L.row].fx[lane].type == songcore::FX_AUS && played.fx[lane].type != songcore::FX_AUS)
                 L.ausEaten = static_cast<uint16_t>(L.ausEaten | bit);
             else
                 L.ausEaten = static_cast<uint16_t>(L.ausEaten & ~bit);

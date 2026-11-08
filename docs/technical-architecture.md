@@ -97,7 +97,8 @@ native/                            The portable program
 │   ├── project_io.h                 .ptp / .pti parse + emit (minified), and JsonWriter
 │   ├── project_ops.h                Compact, transitive table walks, slot surgery
 │   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
-│   ├── effects.h                    Effect codes, names, EFFECT_TYPES, resolve_step_params
+│   ├── effect_codes.h               The effect codes and how their bytes read — the engine's too
+│   ├── effects.h                    Names, EFFECT_TYPES, resolve_step_params
 │   ├── automation.h                 AUS/AUF: the automatable registry, the curve, the pairing
 │   ├── table_automation.h           AUS/AUF over a table's rows — shared by the engine and the editor
 │   ├── traversal.h                  Song walks, collect_used_instruments

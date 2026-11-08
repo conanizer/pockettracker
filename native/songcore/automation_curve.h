@@ -3,9 +3,11 @@
 
 // The ramp's curve, the AUS/AUF pairing and the EQ-morph band rule, shared by phrases and the
 // engine's tables.
-// ⚠️ `<cstdint>` only, ever — the engine must not see model.h.
+// ⚠️ Leaves only, ever — the engine must not see model.h.
 
 #include <cstdint>
+
+#include "effect_codes.h"
 
 namespace songcore {
 
@@ -66,8 +68,6 @@ inline AutomationEqBand automation_eq_band_at(const AutomationEqBand& from, cons
 
 // ─── The pairing: one walk for a phrase, a chain and a table ─────────────────────────────────────
 
-constexpr int RAMP_AUS_CODE        = 0x2D;   // xx = the curve
-constexpr int RAMP_AUF_CODE        = 0x2E;   // xx = the destination
 constexpr int RAMP_EQ_PRESET_SLOTS = 128;
 
 // What the effect to the left of an AUS is to a ramp.
@@ -111,7 +111,7 @@ inline void pair_ramps(int count, RowAt row_at, ArmOf arm_of, Emit emit) {
     for (int pos = 0; pos < count; ++pos) {
         const RampRowFx fx = row_at(pos);
         for (int slot = 1; slot <= 3 && isOpen; ++slot) {
-            if (fx.type[slot] != RAMP_AUF_CODE || !endpoint_ok(open.arm, fx.value[slot])) continue;
+            if (fx.type[slot] != FX_AUF || !endpoint_ok(open.arm, fx.value[slot])) continue;
             open.aufPos   = pos;
             open.aufSlot  = slot;
             open.destByte = fx.value[slot];
@@ -119,7 +119,7 @@ inline void pair_ramps(int count, RowAt row_at, ArmOf arm_of, Emit emit) {
             isOpen = false;
         }
         for (int slot = 1; slot <= 3; ++slot) {
-            if (fx.type[slot] != RAMP_AUS_CODE) continue;
+            if (fx.type[slot] != FX_AUS) continue;
             for (int left = slot - 1; left >= 1; --left) {
                 const RampArm arm = arm_of(fx.type[left]);
                 if (arm == RampArm::NONE) continue;
