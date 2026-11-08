@@ -135,14 +135,6 @@ void* log_pump(void* arg) {
     return nullptr;
 }
 
-// The activity's method `name`, or null with a warning saying what its absence costs.
-jmethodID activity_method(const ptshell::Attached& a, const char* name, const char* sig,
-                          const char* otherwise) {
-    const jmethodID mid = a.method(name, sig);
-    if (!mid) __android_log_print(ANDROID_LOG_WARN, kLogTag, "%s%s not found - %s", name, sig, otherwise);
-    return mid;
-}
-
 // ─── button feedback → the thin Kotlin managers ──────────────────────────────────────────────────
 //
 // The touch layer decides when a button clicks (sdl-touch.cpp); this carries it to Kotlin. Runs on
@@ -155,13 +147,9 @@ public:
 
         ptshell::Attached a;
         if (!a.ok()) return;
-        if (const jmethodID mid = method_id(a)) {
-            a.env->CallVoidMethod(a.activity, mid, static_cast<jint>(button),
-                                  static_cast<jboolean>(down),
-                                  static_cast<jboolean>(s.soundEnabled), static_cast<jint>(s.soundVolume),
-                                  static_cast<jboolean>(s.vibroEnabled), static_cast<jint>(s.vibroPower));
-            a.failed();
-        }
+        if (const jmethodID mid = method_id(a))
+            a.call<void>(mid, static_cast<int>(button), down, s.soundEnabled, static_cast<int>(s.soundVolume),
+                         s.vibroEnabled, static_cast<int>(s.vibroPower));
     }
 
 private:
@@ -170,7 +158,7 @@ private:
     jmethodID method_id(const ptshell::Attached& a) {
         if (looked_up_) return mid_;
         looked_up_ = true;
-        mid_ = activity_method(a, "onButtonFeedback", "(IZZIZI)V", "button feedback disabled");
+        mid_ = a.method("onButtonFeedback", "(IZZIZI)V", "button feedback disabled");
         return mid_;
     }
 
@@ -183,12 +171,7 @@ private:
 // SDL counts the emulator's keyboard as a controller; Kotlin tells them apart. Asked at boot and on
 // a controller add/remove; a missing method means "no pad" (the touch UI).
 bool android_has_physical_gamepad() {
-    ptshell::Attached a;
-    if (!a.ok()) return false;
-    const jmethodID mid = activity_method(a, "hasPhysicalGameButtons", "()Z", "assuming no pad (touch UI)");
-    if (!mid) return false;
-    const bool result = a.env->CallBooleanMethod(a.activity, mid) == JNI_TRUE;
-    return !a.failed() && result;
+    return ptshell::call_activity<bool>("hasPhysicalGameButtons", "()Z", "assuming no pad (touch UI)");
 }
 
 // ─── may the screen rotate into landscape? → SdlActivity ─────────────────────────────────────────
@@ -198,12 +181,11 @@ bool android_has_physical_gamepad() {
 void android_set_landscape_allowed(bool allowed) {
     ptshell::Attached a;
     if (!a.ok()) return;
-    const jmethodID mid = activity_method(a, "setLandscapeAllowed", "(Z)V", "orientation stays as launched");
+    const jmethodID mid = a.method("setLandscapeAllowed", "(Z)V", "orientation stays as launched");
     if (!mid) return;
-    a.env->CallVoidMethod(a.activity, mid, allowed ? JNI_TRUE : JNI_FALSE);
-    if (!a.failed())
-        std::printf("orient:  %s\n", allowed ? "landscape allowed (FULL layout)"
-                                             : "portrait only (on-screen buttons in force)");
+    a.call<void>(mid, allowed);
+    std::printf("orient:  %s\n", allowed ? "landscape allowed (FULL layout)"
+                                         : "portrait only (on-screen buttons in force)");
     std::fflush(stdout);
 }
 
@@ -221,12 +203,7 @@ std::atomic<bool> g_playbackCaptured{false};
 // The song stopped in the background (or never played on): Kotlin takes the service down.
 void android_stop_playback_service() {
     g_bgServiceStarted.store(false);
-    ptshell::Attached a;
-    if (!a.ok()) return;
-    if (const jmethodID mid = activity_method(a, "stopPlaybackService", "()V", "the service stays up")) {
-        a.env->CallVoidMethod(a.activity, mid);
-        a.failed();
-    }
+    ptshell::call_activity<void>("stopPlaybackService", "()V", "the service stays up");
 }
 
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
@@ -238,9 +215,9 @@ void android_log_input_devices() {
     if (!a.env)      { std::printf("input:   no JNI env - cannot enumerate\n"); return; }
     if (!a.activity) { std::printf("input:   no activity - cannot enumerate\n"); return; }
 
-    if (const jmethodID mid = a.method("describeInputDevices", "()Ljava/lang/String;")) {
-        jobject s = a.env->CallObjectMethod(a.activity, mid);
-        if (!a.failed() && s) std::printf("%s\n", a.take(s).c_str());
+    if (const jmethodID mid = a.method("describeInputDevices", "()Ljava/lang/String;", "no device list")) {
+        const std::string list = a.call<std::string>(mid);
+        if (!list.empty()) std::printf("%s\n", list.c_str());
     } else {
         std::printf("input:   describeInputDevices() not found - R8 renamed it, or it is not built\n");
     }

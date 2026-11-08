@@ -423,7 +423,8 @@ if(ANDROID)
             "${PT_SHELL_DIR}/android/android-main.cpp"
             "${PT_SHELL_DIR}/android/saf-filesystem.cpp"   # the SAF ui::FileSystem, and byte_source.h's
                                                            # three hooks for pt:// paths
-            "${PT_SHELL_DIR}/android/midi-out-android.cpp" # MIDI out over five JNI up-calls
+            "${PT_SHELL_DIR}/android/midi-android-devices.cpp" # the device list both directions share
+            "${PT_SHELL_DIR}/android/midi-out-android.cpp" # MIDI out over JNI up-calls
             "${PT_SHELL_DIR}/android/midi-in-android.cpp"  # ⚠️ POLLED once a frame, where winmm and ALSA
                                                            # push — see its header, and MidiInBase::pump
             "${PT_SHELL_DIR}/midi/midi-out-base.cpp"

@@ -1,93 +1,43 @@
-// The Android songcore::IMidiOut: five JNI calls into MidiOutManager.kt (which says why the port is
-// in Kotlin, and why to SEND you open the device's INPUT port).
+// The Android songcore::IMidiOut: JNI calls into MidiOutManager.kt (which says why the port is in
+// Kotlin, and why to SEND you open the device's INPUT port).
 //
 // `send` runs on the MIDI sender thread and on the frame loop for a panic's note-offs, serialised
-// by `ExternalConsumer`'s mutex; the rest on the frame loop. ⚠️ The sender thread is an
-// `SDL_CreateThread` thread for this file: SDL attaches it to the JVM, and a raw `std::thread` would
-// abort the VM on the first JNI call. `open` blocks up to ~3 s while Kotlin waits for the device.
-// Method ids are resolved by name: a missing Kotlin side is "no devices" plus one log line.
+// by `ExternalConsumer`'s mutex; the rest on the frame loop. `Attached` attaches whichever thread
+// asks. `open` blocks up to ~3 s while Kotlin waits for the device. Method ids are resolved by name:
+// a missing Kotlin side is "no devices" plus a log line.
 
 #include "android/midi-out-android.h"
 
 #ifdef __ANDROID__
 
-#include <SDL.h>
-#include <android/log.h>
-
-#include "android/android-jni.h"   // `Attached` — shared with the INPUT backend
-
 namespace ptshell {
 
 namespace {
 
-constexpr const char* kLogTag = "PocketTracker";
+constexpr const char* kOff = "MIDI out disabled";
+constexpr JavaMethod  kMethods[] = {
+    {"midiDeviceCount", "()I", kOff},
+    {"midiDeviceName", "(I)Ljava/lang/String;", kOff},
+    {"midiOpenDevice", "(I)Z", kOff},
+    {"midiCloseDevice", "()V", kOff},
+    {"midiSend", "(IIII)Z", kOff},
+    {"midiSendBytes", "([BI)Z", "a SysEx does not go out"},   // optional: a SysEx, whole
+};
+constexpr int SEND = AndroidMidiDevices::OWN, SEND_BYTES = AndroidMidiDevices::OWN + 1;
 
 }  // namespace
 
+AndroidMidiOut::AndroidMidiOut() : devices_("OUTPUT", kMethods, 5) {}
 AndroidMidiOut::~AndroidMidiOut() { close(); }
 
-AndroidMidiOut::Hooks& AndroidMidiOut::hooks(JNIEnv* env, jobject activity) {
-    if (hooks_.resolved) return hooks_;
-    hooks_.resolved = true;
-
-    // ⚠️ Each miss cleared at once: under CheckJNI a pending exception aborts the next JNI call.
-    jclass     cls  = env->GetObjectClass(activity);
-    const auto find = [&](const char* name, const char* sig) -> jmethodID {
-        const jmethodID m = env->GetMethodID(cls, name, sig);
-        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
-        return m;
-    };
-    hooks_.count     = find("midiDeviceCount", "()I");
-    hooks_.name      = find("midiDeviceName", "(I)Ljava/lang/String;");
-    hooks_.open      = find("midiOpenDevice", "(I)Z");
-    hooks_.close     = find("midiCloseDevice", "()V");
-    hooks_.send      = find("midiSend", "(IIII)Z");
-    hooks_.sendBytes = find("midiSendBytes", "([BI)Z");
-    env->DeleteLocalRef(cls);
-
-    hooks_.ok = hooks_.count && hooks_.name && hooks_.open && hooks_.close && hooks_.send;
-
-    // ⚠️ Logged both ways: with no device plugged in, "resolved" and "R8 renamed them" look the same.
-    __android_log_print(hooks_.ok ? ANDROID_LOG_INFO : ANDROID_LOG_WARN, kLogTag,
-                        "midi: MidiManager hooks %s (count=%p name=%p open=%p close=%p send=%p sendBytes=%p)",
-                        hooks_.ok ? "resolved" : "NOT FOUND - MIDI out disabled",
-                        hooks_.count, hooks_.name, hooks_.open, hooks_.close, hooks_.send, hooks_.sendBytes);
-    return hooks_;
-}
-
-int AndroidMidiOut::device_count() {
-    Attached a;
-    if (!a.ok()) return 0;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return 0;
-
-    // Re-enumerates every call (hot-plug); the Kotlin snapshot refreshes with it, so indices hold.
-    const jint n = a.env->CallIntMethod(a.activity, h.count);
-    if (a.failed()) return 0;
-    return n < 0 ? 0 : static_cast<int>(n);
-}
-
-std::string AndroidMidiOut::device_name(int index) {
-    Attached a;
-    if (!a.ok()) return std::string();
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return std::string();
-
-    jobject raw = a.env->CallObjectMethod(a.activity, h.name, static_cast<jint>(index));
-    if (a.failed()) return std::string();
-    return a.take(raw);
-}
+int         AndroidMidiOut::device_count() { return devices_.count(); }
+std::string AndroidMidiOut::device_name(int index) { return devices_.name(index); }
 
 bool AndroidMidiOut::open(int index) {
     close();
     Attached a;
     if (!a.ok()) return false;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return false;
-
-    const jboolean ok = a.env->CallBooleanMethod(a.activity, h.open, static_cast<jint>(index));
-    if (a.failed()) return false;
-    open_ = (ok == JNI_TRUE);
+    open_ = devices_.open(a, index);
     if (open_) openIndex_ = index;
     if (open_ && !longBuf_) {
         jbyteArray local = a.env->NewByteArray(songcore::NOTE_COMMAND_BYTES);
@@ -107,11 +57,7 @@ void AndroidMidiOut::close() {
 
     Attached a;
     if (a.ok()) {
-        const Hooks& h = hooks(a.env, a.activity);
-        if (h.ok) {
-            a.env->CallVoidMethod(a.activity, h.close);
-            a.failed();
-        }
+        devices_.close(a);
         if (longBuf_) {
             a.env->DeleteGlobalRef(longBuf_);
             longBuf_ = nullptr;
@@ -125,23 +71,22 @@ void AndroidMidiOut::send(const uint8_t* data, int len) {
     if (!open_ || len <= 0 || len > songcore::NOTE_COMMAND_BYTES) return;
     Attached a;
     if (!a.ok()) return;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return;
+    const jmethodID* m = devices_.ids(a);
+    if (!m) return;
 
-    jboolean ok = JNI_FALSE;
+    bool ok = false;
     if (len > 3) {
         // A SysEx whole, not three bytes at a time: a USB packer may not join the pieces.
-        if (h.sendBytes && longBuf_) {
+        if (m[SEND_BYTES] && longBuf_) {
             a.env->SetByteArrayRegion(longBuf_, 0, len, reinterpret_cast<const jbyte*>(data));
-            ok = a.env->CallBooleanMethod(a.activity, h.sendBytes, longBuf_, static_cast<jint>(len));
+            ok = !a.failed() && a.call<bool>(m[SEND_BYTES], static_cast<jobject>(longBuf_), len);
         }
     } else {
         // Three ints, not a byte[]: allocation-free.
-        ok = a.env->CallBooleanMethod(a.activity, h.send, static_cast<jint>(len >= 1 ? data[0] : 0),
-                                      static_cast<jint>(len >= 2 ? data[1] : 0),
-                                      static_cast<jint>(len >= 3 ? data[2] : 0), static_cast<jint>(len));
+        ok = a.call<bool>(m[SEND], len >= 1 ? int{data[0]} : 0, len >= 2 ? int{data[1]} : 0,
+                          len >= 3 ? int{data[2]} : 0, len);
     }
-    const bool bad = a.failed() || ok != JNI_TRUE;
+    const bool bad = !ok;
     if (bad) ++errors_;
     trace_message(data, len, bad);
 }

@@ -32,56 +32,23 @@ bool is_pt_path(const std::string& s) {
 
 // ─── the JNI seam ────────────────────────────────────────────────────────────────────────────────
 //
-// By name and exception-safe, like `android-main.cpp`: a method R8 renamed in a release build costs
-// one log line and an empty answer, not a crash.
-
-struct Env : Attached {
-    jmethodID method(const char* name, const char* sig) const {
-        const jmethodID m = Attached::method(name, sig);
-        if (!m) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                                "saf: %s%s not found on the activity - R8 renamed it, or it is not built",
-                                name, sig);
-        }
-        return m;
-    }
-
-    // A jstring the caller deletes.
-    jstring str(const std::string& s) const { return env->NewStringUTF(s.c_str()); }
-};
-
-std::string call_string(const char* name, const char* sig, const std::string& a, const std::string* b) {
-    Env e;
-    if (!e.ok()) return std::string();
-    jmethodID m = e.method(name, sig);
-    if (!m) return std::string();
-    jstring ja = e.str(a);
-    jstring jb = b ? e.str(*b) : nullptr;
-    jobject r  = b ? e.env->CallObjectMethod(e.activity, m, ja, jb)
-                   : e.env->CallObjectMethod(e.activity, m, ja);
-    const bool bad = e.failed();
-    e.env->DeleteLocalRef(ja);
-    if (jb) e.env->DeleteLocalRef(jb);
-    if (bad) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
-    return e.take(r);
+// One up-call into SafStorage.kt, by name: a method R8 renamed in a release build costs one log line
+// and an empty answer, not a crash. ⚠️ The signature must match the arguments passed — JNI's varargs
+// take whatever is given.
+template <class R, class... A> R saf(const char* name, const char* sig, const A&... args) {
+    return call_activity<R>(name, sig, "the shared folders do not work", args...);
 }
 
-// A no-argument String method. ⚠️ Not `call_string` with "": passing an argument to a
-// `()Ljava/lang/String;` signature is undefined behaviour.
-std::string call_string0(const char* name) {
-    Env e;
-    if (!e.ok()) return std::string();
-    jmethodID m = e.method(name, "()Ljava/lang/String;");
-    if (!m) return std::string();
-    jobject r = e.env->CallObjectMethod(e.activity, m);
-    if (e.failed()) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
-    return e.take(r);
-}
+constexpr const char* kStrStr = "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;";
 
 // The document's URI after the rename — it may change — or "" on failure.
 std::string rename_doc(const std::string& uri, const std::string& name) {
-    return call_string("safRename", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", uri,
-                       &name);
+    return saf<std::string>("safRename", kStrStr, uri, name);
+}
+
+// `safCreateDir`: the new (or existing) folder's URI, or "".
+std::string create_dir(const std::string& parentUri, const std::string& name) {
+    return saf<std::string>("safCreateDir", kStrStr, parentUri, name);
 }
 
 }  // namespace
@@ -139,25 +106,9 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
     roots_.clear();
     homeId_.clear();
 
-    int count = 0;
-    {
-        Env e;
-        if (e.ok()) {
-            if (jmethodID m = e.method("safRootCount", "()I")) {
-                count = e.env->CallIntMethod(e.activity, m);
-                if (e.failed()) count = 0;
-            }
-        }
-    }
-
+    const int count = saf<int>("safRootCount", "()I");
     for (int i = 0; i < count; ++i) {
-        Env e;
-        if (!e.ok()) break;
-        jmethodID m = e.method("safRootInfo", "(I)Ljava/lang/String;");
-        if (!m) break;
-        jobject r = e.env->CallObjectMethod(e.activity, m, static_cast<jint>(i));
-        if (e.failed()) { if (r) e.env->DeleteLocalRef(r); continue; }
-        const std::string info = e.take(r);
+        const std::string info = saf<std::string>("safRootInfo", "(I)Ljava/lang/String;", i);
 
         // `<id>\t<name>\t<docUri>\t<live>`; a row missing any field — the liveness flag included —
         // is skipped, never read as "dead".
@@ -173,7 +124,7 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
 
     // ⚠️ Asked once per load, not per `ensure_dir`: it is a JNI round trip, and the app folders ask
     // on every browser open. The Kotlin side stamps its choice as it answers.
-    homeId_ = call_string0("safHomeRootId");
+    homeId_ = saf<std::string>("safHomeRootId", "()Ljava/lang/String;");
 
     return roots_;
 }
@@ -299,8 +250,7 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
     const std::string dirUri = resolve(dirPath);
     if (dirUri.empty()) return nullptr;
 
-    const std::string blob = call_string("safListChildren", "(Ljava/lang/String;)Ljava/lang/String;",
-                                         dirUri, nullptr);
+    const std::string blob = saf<std::string>("safListChildren", "(Ljava/lang/String;)Ljava/lang/String;", dirUri);
     size_t pos = 0;
     while (pos < blob.size()) {
         size_t nl = blob.find('\n', pos);
@@ -365,9 +315,7 @@ std::string SafFileSystem::ensure_dir(const char* sub) {
 
         const std::string parentUri = resolve(cur);
         if (parentUri.empty()) return std::string();
-        const std::string made = call_string("safCreateDir",
-                                             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                             parentUri, &seg);
+        const std::string made = create_dir(parentUri, seg);
         if (made.empty()) return std::string();
         uriCache_[want] = made;
         invalidate(cur);
@@ -393,12 +341,7 @@ bool SafFileSystem::activate(const std::string& path) {
     const Lock lock(mu_);
     if (path != kAddRootPath) return false;
 
-    Env e;
-    if (!e.ok()) return false;
-    jmethodID m = e.method("safRequestRoot", "()Z");
-    if (!m) return false;
-    const bool launched = e.env->CallBooleanMethod(e.activity, m) == JNI_TRUE;
-    if (e.failed()) return false;
+    const bool launched = saf<bool>("safRequestRoot", "()Z");
 
     // ⚠️ `launched` = the picker is on screen, not that a folder was granted. Nothing waits for the
     // grant: the browser re-lists when the app comes back.
@@ -411,16 +354,7 @@ bool SafFileSystem::set_home_directory(const std::string& path) {
     // Only a granted tree can be home: not the roots, not a folder inside a tree.
     if (!is_granted_tree(path)) return false;
 
-    const std::string id = path.substr(kSchemeLen);
-    Env e;
-    if (!e.ok()) return false;
-    jmethodID m = e.method("safSetHomeRoot", "(Ljava/lang/String;)Z");
-    if (!m) return false;
-    jstring jid = e.str(id);
-    const bool set = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
-    const bool bad = e.failed();
-    e.env->DeleteLocalRef(jid);
-    if (bad || !set) return false;
+    if (!saf<bool>("safSetHomeRoot", "(Ljava/lang/String;)Z", path.substr(kSchemeLen))) return false;
 
     // ⚠️ `homeId_` is read once per roots load; without this the accessors keep answering the old
     // tree until relaunch.
@@ -437,16 +371,7 @@ bool SafFileSystem::revoke_access(const std::string& path) {
     const Lock lock(mu_);
     if (!is_granted_tree(path)) return false;
 
-    const std::string id = path.substr(kSchemeLen);
-    Env e;
-    if (!e.ok()) return false;
-    jmethodID m = e.method("safForgetRoot", "(Ljava/lang/String;)Z");
-    if (!m) return false;
-    jstring jid = e.str(id);
-    const bool gone = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
-    const bool bad  = e.failed();
-    e.env->DeleteLocalRef(jid);
-    if (bad || !gone) return false;
+    if (!saf<bool>("safForgetRoot", "(Ljava/lang/String;)Z", path.substr(kSchemeLen))) return false;
 
     // ⚠️ Every cached URI under the tree is dead with the permission. `forget` also drops the roots
     // listing, since that is the tree's parent.
@@ -476,21 +401,18 @@ bool SafFileSystem::read_file(const std::string& path, std::string& out) {
     const std::string uri = resolve(path);
     if (uri.empty()) return false;
 
-    Env e;
-    if (!e.ok()) return false;
-    jmethodID m = e.method("safReadFile", "(Ljava/lang/String;)[B");
+    Attached a;
+    if (!a.ok()) return false;
+    const jmethodID m = a.method("safReadFile", "(Ljava/lang/String;)[B", "the shared folders do not work");
     if (!m) return false;
-    jstring ju = e.str(uri);
-    jobject r  = e.env->CallObjectMethod(e.activity, m, ju);
-    const bool bad = e.failed();
-    e.env->DeleteLocalRef(ju);
-    if (bad || !r) { if (r) e.env->DeleteLocalRef(r); return false; }
+    jobject r = a.call<jobject>(m, uri);
+    if (!r) return false;
 
     jbyteArray arr = static_cast<jbyteArray>(r);
-    const jsize n  = e.env->GetArrayLength(arr);
+    const jsize n  = a.env->GetArrayLength(arr);
     out.resize(static_cast<size_t>(n));
-    if (n > 0) e.env->GetByteArrayRegion(arr, 0, n, reinterpret_cast<jbyte*>(&out[0]));
-    e.env->DeleteLocalRef(r);
+    if (n > 0) a.env->GetByteArrayRegion(arr, 0, n, reinterpret_cast<jbyte*>(&out[0]));
+    a.env->DeleteLocalRef(r);
     return true;
 }
 
@@ -555,9 +477,7 @@ std::string SafFileSystem::ensure_file(const std::string& path) {
     const std::string parentUri = resolve(parent_path(path));
     if (parentUri.empty()) return std::string();   // ⚠️ the create does NOT make intermediate folders
 
-    const std::string made = call_string("safCreateFile",
-                                         "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                         parentUri, &name);
+    const std::string made = saf<std::string>("safCreateFile", kStrStr, parentUri, name);
     if (made.empty()) return std::string();
     invalidate(parent_path(path));
     uriCache_[path] = made;
@@ -565,31 +485,11 @@ std::string SafFileSystem::ensure_file(const std::string& path) {
 }
 
 bool SafFileSystem::delete_uri(const std::string& uri) {
-    // ⚠️ Not `call_string`: `safDelete` returns a boolean, and reading `Z` through `CallObjectMethod`
-    // is undefined behaviour.
-    Env e;
-    if (!e.ok()) return false;
-    jmethodID m = e.method("safDelete", "(Ljava/lang/String;)Z");
-    if (!m) return false;
-    jstring    ju  = e.str(uri);
-    const bool ok  = e.env->CallBooleanMethod(e.activity, m, ju) == JNI_TRUE;
-    const bool bad = e.failed();
-    e.env->DeleteLocalRef(ju);
-    return ok && !bad;
+    return saf<bool>("safDelete", "(Ljava/lang/String;)Z", uri);
 }
 
 int SafFileSystem::open_uri_fd(const std::string& uri, const char* mode) {
-    Env e;
-    if (!e.ok()) return -1;
-    jmethodID m = e.method("safOpenFd", "(Ljava/lang/String;Ljava/lang/String;)I");
-    if (!m) return -1;
-    jstring ju = e.str(uri);
-    jstring jm = e.str(mode);
-    const jint fd  = e.env->CallIntMethod(e.activity, m, ju, jm);
-    const bool bad = e.failed();
-    e.env->DeleteLocalRef(ju);
-    e.env->DeleteLocalRef(jm);
-    return bad ? -1 : static_cast<int>(fd);
+    return saf<int>("safOpenFd", "(Ljava/lang/String;Ljava/lang/String;)I", uri, mode);
 }
 
 bool SafFileSystem::write_uri(const std::string& uri, const void* data, size_t len) {
@@ -795,9 +695,7 @@ std::string SafFileSystem::create_folder(const std::string& parent, const std::s
     const std::string parentUri = resolve(parent);
     if (parentUri.empty()) return std::string();
 
-    const std::string made = call_string("safCreateDir",
-                                         "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                         parentUri, &safe);
+    const std::string made = create_dir(parentUri, safe);
     if (made.empty()) return std::string();
     uriCache_[target] = made;
     invalidate(parent);
@@ -829,26 +727,14 @@ bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
         const std::string fromParent   = resolve(parent_path(from));
         const std::string toParent     = resolve(parent_path(to));
         if (!srcUri.empty() && !fromParent.empty() && !toParent.empty()) {
-            Env e;
-            if (e.ok()) {
-                if (jmethodID m = e.method(
-                        "safMove",
-                        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")) {
-                    jstring a = e.str(srcUri), b = e.str(fromParent), c = e.str(toParent);
-                    jobject r = e.env->CallObjectMethod(e.activity, m, a, b, c);
-                    const bool bad = e.failed();
-                    e.env->DeleteLocalRef(a);
-                    e.env->DeleteLocalRef(b);
-                    e.env->DeleteLocalRef(c);
-                    if (bad && r) e.env->DeleteLocalRef(r);   // `take` is what frees it on the good path
-                    const std::string moved = bad ? std::string() : e.take(r);
-                    if (!moved.empty()) {
-                        forget(from);
-                        uriCache_[to] = moved;
-                        invalidate(parent_path(to));
-                        return true;
-                    }
-                }
+            const std::string moved = saf<std::string>(
+                "safMove", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                srcUri, fromParent, toParent);
+            if (!moved.empty()) {
+                forget(from);
+                uriCache_[to] = moved;
+                invalidate(parent_path(to));
+                return true;
             }
         }
     }

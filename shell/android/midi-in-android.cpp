@@ -8,7 +8,7 @@
 // the activity is paused nothing pumps, and MidiInManager's ring drops the newest bytes.
 //
 // Every method runs on the SDL thread. Method ids are resolved by name: a missing Kotlin side is
-// "no devices" plus one log line.
+// "no devices" plus a log line.
 
 #include "android/midi-in-android.h"
 
@@ -16,79 +16,36 @@
 
 #include <android/log.h>
 
-#include "android/android-jni.h"
-
 namespace ptshell {
 
 namespace {
-
-constexpr const char* kLogTag = "PocketTracker";
 
 // One pump's capacity — far above a 60 Hz frame of MIDI (~52 bytes), so the first pump after a
 // pause empties MidiInManager's whole ring.
 constexpr int READ_BUF = 1024;
 
+constexpr const char* kOff = "MIDI in disabled";
+constexpr JavaMethod  kMethods[] = {
+    {"midiInDeviceCount", "()I", kOff},
+    {"midiInDeviceName", "(I)Ljava/lang/String;", kOff},
+    {"midiInOpenDevice", "(I)Z", kOff},
+    {"midiInCloseDevice", "()V", kOff},
+    {"midiInRead", "([B)I", kOff},
+};
+constexpr int READ = AndroidMidiDevices::OWN;
+
 }  // namespace
 
+AndroidMidiIn::AndroidMidiIn() : devices_("INPUT", kMethods, 5) {}
 AndroidMidiIn::~AndroidMidiIn() { close(); }
 
-AndroidMidiIn::Hooks& AndroidMidiIn::hooks(JNIEnv* env, jobject activity) {
-    if (hooks_.resolved) return hooks_;
-    hooks_.resolved = true;
-
-    // ⚠️ Each miss cleared at once: under CheckJNI a pending exception aborts the next JNI call.
-    jclass     cls  = env->GetObjectClass(activity);
-    const auto find = [&](const char* name, const char* sig) -> jmethodID {
-        const jmethodID m = env->GetMethodID(cls, name, sig);
-        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
-        return m;
-    };
-    hooks_.count = find("midiInDeviceCount", "()I");
-    hooks_.name  = find("midiInDeviceName", "(I)Ljava/lang/String;");
-    hooks_.open  = find("midiInOpenDevice", "(I)Z");
-    hooks_.close = find("midiInCloseDevice", "()V");
-    hooks_.read  = find("midiInRead", "([B)I");
-    env->DeleteLocalRef(cls);
-
-    hooks_.ok = hooks_.count && hooks_.name && hooks_.open && hooks_.close && hooks_.read;
-
-    // ⚠️ Logged both ways: with nothing plugged in, "resolved" and "R8 renamed them" look the same.
-    __android_log_print(hooks_.ok ? ANDROID_LOG_INFO : ANDROID_LOG_WARN, kLogTag,
-                        "midi: MidiManager INPUT hooks %s (count=%p name=%p open=%p close=%p read=%p)",
-                        hooks_.ok ? "resolved" : "NOT FOUND - MIDI in disabled", hooks_.count,
-                        hooks_.name, hooks_.open, hooks_.close, hooks_.read);
-    return hooks_;
-}
-
-int AndroidMidiIn::device_count() {
-    Attached a;
-    if (!a.ok()) return 0;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return 0;
-
-    // Re-enumerates every call (hot-plug); the Kotlin snapshot refreshes with it, so indices hold.
-    const jint n = a.env->CallIntMethod(a.activity, h.count);
-    if (a.failed()) return 0;
-    return n < 0 ? 0 : static_cast<int>(n);
-}
-
-std::string AndroidMidiIn::device_name(int index) {
-    Attached a;
-    if (!a.ok()) return std::string();
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return std::string();
-
-    jobject raw = a.env->CallObjectMethod(a.activity, h.name, static_cast<jint>(index));
-    if (a.failed()) return std::string();
-    return a.take(raw);
-}
+int         AndroidMidiIn::device_count() { return devices_.count(); }
+std::string AndroidMidiIn::device_name(int index) { return devices_.name(index); }
 
 bool AndroidMidiIn::open(int index) {
     close();
     Attached a;
-    if (!a.ok()) return false;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return false;
+    if (!a.ok() || !devices_.ids(a)) return false;
 
     // ⚠️ A global ref, allocated once: no kilobyte allocated sixty times a second. Freed in `close()`.
     if (!buffer_) {
@@ -99,13 +56,11 @@ bool AndroidMidiIn::open(int index) {
         }
     }
     if (!buffer_) {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag, "midi: could not allocate the MIDI in buffer");
+        __android_log_print(ANDROID_LOG_WARN, "PocketTracker", "midi: could not allocate the MIDI in buffer");
         return false;
     }
 
-    const jboolean ok = a.env->CallBooleanMethod(a.activity, h.open, static_cast<jint>(index));
-    if (a.failed()) return false;
-    open_ = (ok == JNI_TRUE);
+    open_ = devices_.open(a, index);
     if (open_) openIndex_ = index;
     return open_;
 }
@@ -113,11 +68,7 @@ bool AndroidMidiIn::open(int index) {
 void AndroidMidiIn::close() {
     Attached a;
     if (a.ok()) {
-        const Hooks& h = hooks(a.env, a.activity);
-        if (h.ok && open_) {
-            a.env->CallVoidMethod(a.activity, h.close);
-            a.failed();
-        }
+        if (open_) devices_.close(a);
         // ⚠️ Freed even when the port never opened: `open()` allocates it first.
         if (buffer_) {
             a.env->DeleteGlobalRef(buffer_);
@@ -133,21 +84,21 @@ void AndroidMidiIn::pump() {
 
     Attached a;
     if (!a.ok()) return;
-    const Hooks& h = hooks(a.env, a.activity);
-    if (!h.ok) return;
+    const jmethodID* m = devices_.ids(a);
+    if (!m) return;
 
-    const jint n = a.env->CallIntMethod(a.activity, h.read, buffer_);
-    if (a.failed() || n <= 0) return;
+    const int n = a.call<int>(m[READ], static_cast<jobject>(buffer_));
+    if (n <= 0) return;
 
     // `GetByteArrayRegion`: a copy, nothing pinned, no Release to forget. `n` is clamped anyway — a
     // wrong length here is a stack smash.
-    jbyte   raw[READ_BUF];
-    const jint len = n > READ_BUF ? READ_BUF : n;
+    jbyte     raw[READ_BUF];
+    const int len = n > READ_BUF ? READ_BUF : n;
     a.env->GetByteArrayRegion(buffer_, 0, len, raw);
     if (a.failed()) return;
 
     // Through `deliver`, the one door that counts. `callbacks()` here means "pumps that found something".
-    deliver(reinterpret_cast<const uint8_t*>(raw), static_cast<int>(len));
+    deliver(reinterpret_cast<const uint8_t*>(raw), len);
 }
 
 }  // namespace ptshell

@@ -9,6 +9,8 @@
 
 #include <jni.h>
 
+#include "android/midi-android-devices.h"
+
 #include <string>
 #include <vector>
 
@@ -16,6 +18,7 @@ namespace ptshell {
 
 class AndroidMidiOut : public MidiOutBase {
   public:
+    AndroidMidiOut();
     ~AndroidMidiOut() override;
 
     int         device_count() override;
@@ -26,17 +29,7 @@ class AndroidMidiOut : public MidiOutBase {
     void        send(const uint8_t* data, int len) override;
 
   private:
-    /** The method ids, resolved together on first use. `ok_` false = the Kotlin side is absent. */
-    struct Hooks {
-        jmethodID count = nullptr, name = nullptr, open = nullptr, close = nullptr, send = nullptr;
-        jmethodID sendBytes = nullptr;   // a SysEx, whole
-        bool      resolved = false;
-        bool      ok       = false;
-    };
-
-    Hooks& hooks(JNIEnv* env, jobject activity);
-
-    Hooks hooks_;
+    AndroidMidiDevices devices_;
     // Whether our last `open` succeeded, so the frame loop never asks Java. A yanked device shows
     // up as `send` failing — counted and marked in the MIDI trace.
     bool open_ = false;
