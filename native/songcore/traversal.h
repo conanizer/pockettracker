@@ -44,7 +44,7 @@ inline std::set<int> collect_used_instruments(const Project& project, int start_
     bool sawIns = false, sawRandom = false;
     for_each_step_in_song_range(project, start_row, end_row, /*include_inaudible=*/false,
         [&](const PhraseStep& step) {
-            if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
+            if (has_fx(step, FX_RND) || has_fx(step, FX_RNL)) sawRandom = true;
             if (!step_has_note(step)) return;
             if (step.instrument >= 0 && step.instrument < n) used.insert(step.instrument);
             // An INS cell plays its instrument instead.

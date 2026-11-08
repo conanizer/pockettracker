@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "ui/fx_columns.h"
+
 namespace pt::ui {
 
 using songcore::Note;
@@ -22,6 +24,32 @@ struct Bounds {
 Bounds normalise(int startRow, int startColumn, int endRow, int endColumn) {
     return {std::min(startRow, endRow), std::max(startRow, endRow),
             std::min(startColumn, endColumn), std::max(startColumn, endColumn)};
+}
+
+// A command column's half of an item: the TYPE column carries the type and its switch, the VALUE
+// column the value. `first` is the screen's FX1 TYPE column; false when `col` is no command column.
+template <typename Item, typename Row> bool copy_fx_cell(Item& item, const Row& row, int col, int first) {
+    const int slot = fx_slot_of_column(col, first);
+    if (slot == 0) return false;
+    const songcore::FxSlot& f = songcore::fx_slot(row, slot);
+    if (is_fx_type_column(col, first)) { item.fxType = f.type; item.fxOff = f.off; }
+    else                               item.fxValue = f.value;
+    return true;
+}
+// An item without the column's half writes nothing: false.
+template <typename Item, typename Row> bool paste_fx_cell(Row& row, const Item& item, int col, int first) {
+    const int slot = fx_slot_of_column(col, first);
+    if (slot == 0) return false;
+    songcore::FxSlot& f = songcore::fx_slot_ref(row, slot);
+    if (is_fx_type_column(col, first)) {
+        if (!item.fxType) return false;
+        f.type = *item.fxType;
+        f.off  = item.fxOff;
+    } else {
+        if (!item.fxValue) return false;
+        f.value = *item.fxValue;
+    }
+    return true;
 }
 
 // The leftmost copied column — what a paste re-offsets from.
@@ -53,13 +81,9 @@ void Clipboard::copy_phrase_steps(const Project& p, int phraseId, int startRow, 
                 case 1: item.note       = step.note;       break;
                 case 2: item.volume     = step.volume;     break;
                 case 3: item.instrument = step.instrument; break;
-                case 4: item.fxType     = step.fx1Type;    item.fxOff = step.fx1Off; break;
-                case 5: item.fxValue    = step.fx1Value;   break;
-                case 6: item.fxType     = step.fx2Type;    item.fxOff = step.fx2Off; break;
-                case 7: item.fxValue    = step.fx2Value;   break;
-                case 8: item.fxType     = step.fx3Type;    item.fxOff = step.fx3Off; break;
-                case 9: item.fxValue    = step.fx3Value;   break;
-                default: continue;  // outside the editable columns — no item at all
+                default:   // outside the editable columns — no item at all
+                    if (!copy_fx_cell(item, step, col, PHRASE_FX_COLUMN)) continue;
+                    break;
             }
             phraseItems_.push_back(item);
         }
@@ -132,13 +156,9 @@ void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int
             switch (col) {
                 case 1: item.transpose = tr.transpose; break;
                 case 2: item.volume    = tr.volume;    break;
-                case 3: item.fxType    = tr.fx1Type;   item.fxOff = tr.fx1Off; break;
-                case 4: item.fxValue   = tr.fx1Value;  break;
-                case 5: item.fxType    = tr.fx2Type;   item.fxOff = tr.fx2Off; break;
-                case 6: item.fxValue   = tr.fx2Value;  break;
-                case 7: item.fxType    = tr.fx3Type;   item.fxOff = tr.fx3Off; break;
-                case 8: item.fxValue   = tr.fx3Value;  break;
-                default: continue;
+                default:
+                    if (!copy_fx_cell(item, tr, col, TABLE_FX_COLUMN)) continue;
+                    break;
             }
             tableItems_.push_back(item);
         }
@@ -198,13 +218,7 @@ PasteResult Clipboard::paste_phrase_steps(Project& p, int phraseId, int cursorRo
             case 1: if (item.note)       { step.note       = *item.note;       ++itemsPasted; } break;
             case 2: if (item.volume)     { step.volume     = *item.volume;     ++itemsPasted; } break;
             case 3: if (item.instrument) { step.instrument = *item.instrument; ++itemsPasted; } break;
-            case 4: if (item.fxType)     { step.fx1Type    = *item.fxType; step.fx1Off = item.fxOff; ++itemsPasted; } break;
-            case 5: if (item.fxValue)    { step.fx1Value   = *item.fxValue;    ++itemsPasted; } break;
-            case 6: if (item.fxType)     { step.fx2Type    = *item.fxType; step.fx2Off = item.fxOff; ++itemsPasted; } break;
-            case 7: if (item.fxValue)    { step.fx2Value   = *item.fxValue;    ++itemsPasted; } break;
-            case 8: if (item.fxType)     { step.fx3Type    = *item.fxType; step.fx3Off = item.fxOff; ++itemsPasted; } break;
-            case 9: if (item.fxValue)    { step.fx3Value   = *item.fxValue;    ++itemsPasted; } break;
-            default: break;
+            default: if (paste_fx_cell(step, item, targetCol, PHRASE_FX_COLUMN)) ++itemsPasted; break;
         }
     }
     return PasteResult{PasteResult::Kind::SUCCESS, itemsPasted};
@@ -286,13 +300,7 @@ PasteResult Clipboard::paste_table_rows(Project& p, int tableId, int cursorRow, 
         switch (targetCol) {
             case 1: if (item.transpose) { tr.transpose = *item.transpose; ++itemsPasted; } break;
             case 2: if (item.volume)    { tr.volume    = *item.volume;    ++itemsPasted; } break;
-            case 3: if (item.fxType)    { tr.fx1Type   = *item.fxType; tr.fx1Off = item.fxOff; ++itemsPasted; } break;
-            case 4: if (item.fxValue)   { tr.fx1Value  = *item.fxValue;   ++itemsPasted; } break;
-            case 5: if (item.fxType)    { tr.fx2Type   = *item.fxType; tr.fx2Off = item.fxOff; ++itemsPasted; } break;
-            case 6: if (item.fxValue)   { tr.fx2Value  = *item.fxValue;   ++itemsPasted; } break;
-            case 7: if (item.fxType)    { tr.fx3Type   = *item.fxType; tr.fx3Off = item.fxOff; ++itemsPasted; } break;
-            case 8: if (item.fxValue)   { tr.fx3Value  = *item.fxValue;   ++itemsPasted; } break;
-            default: break;
+            default: if (paste_fx_cell(tr, item, targetCol, TABLE_FX_COLUMN)) ++itemsPasted; break;
         }
     }
     return PasteResult{PasteResult::Kind::SUCCESS, itemsPasted};
@@ -337,6 +345,14 @@ template <class T> void clear_to(T& field, const T& empty, int& changed) {
     ++changed;
 }
 
+template <typename Row> void delete_fx_cell(Row& row, int col, int first, int& changed) {
+    const int slot = fx_slot_of_column(col, first);
+    if (slot == 0) return;
+    songcore::FxSlot& f = songcore::fx_slot_ref(row, slot);
+    if (is_fx_type_column(col, first)) clear_to(f.type, 0, changed);
+    clear_to(f.value, 0, changed);
+}
+
 }  // namespace
 
 int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int startColumn,
@@ -354,13 +370,7 @@ int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int s
                 case 1: clear_to(step.note, Note::EMPTY(), changed); break;
                 case 2: clear_to(step.volume, 0x7F, changed); break;  // max velocity
                 case 3: clear_to(step.instrument, 0, changed); break;
-                case 4: clear_to(step.fx1Type, 0, changed); clear_to(step.fx1Value, 0, changed); break;
-                case 5: clear_to(step.fx1Value, 0, changed); break;
-                case 6: clear_to(step.fx2Type, 0, changed); clear_to(step.fx2Value, 0, changed); break;
-                case 7: clear_to(step.fx2Value, 0, changed); break;
-                case 8: clear_to(step.fx3Type, 0, changed); clear_to(step.fx3Value, 0, changed); break;
-                case 9: clear_to(step.fx3Value, 0, changed); break;
-                default: break;
+                default: delete_fx_cell(step, col, PHRASE_FX_COLUMN, changed); break;
             }
         }
     }
@@ -418,13 +428,7 @@ int Clipboard::delete_table_rows(Project& p, int tableId, int startRow, int star
             switch (col) {
                 case 1: clear_to(tr.transpose, 0x00, changed); break;
                 case 2: clear_to(tr.volume, -1, changed); break;  // a table volume CAN be empty
-                case 3: clear_to(tr.fx1Type, 0, changed); clear_to(tr.fx1Value, 0, changed); break;
-                case 4: clear_to(tr.fx1Value, 0, changed); break;
-                case 5: clear_to(tr.fx2Type, 0, changed); clear_to(tr.fx2Value, 0, changed); break;
-                case 6: clear_to(tr.fx2Value, 0, changed); break;
-                case 7: clear_to(tr.fx3Type, 0, changed); clear_to(tr.fx3Value, 0, changed); break;
-                case 8: clear_to(tr.fx3Value, 0, changed); break;
-                default: break;
+                default: delete_fx_cell(tr, col, TABLE_FX_COLUMN, changed); break;
             }
         }
     }

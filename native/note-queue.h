@@ -320,14 +320,10 @@ struct InstrumentModSlot {
 
 // One row of a table — a 16-row sequencer that runs beside a playing voice.
 struct TableRow {
-    int8_t transpose = 0;       // semitones, signed
-    uint8_t volume   = 0xFF;    // FF = no change
-    uint8_t fx1Type  = 0;       // 0 = none
-    uint8_t fx1Value = 0;
-    uint8_t fx2Type  = 0;
-    uint8_t fx2Value = 0;
-    uint8_t fx3Type  = 0;
-    uint8_t fx3Value = 0;
+    struct Fx { uint8_t type = 0, value = 0; };   // type 0 = none
+    int8_t  transpose = 0;      // semitones, signed
+    uint8_t volume    = 0xFF;   // FF = no change
+    Fx      fx[3];              // FX1..FX3 = lanes 0..2
 };
 
 static_assert(sizeof(TableRow) == 8, "a table row is one 64-bit word in TableStore");

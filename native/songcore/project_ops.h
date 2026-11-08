@@ -40,7 +40,7 @@ inline UsedRefs collect_used_refs(const Project& project) {
     for (int phraseId : used.phrases) {
         if (phraseId >= static_cast<int>(project.phrases.size())) continue;
         for (const PhraseStep& step : project.phrases[static_cast<size_t>(phraseId)].steps) {
-            if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
+            if (has_fx(step, FX_RND) || has_fx(step, FX_RNL)) sawRandom = true;
             if (step_has_note(step)) {
                 used.instruments.insert(step.instrument);
                 // An INS cell's instrument is played too, so COMPACT must not wipe it.
@@ -80,11 +80,9 @@ inline void clean_unused_inst(Project& project) {
     for (int phraseId : used.phrases) {
         if (phraseId >= static_cast<int>(project.phrases.size())) continue;
         for (const PhraseStep& step : project.phrases[static_cast<size_t>(phraseId)].steps) {
-            const int types[3]  = {step.fx1Type,  step.fx2Type,  step.fx3Type};
-            const int values[3] = {step.fx1Value, step.fx2Value, step.fx3Value};
-            for (int k = 0; k < 3; ++k) {
-                if (types[k] == FX_TBL) usedTables.insert(values[k] & 0xFF);
-                if (types[k] == FX_GRV) usedGrooves.insert(values[k] & 0xFF);
+            for (const FxSlot& f : step.fx) {
+                if (f.type == FX_TBL) usedTables.insert(f.value & 0xFF);
+                if (f.type == FX_GRV) usedGrooves.insert(f.value & 0xFF);
             }
         }
     }
@@ -105,14 +103,12 @@ inline void clean_unused_inst(Project& project) {
         if (tableId < 0 || tableId >= static_cast<int>(project.tables.size())) continue;
 
         for (const TableRow& row : project.tables[static_cast<size_t>(tableId)].rows) {
-            const int types[3]  = {row.fx1Type,  row.fx2Type,  row.fx3Type};
-            const int values[3] = {row.fx1Value, row.fx2Value, row.fx3Value};
-            for (int k = 0; k < 3; ++k) {
-                if (types[k] == FX_TBL) {
-                    const int ref = values[k] & 0xFF;
+            for (const FxSlot& f : row.fx) {
+                if (f.type == FX_TBL) {
+                    const int ref = f.value & 0xFF;
                     if (usedTables.insert(ref).second) worklist.push_back(ref);
-                } else if (types[k] == FX_GRV) {
-                    usedGrooves.insert(values[k] & 0xFF);
+                } else if (f.type == FX_GRV) {
+                    usedGrooves.insert(f.value & 0xFF);
                 }
             }
         }

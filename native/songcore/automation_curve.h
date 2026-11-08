@@ -81,9 +81,10 @@ struct RampRowFx {
 
 template <typename Row> inline RampRowFx ramp_row_fx(const Row& r) {
     RampRowFx fx;
-    fx.type[1] = r.fx1Type;  fx.value[1] = r.fx1Value;
-    fx.type[2] = r.fx2Type;  fx.value[2] = r.fx2Value;
-    fx.type[3] = r.fx3Type;  fx.value[3] = r.fx3Value;
+    for (int slot = 1; slot <= 3; ++slot) {
+        fx.type[slot]  = r.fx[static_cast<size_t>(slot - 1)].type;
+        fx.value[slot] = r.fx[static_cast<size_t>(slot - 1)].value;
+    }
     return fx;
 }
 

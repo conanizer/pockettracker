@@ -15,6 +15,7 @@
 #include "songcore/model.h"
 #include "songcore/rng.h"
 #include "songcore/scales.h"
+#include "ui/fx_columns.h"
 
 namespace pt::ui {
 
@@ -39,16 +40,16 @@ inline constexpr int FILL_RAMP      = -1;
 inline constexpr int FILL_SPACINGS[] = {8, 6, 4, 3, 2, 1};
 inline constexpr int FILL_SPREADS[]  = {3, 5, 6, 7, 9, 11, 13};
 
-inline constexpr bool fill_is_fx_type(int column)  { return column >= 4 && column % 2 == 0; }
-inline constexpr bool fill_is_fx_value(int column) { return column >= 5 && column % 2 == 1; }
-inline constexpr int  fill_fx_slot(int column)     { return (column - 2) / 2; }
+inline constexpr int  fill_fx_slot(int column)     { return fx_slot_of_column(column, PHRASE_FX_COLUMN); }
+inline constexpr bool fill_is_fx_type(int column)  { return is_fx_type_column(column, PHRASE_FX_COLUMN); }
+inline constexpr bool fill_is_fx_value(int column) { return fill_fx_slot(column) != 0 && !fill_is_fx_type(column); }
 
 // Does this cell hold something a fill can use? ⚠️ Volume and instrument count only beside a note, or
 // an empty top row would stamp 7F / 00 over every note in the range.
 inline bool fill_cell_holds(const songcore::PhraseStep& s, int column) {
     if (column == 1) return s.note != songcore::Note::EMPTY();
     if (column == 2 || column == 3) return songcore::step_has_note(s);
-    return songcore::step_fx_type(s, fill_fx_slot(column)) != songcore::FX_NONE;
+    return songcore::fx_slot(s, fill_fx_slot(column)).type != songcore::FX_NONE;
 }
 
 /** A cell as a number: a note's MIDI pitch, a volume, an instrument, an FX value. */
@@ -56,13 +57,13 @@ inline int fill_get(const songcore::PhraseStep& s, int column) {
     if (column == 1) return songcore::note_to_midi(s.note);
     if (column == 2) return s.volume;
     if (column == 3) return s.instrument;
-    return songcore::step_fx_value(s, fill_fx_slot(column));
+    return songcore::fx_slot(s, fill_fx_slot(column)).value;
 }
 inline void fill_set(songcore::PhraseStep& s, int column, int value) {
     if (column == 1)      s.note = songcore::note_from_midi(value);
     else if (column == 2) s.volume = value;
     else if (column == 3) s.instrument = value;
-    else                  songcore::step_set_fx_value(s, fill_fx_slot(column), value);
+    else if (const int slot = fill_fx_slot(column)) songcore::fx_slot_ref(s, slot).value = value;
 }
 
 inline bool fill_same_steps(const songcore::Phrase& a, const songcore::Phrase& b) {
@@ -70,10 +71,7 @@ inline bool fill_same_steps(const songcore::Phrase& a, const songcore::Phrase& b
     for (size_t i = 0; i < a.steps.size(); ++i) {
         const songcore::PhraseStep& x = a.steps[i];
         const songcore::PhraseStep& y = b.steps[i];
-        if (x.note != y.note || x.instrument != y.instrument || x.volume != y.volume ||
-            x.fx1Type != y.fx1Type || x.fx1Value != y.fx1Value || x.fx2Type != y.fx2Type ||
-            x.fx2Value != y.fx2Value || x.fx3Type != y.fx3Type || x.fx3Value != y.fx3Value ||
-            x.fx1Off != y.fx1Off || x.fx2Off != y.fx2Off || x.fx3Off != y.fx3Off)
+        if (x.note != y.note || x.instrument != y.instrument || x.volume != y.volume || x.fx != y.fx)
             return false;
     }
     return true;
@@ -100,21 +98,21 @@ inline void fill_place(songcore::PhraseStep& dst, const songcore::PhraseStep& sr
     if (srcNote && r.has(2)) dst.volume = src.volume;
     if (srcNote && r.has(3)) dst.instrument = src.instrument;
 
-    for (int slot = 1; slot <= 3; ++slot) {
-        const int  type     = songcore::step_fx_type(src, slot);
-        const bool hasType  = r.has(2 + slot * 2);
-        const bool hasValue = r.has(3 + slot * 2);
-        if (type == songcore::FX_NONE || (!hasType && !hasValue)) continue;
+    for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
+        const songcore::FxSlot& from = songcore::fx_slot(src, slot);
+        songcore::FxSlot&       to   = songcore::fx_slot_ref(dst, slot);
+        const int  typeColumn = fx_type_column(slot, PHRASE_FX_COLUMN);
+        const bool hasType    = r.has(typeColumn);
+        const bool hasValue   = r.has(typeColumn + 1);
+        if (from.type == songcore::FX_NONE || (!hasType && !hasValue)) continue;
 
-        const int was = songcore::step_fx_type(dst, slot);
-        if (r.wholeUnit || (hasType && hasValue) || was == songcore::FX_NONE) {
-            songcore::step_set_fx(dst, slot, type, songcore::step_fx_value(src, slot));
-            songcore::set_fx_off(dst, slot, songcore::fx_off(src, slot));
+        if (r.wholeUnit || (hasType && hasValue) || to.type == songcore::FX_NONE) {
+            to = from;
         } else if (hasType) {
-            songcore::step_set_fx(dst, slot, type, songcore::step_fx_value(dst, slot));
-            songcore::set_fx_off(dst, slot, songcore::fx_off(src, slot));
-        } else if (was == type)
-            songcore::step_set_fx_value(dst, slot, songcore::step_fx_value(src, slot));
+            to.type = from.type;   // the value stays
+            to.off  = from.off;
+        } else if (to.type == from.type)
+            to.value = from.value;
     }
 }
 
@@ -175,8 +173,8 @@ inline bool fill_ramps(const songcore::Phrase& base, const FillRange& r, int col
                fill_get(a, column) != fill_get(b, column);
     }
     const int slot = fill_fx_slot(column);
-    return songcore::step_fx_type(a, slot) != songcore::FX_NONE &&
-           songcore::step_fx_type(a, slot) == songcore::step_fx_type(b, slot) &&
+    return songcore::fx_slot(a, slot).type != songcore::FX_NONE &&
+           songcore::fx_slot(a, slot).type == songcore::fx_slot(b, slot).type &&
            fill_get(a, column) != fill_get(b, column);
 }
 
@@ -205,9 +203,9 @@ inline songcore::Phrase fill_ramp(const songcore::Phrase& base, const FillRange&
                 if (songcore::step_has_note(dst)) fill_set(dst, column, value);
             } else {
                 const int slot = fill_fx_slot(column);
-                const int type = songcore::step_fx_type(a, slot);
-                const int was  = songcore::step_fx_type(dst, slot);
-                if (was == songcore::FX_NONE || was == type) songcore::step_set_fx(dst, slot, type, value);
+                songcore::FxSlot& f    = songcore::fx_slot_ref(dst, slot);
+                const int         type = songcore::fx_slot(a, slot).type;
+                if (f.type == songcore::FX_NONE || f.type == type) { f.type = type; f.value = value; }
             }
         }
     }
@@ -314,7 +312,7 @@ inline songcore::Phrase fill_randomize(const songcore::Phrase& placed, FillRange
                 if (!notes.empty())
                     fill_set(s, 1, notes[static_cast<size_t>(rng.next_int(static_cast<int>(notes.size())))]);
             } else if (fill_is_fx_value(column)) {
-                const int max = songcore::effect_value_max(songcore::step_fx_type(s, fill_fx_slot(column)));
+                const int max = songcore::effect_value_max(songcore::fx_slot(s, fill_fx_slot(column)).type);
                 fill_set(s, column, flat ? rng.next_int(0, max + 1)
                                          : std::min(max, rng.next_int(lo, hi + 1)));
             } else {

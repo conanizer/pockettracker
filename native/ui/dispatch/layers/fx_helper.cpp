@@ -2,18 +2,11 @@
 // writes the highlighted effect. ⚠️ The cursor underneath still names the cell the commit writes.
 
 #include "ui/dispatch/dispatch_common.h"
+#include "ui/fx_columns.h"
 
 namespace pt::ui {
 
 namespace {
-
-// A phrase step and a table row carry the same six FX fields; `slot` is 0-2.
-template <class Row> auto& fx_type_of(Row& r, int slot) {
-    return slot == 0 ? r.fx1Type : slot == 1 ? r.fx2Type : r.fx3Type;
-}
-template <class Row> auto& fx_value_of(Row& r, int slot) {
-    return slot == 0 ? r.fx1Value : slot == 1 ? r.fx2Value : r.fx3Value;
-}
 
 // The phrase step or table row under the cursor, handed to `fn`; nothing on any other screen.
 template <class P, class F> void with_fx_row(const AppState& s, P& p, F fn) {
@@ -53,27 +46,23 @@ void InputDispatcher::open_fx_helper() {
 
 bool InputDispatcher::on_fx_type_column() const {
     switch (s_.currentScreen) {
-        case ScreenType::PHRASE:
-            return s_.cursorColumn == 4 || s_.cursorColumn == 6 || s_.cursorColumn == 8;
-        case ScreenType::TABLE:
-            return s_.tableCursorColumn == 3 || s_.tableCursorColumn == 5 ||
-                   s_.tableCursorColumn == 7;
-        default:
-            return false;
+        case ScreenType::PHRASE: return is_fx_type_column(s_.cursorColumn, PHRASE_FX_COLUMN);
+        case ScreenType::TABLE:  return is_fx_type_column(s_.tableCursorColumn, TABLE_FX_COLUMN);
+        default:                 return false;
     }
 }
 
 int InputDispatcher::current_fx_type_code() const {
     int code = 0;
     if (on_fx_type_column())
-        with_fx_row(s_, *s_.project, [&](const auto& r) { code = fx_type_of(r, fx_slot_at_cursor()); });
+        with_fx_row(s_, *s_.project, [&](const auto& r) { code = songcore::fx_slot(r, fx_slot_at_cursor()).type; });
     return code;
 }
 
 void InputDispatcher::apply_fx_type_change(int effect_code) {
     if (!on_fx_type_column() || effect_code == current_fx_type_code()) return;
     const int slot = fx_slot_at_cursor();
-    with_fx_row(s_, host_.edit_project(), [&](auto& r) { fx_type_of(r, slot) = effect_code; });
+    with_fx_row(s_, host_.edit_project(), [&](auto& r) { songcore::fx_slot_ref(r, slot).type = effect_code; });
     mark_modified(/*table_touched=*/s_.currentScreen == ScreenType::TABLE);
     remember_fx_at_cursor();
 }
@@ -81,24 +70,19 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
 // ─── A on an empty command cell ──────────────────────────────────────────────────────────────────
 
 int InputDispatcher::fx_slot_at_cursor() const {
-    if (s_.currentScreen == ScreenType::PHRASE && s_.cursorColumn >= 4) return (s_.cursorColumn - 4) / 2;
-    if (s_.currentScreen == ScreenType::TABLE && s_.tableCursorColumn >= 3)
-        return (s_.tableCursorColumn - 3) / 2;
-    return -1;
+    if (s_.currentScreen == ScreenType::PHRASE) return fx_slot_of_column(s_.cursorColumn, PHRASE_FX_COLUMN);
+    if (s_.currentScreen == ScreenType::TABLE)  return fx_slot_of_column(s_.tableCursorColumn, TABLE_FX_COLUMN);
+    return 0;
 }
 
 void InputDispatcher::remember_fx_at_cursor() {
     const int slot = fx_slot_at_cursor();
-    if (slot < 0) return;
-    int type  = songcore::FX_NONE;
-    int value = 0;
-    with_fx_row(s_, *s_.project, [&](const auto& r) {
-        type  = fx_type_of(r, slot);
-        value = fx_value_of(r, slot);
-    });
-    if (type == songcore::FX_NONE) return;   // a cleared cell leaves the memory alone
-    s_.lastEditedFxType  = type;
-    s_.lastEditedFxValue = value;
+    if (slot == 0) return;
+    songcore::FxSlot f;
+    with_fx_row(s_, *s_.project, [&](const auto& r) { f = songcore::fx_slot(r, slot); });
+    if (f.type == songcore::FX_NONE) return;   // a cleared cell leaves the memory alone
+    s_.lastEditedFxType  = f.type;
+    s_.lastEditedFxValue = f.value;
 }
 
 bool InputDispatcher::lay_last_fx(bool peek) {
@@ -108,8 +92,9 @@ bool InputDispatcher::lay_last_fx(bool peek) {
 
     const int slot = fx_slot_at_cursor();
     with_fx_row(s_, host_.edit_project(), [&](auto& r) {
-        fx_type_of(r, slot)  = s_.lastEditedFxType;
-        fx_value_of(r, slot) = s_.lastEditedFxValue;
+        songcore::FxSlot& f = songcore::fx_slot_ref(r, slot);
+        f.type  = s_.lastEditedFxType;
+        f.value = s_.lastEditedFxValue;
     });
     return true;
 }
@@ -127,9 +112,9 @@ bool InputDispatcher::cursor_cell_empty() const {
         return !songcore::step_has_note(s_.project->phrases[static_cast<size_t>(s_.currentPhrase)]
                                             .steps[static_cast<size_t>(s_.cursorRow)]);
     const int slot = fx_slot_at_cursor();
-    if (slot < 0) return false;
+    if (slot == 0) return false;
     int type = songcore::FX_NONE;
-    with_fx_row(s_, *s_.project, [&](const auto& r) { type = fx_type_of(r, slot); });
+    with_fx_row(s_, *s_.project, [&](const auto& r) { type = songcore::fx_slot(r, slot).type; });
     return type == songcore::FX_NONE;
 }
 

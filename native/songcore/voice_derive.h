@@ -221,12 +221,10 @@ void push_table(Engine& engine, const Project& project, int tableId) {
         uint8_t* p = rowData + rowIndex * 8;
         p[0] = static_cast<uint8_t>(row.transpose);
         p[1] = static_cast<uint8_t>(row.volume);     // -1 → 0xFF
-        p[2] = static_cast<uint8_t>(row.fx1Type);
-        p[3] = static_cast<uint8_t>(row.fx1Value);
-        p[4] = static_cast<uint8_t>(row.fx2Type);
-        p[5] = static_cast<uint8_t>(row.fx2Value);
-        p[6] = static_cast<uint8_t>(row.fx3Type);
-        p[7] = static_cast<uint8_t>(row.fx3Value);
+        for (int i = 0; i < FX_SLOTS; ++i) {
+            p[2 + 2 * i] = static_cast<uint8_t>(row.fx[static_cast<size_t>(i)].type);
+            p[3 + 2 * i] = static_cast<uint8_t>(row.fx[static_cast<size_t>(i)].value);
+        }
     }
     engine.loadTable(tableId, rowData);
 }
@@ -268,11 +266,9 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
             for (int rowIndex = 0; rowIndex < 16 && rowIndex < static_cast<int>(table.rows.size()); ++rowIndex) {
                 const TableRow& row = table.rows[rowIndex];
                 // A table id defaults to its instrument's id, so an INS value names the next table too.
-                const int fxType[3]  = {row.fx1Type,  row.fx2Type,  row.fx3Type};
-                const int fxValue[3] = {row.fx1Value, row.fx2Value, row.fx3Value};
-                for (int s = 0; s < 3; ++s) {
-                    if (fxType[s] != FX_INS) continue;
-                    const int next = fxValue[s] & 0x7F;
+                for (const FxSlot& f : row.fx) {
+                    if (f.type != FX_INS) continue;
+                    const int next = f.value & 0x7F;
                     if (next >= POOL_TABLES || queued[next] || tableLoaded[next]) continue;
                     queued[next] = true;
                     pending[top++] = next;

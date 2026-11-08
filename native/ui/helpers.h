@@ -203,14 +203,13 @@ inline std::string megabytes_str(int64_t bytes) {
     return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + " MB";
 }
 
-// Clear one FX slot (1..3) of a step.
-inline void clear_effect(songcore::PhraseStep& step, int fx_slot) {
-    switch (fx_slot) {
-        case 1: step.fx1Type = 0x00; step.fx1Value = 0x00; break;
-        case 2: step.fx2Type = 0x00; step.fx2Value = 0x00; break;
-        case 3: step.fx3Type = 0x00; step.fx3Value = 0x00; break;
-        default: break;
-    }
+// Clear one FX slot (1..3) of a phrase step or a table row; its switch stays (an empty slot plays
+// nothing either way).
+template <typename Row> void clear_effect(Row& row, int fx_slot) {
+    if (fx_slot < 1 || fx_slot > songcore::FX_SLOTS) return;
+    songcore::FxSlot& f = songcore::fx_slot_ref(row, fx_slot);
+    f.type  = 0x00;
+    f.value = 0x00;
 }
 
 }  // namespace pt::ui

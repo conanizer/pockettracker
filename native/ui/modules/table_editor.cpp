@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "songcore/table_automation.h"
+#include "ui/fx_columns.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -97,21 +98,16 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     cells.cell(row.volume == -1 ? "--" : hex2(row.volume), volX, cur(2), sel(2),
                /*is_empty=*/row.volume == -1, t.textValue);
 
-    // FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8. A pair dims when unset or switched off, an AUS/AUF when
-    // no ramp uses it.
-    const auto fxDim = [&](int type, int slot) {
-        return type == 0x00 || songcore::fx_off(row, slot) || !rampCells.active(type, index, slot);
-    };
-
-    const bool fx1Empty = fxDim(row.fx1Type, 1);
-    cells.cell(effect_name(row.fx1Type), fx1NameX,  cur(3), sel(3), fx1Empty, t.textValue);
-    cells.cell(hex2(row.fx1Value),       fx1ValueX, cur(4), sel(4), fx1Empty, t.textValue);
-    const bool fx2Empty = fxDim(row.fx2Type, 2);
-    cells.cell(effect_name(row.fx2Type), fx2NameX,  cur(5), sel(5), fx2Empty, t.textValue);
-    cells.cell(hex2(row.fx2Value),       fx2ValueX, cur(6), sel(6), fx2Empty, t.textValue);
-    const bool fx3Empty = fxDim(row.fx3Type, 3);
-    cells.cell(effect_name(row.fx3Type), fx3NameX,  cur(7), sel(7), fx3Empty, t.textValue);
-    cells.cell(hex2(row.fx3Value),       fx3ValueX, cur(8), sel(8), fx3Empty, t.textValue);
+    // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it.
+    const int nameX[]  = {fx1NameX, fx2NameX, fx3NameX};
+    const int valueX[] = {fx1ValueX, fx2ValueX, fx3ValueX};
+    for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
+        const songcore::FxSlot& f = songcore::fx_slot(row, slot);
+        const int  col = fx_type_column(slot, TABLE_FX_COLUMN);
+        const bool dim = f.type == 0x00 || f.off || !rampCells.active(f.type, index, slot);
+        cells.cell(effect_name(f.type), nameX[slot - 1],  cur(col),     sel(col),     dim, t.textValue);
+        cells.cell(hex2(f.value),       valueX[slot - 1], cur(col + 1), sel(col + 1), dim, t.textValue);
+    }
 
     // Lanes 1 and 2 get a marker ahead of their FX column; lane 0 two, beside the row number and
     // ahead of FX1. A stopped lane (−1) has none.
@@ -149,15 +145,15 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
             return ctx;
         }
 
-        case 3: return cc::effect_type(row.fx1Type, 1, s.effectTypeCount);
-        case 4: return fx_value(row.fx1Value, row.fx1Type);
-        case 5: return cc::effect_type(row.fx2Type, 2, s.effectTypeCount);
-        case 6: return fx_value(row.fx2Value, row.fx2Type);
-        case 7: return cc::effect_type(row.fx3Type, 3, s.effectTypeCount);
-        case 8: return fx_value(row.fx3Value, row.fx3Type);
-
-        default: return cc::none();
+        default: break;
     }
+    if (const int slot = fx_slot_of_column(s.cursorColumn, TABLE_FX_COLUMN)) {
+        const songcore::FxSlot& f = songcore::fx_slot(row, slot);
+        return is_fx_type_column(s.cursorColumn, TABLE_FX_COLUMN)
+                   ? cc::effect_type(f.type, slot, s.effectTypeCount)
+                   : fx_value(f.value, f.type);
+    }
+    return cc::none();
 }
 
 TableInputResult TableModule::handle_input(songcore::Table& table, int cursor_row, int cursor_column,
@@ -172,14 +168,16 @@ TableInputResult TableModule::handle_input(songcore::Table& table, int cursor_ro
             switch (cursor_column) {
                 case 1: row.transpose = clamp255(action.value); break;
                 case 2: row.volume    = clamp255(action.value); break;
-                // The type columns store an index into EFFECT_TYPES; the code is what the row keeps.
-                case 3: row.fx1Type  = songcore::effect_type_at(action.value); break;
-                case 4: row.fx1Value = clamp255(action.value); break;
-                case 5: row.fx2Type  = songcore::effect_type_at(action.value); break;
-                case 6: row.fx2Value = clamp255(action.value); break;
-                case 7: row.fx3Type  = songcore::effect_type_at(action.value); break;
-                case 8: row.fx3Value = clamp255(action.value); break;
-                default: break;
+                default:
+                    // The type columns store an index into EFFECT_TYPES; the code is what the row keeps.
+                    if (const int slot = fx_slot_of_column(cursor_column, TABLE_FX_COLUMN)) {
+                        songcore::FxSlot& f = songcore::fx_slot_ref(row, slot);
+                        if (is_fx_type_column(cursor_column, TABLE_FX_COLUMN))
+                            f.type = songcore::effect_type_at(action.value);
+                        else
+                            f.value = clamp255(action.value);
+                    }
+                    break;
             }
             break;
 
@@ -187,10 +185,10 @@ TableInputResult TableModule::handle_input(songcore::Table& table, int cursor_ro
             switch (cursor_column) {
                 case 1: row.transpose = 0x00; break;  // back to no transpose
                 case 2: row.volume    = -1;   break;  // back to no volume change
-                case 3: row.fx1Type = 0; row.fx1Value = 0; break;
-                case 5: row.fx2Type = 0; row.fx2Value = 0; break;
-                case 7: row.fx3Type = 0; row.fx3Value = 0; break;
-                default: break;
+                default:
+                    if (is_fx_type_column(cursor_column, TABLE_FX_COLUMN))
+                        clear_effect(row, fx_slot_of_column(cursor_column, TABLE_FX_COLUMN));
+                    break;
             }
             break;
 

@@ -66,10 +66,9 @@ inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
     for (int r = 0; r <= last; ++r) {
         const PhraseStep step = as_played(ph.steps[static_cast<size_t>(r)]);
         int sca = -1, scg = -1;
-        for (int slot = 1; slot <= 3; ++slot) {
-            const int type = step_fx_type(step, slot);
-            if (type == FX_SCG)      scg = step_fx_value(step, slot);
-            else if (type == FX_SCA) sca = step_fx_value(step, slot);
+        for (const FxSlot& f : step.fx) {
+            if (f.type == FX_SCG)      scg = f.value;
+            else if (f.type == FX_SCA) sca = f.value;
         }
         if (scg >= 0) { at.slot = scale_cmd_slot(scg); at.key = scale_cmd_key(scg); }
         if (sca >= 0) { at.slot = scale_cmd_slot(sca); at.key = scale_cmd_key(sca); }

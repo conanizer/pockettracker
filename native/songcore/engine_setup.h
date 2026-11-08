@@ -66,11 +66,9 @@ void push_used_instrument_params(Engine& engine, const Project& project, const R
         pending.pop_back();
         if (id >= tableCount) continue;
         for (const TableRow& row : project.tables[id].rows) {
-            const int fxType[3]  = {row.fx1Type,  row.fx2Type,  row.fx3Type};
-            const int fxValue[3] = {row.fx1Value, row.fx2Value, row.fx3Value};
-            for (int s = 0; s < 3; ++s) {
-                if (fxType[s] != FX_INS) continue;
-                const int next = fxValue[s] & 0x7F;
+            for (const FxSlot& f : row.fx) {
+                if (f.type != FX_INS) continue;
+                const int next = f.value & 0x7F;
                 if (next >= POOL_INSTRUMENTS || wanted[next]) continue;
                 wanted[next] = true;
                 pending.push_back(next);

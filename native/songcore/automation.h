@@ -185,10 +185,8 @@ inline int ramp_value(const RampSpec& r, double t) {
 inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     for (const PhraseStep& authored : phrase.steps) {
         const PhraseStep step = as_played(authored);
-        for (int slot = 1; slot <= 3; ++slot) {
-            const int type = step_fx_type(step, slot);
-            if (type == FX_AUS || type == FX_AUF) return true;
-        }
+        for (const FxSlot& f : step.fx)
+            if (f.type == FX_AUS || f.type == FX_AUF) return true;
     }
     return false;
 }

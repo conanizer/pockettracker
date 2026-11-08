@@ -914,9 +914,9 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
         // CHA/RND/RNL first: a GRV is the one the row plays, and it times its own row. The last GRV wins.
         bool skipNote = false;
         const PhraseStep effective = applyChanceAndRandomize(step, trackState, skipNote);
-        for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
-            if (step_fx_type(effective, fxSlot) == FX_GRV) {
-                trackState.grooveId = step_fx_value(effective, fxSlot);
+        for (const FxSlot& f : effective.fx) {
+            if (f.type == FX_GRV) {
+                trackState.grooveId = f.value;
                 w.localGrooveStep = 0;
                 trackState.grooveCarry = 0;
             }
@@ -1006,7 +1006,7 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
         // crosses. Pairing reads the authored step, so the roll is consulted here.
         if (r.ausStep >= 0 && stepIndex == r.ausStep)
             trackState.set_aus_eaten(chainId, r.originAbs, r.originSlot,
-                                     step_fx_type(effectiveStep, r.ausSlot) != FX_AUS);
+                                     fx_slot(effectiveStep, r.ausSlot).type != FX_AUS);
         if (trackState.aus_eaten(chainId, r.originAbs, r.originSlot)) continue;
 
         const int lane = r.global ? TRACK_GLOBAL : trackId;
@@ -1022,7 +1022,7 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
         // ⚠️ A step that writes this parameter OWNS its frame: the ramp yields and resumes after it
         // (two updates on one frame are ordered arbitrarily). It yields to where the write actually
         // landed (`fxFrame`), read off the EFFECTIVE step.
-        const bool ownsStep = step_has_fx(effectiveStep, r.fxCode);
+        const bool ownsStep = has_fx(effectiveStep, r.fxCode);
         const bool perVoice = ramp_moves_voice(r);
 
         // ⚠️ A new note inside the fade starts from the instrument, so the fade is re-asserted a frame
@@ -1101,21 +1101,21 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
     PhraseStep effectiveStep = step;
     // NTH has done its work in the walk. Taken out here so CHA and RNL look past it to the cell
     // they would reach without it.
-    for (int slot = 1; slot <= 3; ++slot)
-        if (step_fx_type(effectiveStep, slot) == FX_NTH) step_set_fx(effectiveStep, slot, FX_NONE, 0x00);
+    for (FxSlot& f : effectiveStep.fx)
+        if (f.type == FX_NTH) f = FxSlot{};
     // CHA XY: X gates the nearest filled column on the LEFT (or the note), Y the one on the RIGHT;
     // 0 never, F always. A CHA an earlier one cleared gates nothing.
-    for (int slot = 1; slot <= 3; ++slot) {
-        if (step_fx_type(effectiveStep, slot) != FX_CHA) continue;
-        const int value = step_fx_value(effectiveStep, slot);
+    for (int slot = 1; slot <= FX_SLOTS; ++slot) {
+        if (fx_slot(effectiveStep, slot).type != FX_CHA) continue;
+        const int value = fx_slot(effectiveStep, slot).value;
         int left = slot - 1, right = slot + 1;
-        while (left >= 1 && step_fx_type(effectiveStep, left) == FX_NONE) --left;
-        while (right <= 3 && step_fx_type(effectiveStep, right) == FX_NONE) ++right;
+        while (left >= 1 && fx_slot(effectiveStep, left).type == FX_NONE) --left;
+        while (right <= FX_SLOTS && fx_slot(effectiveStep, right).type == FX_NONE) ++right;
         if (rng_int(15) >= ((value >> 4) & 0x0F)) {
-            if (left >= 1) step_set_fx(effectiveStep, left, 0x00, 0x00);
+            if (left >= 1) fx_slot_ref(effectiveStep, left) = FxSlot{};
             else           skipNote = true;
         }
-        if (right <= 3 && rng_int(15) >= (value & 0x0F)) step_set_fx(effectiveStep, right, 0x00, 0x00);
+        if (right <= FX_SLOTS && rng_int(15) >= (value & 0x0F)) fx_slot_ref(effectiveStep, right) = FxSlot{};
     }
     // RND/RNL add a random 0..XY, capped at the effect's ceiling (00 draws nothing). RNL in FX1 adds
     // 0..X to the note and 0..Y to the instrument.
@@ -1126,14 +1126,15 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
         const int added = range > 0 ? rng_range(0, range + 1) : 0;
         return clampi(base + added, 0, ceiling);
     };
-    for (int slot = 1; slot <= 3; ++slot) {
-        int fxType = step_fx_type(effectiveStep, slot);
-        int fxValue = step_fx_value(effectiveStep, slot);
+    for (int slot = 1; slot <= FX_SLOTS; ++slot) {
+        FxSlot& cell = fx_slot_ref(effectiveStep, slot);
+        const int fxType = cell.type, fxValue = cell.value;
         if (fxType == FX_RND) {
             int prevType = trackState.lastColFxType[slot];
             if (prevType == 0x00) continue;
             int base = trackState.lastColFxValue[slot];
-            step_set_fx(effectiveStep, slot, prevType, add_random(base, fxValue, effect_value_max(prevType)));
+            cell.type  = prevType;
+            cell.value = add_random(base, fxValue, effect_value_max(prevType));
         } else if (fxType == FX_RNL) {
             if (slot == 1) {
                 if (hasNote) {
@@ -1146,11 +1147,8 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
                     }
                 }
             } else {
-                int targetSlot = slot - 1;
-                int targetType = step_fx_type(effectiveStep, targetSlot);
-                int base = step_fx_value(effectiveStep, targetSlot);
-                step_set_fx_value(effectiveStep, targetSlot,
-                                  add_random(base, fxValue, effect_value_max(targetType)));
+                FxSlot& target = fx_slot_ref(effectiveStep, slot - 1);
+                target.value = add_random(target.value, fxValue, effect_value_max(target.type));
             }
         }
     }
@@ -1207,7 +1205,7 @@ void Sequencer::vibrato_from(int v, bool wide, int tempo, float& speed, float& d
 void Sequencer::end_repeat_and_arpeggio(StepPlay& s) {
     TrackState& ts = s.ts;
     const PhraseStep& step = s.step;
-    const bool hasKill = step.fx1Type == FX_KILL || step.fx2Type == FX_KILL || step.fx3Type == FX_KILL;
+    const bool hasKill = has_fx(step, FX_KILL);
     if (hasKill || note_is_off(step.note)) { ts.clearRepeat(); ts.clearArpeggio(); }
 
     s.hasNote = step_has_note(step);
@@ -1219,8 +1217,8 @@ void Sequencer::end_repeat_and_arpeggio(StepPlay& s) {
         s.savedRampVolume = clampf(ts.repeatBaseVolume + ts.repeatRetrigCount * oldDelta, 0.0f, 1.0f);
     }
 
-    if (ts.hasActiveRepeat() && step_fx_type(step, ts.repeatActiveColumn) != FX_NONE) ts.clearRepeat();
-    if (ts.hasActiveArpeggio() && step_fx_type(step, ts.arpeggioActiveColumn) != FX_NONE) ts.clearArpeggio();
+    if (ts.hasActiveRepeat() && fx_slot(step, ts.repeatActiveColumn).type != FX_NONE) ts.clearRepeat();
+    if (ts.hasActiveArpeggio() && fx_slot(step, ts.arpeggioActiveColumn).type != FX_NONE) ts.clearArpeggio();
 }
 
 void Sequencer::resolve_step(StepPlay& s) {
@@ -1494,9 +1492,10 @@ void Sequencer::schedule_repeat(StepPlay& s) {
     const int64_t stepDuration = s.stepDuration;
 
     int newRepeatColumn = 0;
-    if (effectiveStep.fx1Type == FX_REPEAT && effectiveStep.fx1Value > 0) newRepeatColumn = 1;
-    else if (effectiveStep.fx2Type == FX_REPEAT && effectiveStep.fx2Value > 0) newRepeatColumn = 2;
-    else if (effectiveStep.fx3Type == FX_REPEAT && effectiveStep.fx3Value > 0) newRepeatColumn = 3;
+    for (int slot = FX_SLOTS; slot >= 1; --slot) {
+        const FxSlot& f = fx_slot(effectiveStep, slot);
+        if (f.type == FX_REPEAT && f.value > 0) newRepeatColumn = slot;   // the leftmost
+    }
     int newRepeatTicInterval = s.params.repeatCount.value_or(0);
     int newRepeatVolRamp = s.params.repeatVolRamp.value_or(0);
 
@@ -1566,10 +1565,8 @@ void Sequencer::schedule_arpeggio(StepPlay& s) {
         ts.arpeggioSpeed = speed > 0 ? speed : 4;
     }
 
-    int newArpColumn = 0, newArpValue = 0;
-    if (effectiveStep.fx1Type == FX_ARPEGGIO) { newArpColumn = 1; newArpValue = effectiveStep.fx1Value; }
-    else if (effectiveStep.fx2Type == FX_ARPEGGIO) { newArpColumn = 2; newArpValue = effectiveStep.fx2Value; }
-    else if (effectiveStep.fx3Type == FX_ARPEGGIO) { newArpColumn = 3; newArpValue = effectiveStep.fx3Value; }
+    const int newArpColumn = slot_with_fx(effectiveStep, FX_ARPEGGIO);
+    const int newArpValue  = fx_slot(effectiveStep, newArpColumn).value;
 
     if (newArpColumn > 0 && newArpValue == 0) {
         ts.clearArpeggio();
@@ -1628,12 +1625,12 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
 }
 
 void Sequencer::remember_column_fx(StepPlay& s) {
-    for (int col = 1; col <= 3; ++col) {
-        int fxType = step_fx_type(s.step, col);
-        if (fxType != FX_NONE && fxType != FX_RND && fxType != FX_RNL && fxType != FX_CHA &&
-            fxType != FX_NTH) {
-            s.ts.lastColFxType[col] = fxType;
-            s.ts.lastColFxValue[col] = step_fx_value(s.step, col);
+    for (int col = 1; col <= FX_SLOTS; ++col) {
+        const FxSlot& f = fx_slot(s.step, col);
+        if (f.type != FX_NONE && f.type != FX_RND && f.type != FX_RNL && f.type != FX_CHA &&
+            f.type != FX_NTH) {
+            s.ts.lastColFxType[col] = f.type;
+            s.ts.lastColFxValue[col] = f.value;
         }
     }
 }
@@ -1678,7 +1675,7 @@ double Sequencer::fade_t_at(const RampSpec& r, int64_t f) const {
     if (!ramp_moves_voice(r)) return -1.0;
     if (r.ausStep >= 0 && stepIndex_ < r.ausStep) return -1.0;
     if (r.aufStep >= 0 && stepIndex_ > r.aufStep) return -1.0;
-    const bool owns = stepEffective_ != nullptr && step_has_fx(*stepEffective_, r.fxCode);
+    const bool owns = stepEffective_ != nullptr && has_fx(*stepEffective_, r.fxCode);
     if (stepIndex_ == r.aufStep) {
         const int64_t raw = owns ? stepFxFrame_ + 1 : stepTarget_;
         return f >= (raw == stepNoteFrame_ ? raw + 1 : raw) ? 1.0 : -1.0;

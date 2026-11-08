@@ -53,18 +53,27 @@ inline Note parse_note(const json& j) {
     return n;
 }
 
+// The file's names for FX1..FX3.
+struct FxSlotKeys { const char* type; const char* value; const char* off; };
+inline constexpr FxSlotKeys FX_SLOT_KEYS[FX_SLOTS] = {
+    {"fx1Type", "fx1Value", "fx1Off"}, {"fx2Type", "fx2Value", "fx2Off"}, {"fx3Type", "fx3Value", "fx3Off"}};
+
+inline void parse_fx_slots(const json& j, FxSlots& fx) {
+    for (int i = 0; i < FX_SLOTS; ++i) {
+        FxSlot& f = fx[static_cast<size_t>(i)];
+        f.type  = get_int(j,  FX_SLOT_KEYS[i].type,  f.type);
+        f.value = get_int(j,  FX_SLOT_KEYS[i].value, f.value);
+        f.off   = get_bool(j, FX_SLOT_KEYS[i].off,   f.off);
+    }
+}
+
 inline PhraseStep parse_phrase_step(const json& j) {
     PhraseStep s;
     auto it = j.find("note");
     if (it != j.end() && it->is_object()) s.note = parse_note(*it);
     s.instrument = get_int(j, "instrument", s.instrument);
     s.volume     = get_int(j, "volume",     s.volume);
-    s.fx1Type = get_int(j, "fx1Type", s.fx1Type);  s.fx1Value = get_int(j, "fx1Value", s.fx1Value);
-    s.fx2Type = get_int(j, "fx2Type", s.fx2Type);  s.fx2Value = get_int(j, "fx2Value", s.fx2Value);
-    s.fx3Type = get_int(j, "fx3Type", s.fx3Type);  s.fx3Value = get_int(j, "fx3Value", s.fx3Value);
-    s.fx1Off = get_bool(j, "fx1Off", s.fx1Off);
-    s.fx2Off = get_bool(j, "fx2Off", s.fx2Off);
-    s.fx3Off = get_bool(j, "fx3Off", s.fx3Off);
+    parse_fx_slots(j, s.fx);
     drop_off_from_empty(s);
     return s;
 }
@@ -114,12 +123,7 @@ inline TableRow parse_table_row(const json& j) {
     TableRow r;
     r.transpose = get_int(j, "transpose", r.transpose);
     r.volume    = get_int(j, "volume",    r.volume);
-    r.fx1Type = get_int(j, "fx1Type", r.fx1Type);  r.fx1Value = get_int(j, "fx1Value", r.fx1Value);
-    r.fx2Type = get_int(j, "fx2Type", r.fx2Type);  r.fx2Value = get_int(j, "fx2Value", r.fx2Value);
-    r.fx3Type = get_int(j, "fx3Type", r.fx3Type);  r.fx3Value = get_int(j, "fx3Value", r.fx3Value);
-    r.fx1Off = get_bool(j, "fx1Off", r.fx1Off);
-    r.fx2Off = get_bool(j, "fx2Off", r.fx2Off);
-    r.fx3Off = get_bool(j, "fx3Off", r.fx3Off);
+    parse_fx_slots(j, r.fx);
     drop_off_from_empty(r);
     return r;
 }
@@ -557,20 +561,25 @@ inline void emit_note(JsonWriter& w, const Note& n) {
     w.end_object();
 }
 
+// Every slot's type and value, then the switches — the order the files have always had.
+inline void emit_fx_slots(JsonWriter& w, const FxSlots& fx) {
+    for (int i = 0; i < FX_SLOTS; ++i) {
+        const FxSlot& f = fx[static_cast<size_t>(i)];
+        if (f.type  != 0x00) w.field_int(FX_SLOT_KEYS[i].type,  f.type);
+        if (f.value != 0x00) w.field_int(FX_SLOT_KEYS[i].value, f.value);
+    }
+    for (int i = 0; i < FX_SLOTS; ++i) {
+        const FxSlot& f = fx[static_cast<size_t>(i)];
+        if (f.off && f.type != 0x00) w.field_bool(FX_SLOT_KEYS[i].off, true);
+    }
+}
+
 inline void emit_phrase_step(JsonWriter& w, const PhraseStep& s) {
     w.begin_object();
     if (s.note != Note::EMPTY())  { w.key("note"); emit_note(w, s.note); }
     if (s.instrument != 0x00)     w.field_int("instrument", s.instrument);
     if (s.volume     != 0x7F)     w.field_int("volume",     s.volume);
-    if (s.fx1Type  != 0x00)       w.field_int("fx1Type",  s.fx1Type);
-    if (s.fx1Value != 0x00)       w.field_int("fx1Value", s.fx1Value);
-    if (s.fx2Type  != 0x00)       w.field_int("fx2Type",  s.fx2Type);
-    if (s.fx2Value != 0x00)       w.field_int("fx2Value", s.fx2Value);
-    if (s.fx3Type  != 0x00)       w.field_int("fx3Type",  s.fx3Type);
-    if (s.fx3Value != 0x00)       w.field_int("fx3Value", s.fx3Value);
-    if (s.fx1Off && s.fx1Type != 0x00) w.field_bool("fx1Off", true);
-    if (s.fx2Off && s.fx2Type != 0x00) w.field_bool("fx2Off", true);
-    if (s.fx3Off && s.fx3Type != 0x00) w.field_bool("fx3Off", true);
+    emit_fx_slots(w, s.fx);
     w.end_object();
 }
 
@@ -603,15 +612,7 @@ inline void emit_table_row(JsonWriter& w, const TableRow& r) {
     w.begin_object();
     if (r.transpose != 0x00) w.field_int("transpose", r.transpose);
     if (r.volume    != -1)   w.field_int("volume",    r.volume);
-    if (r.fx1Type  != 0x00)  w.field_int("fx1Type",  r.fx1Type);
-    if (r.fx1Value != 0x00)  w.field_int("fx1Value", r.fx1Value);
-    if (r.fx2Type  != 0x00)  w.field_int("fx2Type",  r.fx2Type);
-    if (r.fx2Value != 0x00)  w.field_int("fx2Value", r.fx2Value);
-    if (r.fx3Type  != 0x00)  w.field_int("fx3Type",  r.fx3Type);
-    if (r.fx3Value != 0x00)  w.field_int("fx3Value", r.fx3Value);
-    if (r.fx1Off && r.fx1Type != 0x00) w.field_bool("fx1Off", true);
-    if (r.fx2Off && r.fx2Type != 0x00) w.field_bool("fx2Off", true);
-    if (r.fx3Off && r.fx3Type != 0x00) w.field_bool("fx3Off", true);
+    emit_fx_slots(w, r.fx);
     w.end_object();
 }
 

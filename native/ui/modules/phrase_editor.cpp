@@ -1,6 +1,7 @@
 #include "ui/modules/phrase_editor.h"
 
 #include "songcore/scales.h"
+#include "ui/fx_columns.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -102,20 +103,16 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
 
     // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it.
-    const auto fxDim = [&](int type, int slot) {
-        if (cutOff && !(index == hopRow && type == songcore::FX_HOP)) return true;
-        return type == 0x00 || songcore::fx_off(step, slot) || !rampCells.active(type, index, slot);
-    };
-
-    const bool fx1Dim = fxDim(step.fx1Type, 1);
-    cells.cell(effect_name(step.fx1Type), fx1NameX,  cur(4), sel(4), fx1Dim, t.textValue);
-    cells.cell(hex2(step.fx1Value),       fx1ValueX, cur(5), sel(5), fx1Dim, t.textParam);
-    const bool fx2Dim = fxDim(step.fx2Type, 2);
-    cells.cell(effect_name(step.fx2Type), fx2NameX,  cur(6), sel(6), fx2Dim, t.textValue);
-    cells.cell(hex2(step.fx2Value),       fx2ValueX, cur(7), sel(7), fx2Dim, t.textParam);
-    const bool fx3Dim = fxDim(step.fx3Type, 3);
-    cells.cell(effect_name(step.fx3Type), fx3NameX,  cur(8), sel(8), fx3Dim, t.textValue);
-    cells.cell(hex2(step.fx3Value),       fx3ValueX, cur(9), sel(9), fx3Dim, t.textParam);
+    const int nameX[]  = {fx1NameX, fx2NameX, fx3NameX};
+    const int valueX[] = {fx1ValueX, fx2ValueX, fx3ValueX};
+    for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
+        const songcore::FxSlot& f = songcore::fx_slot(step, slot);
+        const int  col = fx_type_column(slot, PHRASE_FX_COLUMN);
+        const bool dim = (cutOff && !(index == hopRow && f.type == songcore::FX_HOP)) || f.type == 0x00 ||
+                         f.off || !rampCells.active(f.type, index, slot);
+        cells.cell(effect_name(f.type), nameX[slot - 1],  cur(col),     sel(col),     dim, t.textValue);
+        cells.cell(hex2(f.value),       valueX[slot - 1], cur(col + 1), sel(col + 1), dim, t.textParam);
+    }
 }
 
 CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) const {
@@ -148,14 +145,15 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         }
         case 2: return cc::volume(step.volume);
         case 3: return cc::instrument(step.instrument);
-        case 4: return cc::effect_type(step.fx1Type, 1, s.effectTypeCount);
-        case 5: return cc::effect_value(step.fx1Value, 1, effect_value_max(step.fx1Type));
-        case 6: return cc::effect_type(step.fx2Type, 2, s.effectTypeCount);
-        case 7: return cc::effect_value(step.fx2Value, 2, effect_value_max(step.fx2Type));
-        case 8: return cc::effect_type(step.fx3Type, 3, s.effectTypeCount);
-        case 9: return cc::effect_value(step.fx3Value, 3, effect_value_max(step.fx3Type));
-        default: return cc::none();
+        default: break;
     }
+    if (const int slot = fx_slot_of_column(s.cursorColumn, PHRASE_FX_COLUMN)) {
+        const songcore::FxSlot& f = songcore::fx_slot(step, slot);
+        return is_fx_type_column(s.cursorColumn, PHRASE_FX_COLUMN)
+                   ? cc::effect_type(f.type, slot, s.effectTypeCount)
+                   : cc::effect_value(f.value, slot, effect_value_max(f.type));
+    }
+    return cc::none();
 }
 
 PhraseInputResult PhraseEditorModule::handle_input(songcore::Phrase& phrase, int cursor_row,
@@ -182,24 +180,26 @@ PhraseInputResult PhraseEditorModule::handle_input(songcore::Phrase& phrase, int
                     r.hasInstrument        = true;
                     r.lastEditedInstrument = action.value;
                     break;
-                // The type columns store an index into EFFECT_TYPES; the code is what the step keeps.
-                case 4: step.fx1Type  = songcore::effect_type_at(action.value); break;
-                case 5: step.fx1Value = action.value; break;
-                case 6: step.fx2Type  = songcore::effect_type_at(action.value); break;
-                case 7: step.fx2Value = action.value; break;
-                case 8: step.fx3Type  = songcore::effect_type_at(action.value); break;
-                case 9: step.fx3Value = action.value; break;
-                default: break;
+                default:
+                    // The type columns store an index into EFFECT_TYPES; the code is what the step keeps.
+                    if (const int slot = fx_slot_of_column(cursor_column, PHRASE_FX_COLUMN)) {
+                        songcore::FxSlot& f = songcore::fx_slot_ref(step, slot);
+                        if (is_fx_type_column(cursor_column, PHRASE_FX_COLUMN))
+                            f.type = songcore::effect_type_at(action.value);
+                        else
+                            f.value = action.value;
+                    }
+                    break;
             }
             break;
 
         case ActionType::DELETE:
             switch (cursor_column) {
                 case 1: step.note = Note::EMPTY(); break;
-                case 4: clear_effect(step, 1); break;
-                case 6: clear_effect(step, 2); break;
-                case 8: clear_effect(step, 3); break;
-                default: break;
+                default:
+                    if (is_fx_type_column(cursor_column, PHRASE_FX_COLUMN))
+                        clear_effect(step, fx_slot_of_column(cursor_column, PHRASE_FX_COLUMN));
+                    break;
             }
             break;
 

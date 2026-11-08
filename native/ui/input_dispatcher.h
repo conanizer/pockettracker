@@ -538,7 +538,7 @@ class InputDispatcher {
     // The effect code the cursor's FX column holds — where the picker opens.
     int  current_fx_type_code() const;
     void apply_fx_type_change(int effect_code);
-    // The cursor's FX slot (0-2) on PHRASE or TABLE, from either of its cells; -1 elsewhere.
+    // The cursor's FX slot (1-3) on PHRASE or TABLE, from either of its cells; 0 elsewhere.
     int  fx_slot_at_cursor() const;
     // After an edit: the command in the cursor's FX slot is what a plain A lays down next.
     void remember_fx_at_cursor();

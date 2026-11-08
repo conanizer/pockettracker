@@ -35,19 +35,11 @@ AudioEngine::Tic00Cursor* AudioEngine::tic00Slot(int trackId, int tableId, bool 
 // Defined below, beside the playing-row readout.
 static int findTrackVoice(Voice* voices, int trackId, bool fading);
 
-// A table row's three FX slots, as (type, value) pairs — slot 1 is index 0.
-static inline void rowFx(const TableRow& r, int type[3], int value[3]) {
-    type[0] = r.fx1Type; value[0] = r.fx1Value;
-    type[1] = r.fx2Type; value[1] = r.fx2Value;
-    type[2] = r.fx3Type; value[2] = r.fx3Value;
-}
-
 // Where a HOP or THO in column `lane` sends it, a HOP's count aside; -1 = the row does not steer
 // (HOP FF stops the column instead). The player steers by the same rule, with the count.
 static int steerTarget(const TableRow& r, int lane) {
-    int t3[3], v3[3];
-    rowFx(r, t3, v3);
-    if ((t3[lane] == FX_HOP && v3[lane] != 0xFF) || t3[lane] == FX_THO) return v3[lane] & 0x0F;
+    const TableRow::Fx& f = r.fx[lane];
+    if ((f.type == FX_HOP && f.value != 0xFF) || f.type == FX_THO) return f.value & 0x0F;
     return -1;
 }
 
@@ -67,13 +59,12 @@ static int followSteering(const TableRow rows[16], int row, int lane) {
 static bool tableRandomize(const TableRow rows[16], int row, int slot, int range, uint32_t& rng,
                            int& type, int& value) {
     for (int up = 1; up < 16; ++up) {
-        int t3[3], v3[3];
-        rowFx(rows[(row - up + 16) % 16], t3, v3);
-        const int t = t3[slot];
+        const TableRow::Fx& f = rows[(row - up + 16) % 16].fx[slot];
+        const int t = f.type;
         if (t == 0 || t == FX_RND || t == FX_RNL || t == FX_CHA) continue;
         const int added = range > 0 ? static_cast<int>(xorshift32(rng) % (uint32_t)(range + 1)) : 0;
         type  = t;
-        value = std::min(v3[slot] + added, tableFxCeiling(t));
+        value = std::min(f.value + added, tableFxCeiling(t));
         return true;
     }
     return false;
@@ -87,24 +78,23 @@ static bool tableRandomize(const TableRow rows[16], int row, int slot, int range
 static TableRow rollTableRow(const TableRow rows[16], int row, int lane, uint32_t& rng,
                              int (&rolls)[3][2], bool& nvPlays) {
     TableRow played = rows[row];
-    uint8_t& fxT = (lane == 0) ? played.fx1Type  : (lane == 1) ? played.fx2Type  : played.fx3Type;
-    uint8_t& fxV = (lane == 0) ? played.fx1Value : (lane == 1) ? played.fx2Value : played.fx3Value;
-    int t3[3], v3[3];
-    rowFx(played, t3, v3);
+    uint8_t& fxT = played.fx[lane].type;
+    uint8_t& fxV = played.fx[lane].value;
+    const TableRow::Fx (&cell)[3] = rows[row].fx;   // as typed: the rolls below change only `played`
 
-    bool alive[3] = {t3[0] != 0, t3[1] != 0, t3[2] != 0};
+    bool alive[3] = {cell[0].type != 0, cell[1].type != 0, cell[2].type != 0};
     nvPlays = true;
     for (int s = 0; s < 3; ++s) {
-        if (t3[s] != FX_CHA || !alive[s]) continue;
+        if (cell[s].type != FX_CHA || !alive[s]) continue;
         for (int& r : rolls[s]) if (r < 0) r = static_cast<int>(xorshift32(rng) % 15u);
         int left = s - 1, right = s + 1;
         while (left >= 0 && !alive[left]) --left;
         while (right <= 2 && !alive[right]) ++right;
-        if (rolls[s][0] >= ((v3[s] >> 4) & 0x0F)) {
+        if (rolls[s][0] >= ((cell[s].value >> 4) & 0x0F)) {
             if (left >= 0) alive[left] = false;
             else           nvPlays = false;
         }
-        if (right <= 2 && rolls[s][1] >= (v3[s] & 0x0F)) alive[right] = false;
+        if (right <= 2 && rolls[s][1] >= (cell[s].value & 0x0F)) alive[right] = false;
     }
     if (!alive[lane]) fxT = 0;
 
@@ -117,8 +107,8 @@ static TableRow rollTableRow(const TableRow rows[16], int row, int lane, uint32_
             fxT = 0;
         }
     }
-    if (lane < 2 && fxT != 0 && alive[lane + 1] && t3[lane + 1] == FX_RNL && v3[lane + 1] > 0) {
-        const int added = static_cast<int>(xorshift32(rng) % static_cast<uint32_t>(v3[lane + 1] + 1));
+    if (lane < 2 && fxT != 0 && alive[lane + 1] && cell[lane + 1].type == FX_RNL && cell[lane + 1].value > 0) {
+        const int added = static_cast<int>(xorshift32(rng) % static_cast<uint32_t>(cell[lane + 1].value + 1));
         fxV = static_cast<uint8_t>(std::min(fxV + added, tableFxCeiling(fxT)));
     }
     return played;
@@ -149,19 +139,15 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
 
         // A table with no INS cannot route: it is left alone, no place kept.
         bool routes = false;
-        for (int r = 0; r < 16 && !routes; ++r) {
-            int t3[3], v3[3];
-            rowFx(rows[r], t3, v3);
-            for (int s = 0; s < 3; ++s) routes |= (t3[s] == FX_INS);
-        }
+        for (int r = 0; r < 16 && !routes; ++r)
+            for (const TableRow::Fx& f : rows[r].fx) routes |= (f.type == FX_INS);
         if (!routes) return instrumentId;
 
         // ⚠️ The row the voice would start at: at TIC00 one row further per trigger (the rotation),
         // otherwise row 0. With no switch, the voice starts on it. Rates per column as effectiveTicRatesFor.
         int rates[TABLE_LANES] = {p.tableTicRate, p.tableTicRate, p.tableTicRate};
-        if (rows[15].fx1Type == FX_TIC) rates[0] = rows[15].fx1Value;
-        if (rows[15].fx2Type == FX_TIC) rates[1] = rows[15].fx2Value;
-        if (rows[15].fx3Type == FX_TIC) rates[2] = rows[15].fx3Value;
+        for (int l = 0; l < TABLE_LANES; ++l)
+            if (rows[15].fx[l].type == FX_TIC) rates[l] = rows[15].fx[l].value;
 
         const Tic00Cursor* cur = tic00Slot(trackId, tableId, /*create=*/false);
         const int liveVoice = findTrackVoice(voices, trackId, /*fading=*/false);
@@ -191,9 +177,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         for (int s = 0; s < 3; ++s) {
             bool nv = true;
             const TableRow played = rollTableRow(rows, laneRow[s], s, chainRngState, rolls[laneRow[s]], nv);
-            int t3[3], v3[3];
-            rowFx(played, t3, v3);
-            type[s] = t3[s]; value[s] = v3[s]; slotRow[s] = laneRow[s];
+            type[s] = played.fx[s].type; value[s] = played.fx[s].value; slotRow[s] = laneRow[s];
             if (s == 0) nvPlays = nv;
         }
 
@@ -258,10 +242,8 @@ void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_
     if (tableId < 0 || tableId >= 256) return;
     TableRow rows[16];
     if (!tables.read(tableId, rows)) return;
-    const TableRow& lastRow = rows[15];
-    if (lastRow.fx1Type == FX_TIC) out[0] = lastRow.fx1Value;
-    if (lastRow.fx2Type == FX_TIC) out[1] = lastRow.fx2Value;
-    if (lastRow.fx3Type == FX_TIC) out[2] = lastRow.fx3Value;
+    for (int l = 0; l < TABLE_LANES; ++l)
+        if (rows[15].fx[l].type == FX_TIC) out[l] = rows[15].fx[l].value;
 }
 
 // The ARC that strums a CHD in column `slot`: the nearest to its right before another CHD or ARP, each
@@ -270,10 +252,9 @@ void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_
 static int strumForChord(const TableRow rows[16], const TableLane (&lanes)[TABLE_LANES], int slot) {
     for (int s = slot + 1; s < TABLE_LANES; ++s) {
         if (!lanes[s].active) continue;
-        int t3[3], v3[3];
-        rowFx(rows[followSteering(rows, lanes[s].row, s)], t3, v3);
-        if (t3[s] == FX_CHD || t3[s] == FX_ARPEGGIO) return -1;
-        if (t3[s] == FX_ARC) return v3[s];
+        const TableRow::Fx& f = rows[followSteering(rows, lanes[s].row, s)].fx[s];
+        if (f.type == FX_CHD || f.type == FX_ARPEGGIO) return -1;
+        if (f.type == FX_ARC) return f.value;
     }
     return -1;
 }
@@ -301,7 +282,7 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
     // nothing.
     bool blank = true;
     for (const TableRow& r : rows)
-        blank = blank && r.transpose == 0 && r.volume == 0xFF && !r.fx1Type && !r.fx2Type && !r.fx3Type;
+        blank = blank && r.transpose == 0 && r.volume == 0xFF && !r.fx[0].type && !r.fx[1].type && !r.fx[2].type;
 
     // Each CHA's two rolls per row, shared by the lanes — see rollTableRow.
     int rolls[16][3][2];
@@ -336,12 +317,11 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
             bool nvPlays = true;
             const TableRow played = rollTableRow(rows, L.row, lane, chainRngState, rolls[L.row], nvPlays);
             // A CHA that ate this column's AUS turns its ramp off until the row plays again.
-            int a3[3], av3[3], p3[3], pv3[3];
-            rowFx(rows[L.row], a3, av3);
-            rowFx(played, p3, pv3);
             const uint16_t bit = static_cast<uint16_t>(1u << L.row);
-            if (a3[lane] == table_automation::FX_AUS_CODE && p3[lane] != table_automation::FX_AUS_CODE) L.ausEaten = static_cast<uint16_t>(L.ausEaten | bit);
-            else                                          L.ausEaten = static_cast<uint16_t>(L.ausEaten & ~bit);
+            if (rows[L.row].fx[lane].type == table_automation::FX_AUS_CODE && played.fx[lane].type != table_automation::FX_AUS_CODE)
+                L.ausEaten = static_cast<uint16_t>(L.ausEaten | bit);
+            else
+                L.ausEaten = static_cast<uint16_t>(L.ausEaten & ~bit);
             if (!processTableRow(voice, rows, played, lane, shouldAdvance, from, sampleRate, nvPlays)) break;
         }
         // ⚠️ A HOP FF in an earlier lane can have cleared tableId: stop here.
@@ -389,7 +369,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow (&rows)[16], const Ta
                                   bool shouldAdvance, int atFrame, float sampleRate, bool applyNV) {
     TableLane& L = voice.lanes[lane];
 
-    const uint8_t laneFxType = (lane == 0) ? row.fx1Type : (lane == 1) ? row.fx2Type : row.fx3Type;
+    const uint8_t laneFxType = row.fx[lane].type;
     const bool steers = (laneFxType == FX_HOP || laneFxType == FX_THO);
 
     if (lane == 0 && !steers && applyNV) {
@@ -513,9 +493,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow (&rows)[16], const Ta
         }
     };
 
-    if (lane == 0)      processEffect(row.fx1Type, row.fx1Value);
-    else if (lane == 1) processEffect(row.fx2Type, row.fx2Value);
-    else                processEffect(row.fx3Type, row.fx3Value);
+    processEffect(row.fx[lane].type, row.fx[lane].value);
 
     L.lastProcessed = L.row;
 
@@ -690,12 +668,10 @@ void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
         int offset = row * 8;
         rows[row].transpose = (int8_t)rowData[offset + 0];
         rows[row].volume = rowData[offset + 1];
-        rows[row].fx1Type = rowData[offset + 2];
-        rows[row].fx1Value = rowData[offset + 3];
-        rows[row].fx2Type = rowData[offset + 4];
-        rows[row].fx2Value = rowData[offset + 5];
-        rows[row].fx3Type = rowData[offset + 6];
-        rows[row].fx3Value = rowData[offset + 7];
+        for (int l = 0; l < 3; ++l) {
+            rows[row].fx[l].type  = rowData[offset + 2 + 2 * l];
+            rows[row].fx[l].value = rowData[offset + 3 + 2 * l];
+        }
     }
     std::lock_guard<std::mutex> lock(tableWriteMutex);   // writers only; the audio thread never takes it
     tables.write(tableId, rows);

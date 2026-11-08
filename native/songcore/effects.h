@@ -144,16 +144,15 @@ constexpr int FX_CHD      = 0x3F;
 
 /** Every NTH on the row must agree. */
 inline bool step_plays_on_pass(const PhraseStep& s, int pass) {
-    for (int slot = 1; slot <= 3; ++slot)
-        if (step_fx_type(s, slot) == FX_NTH && !nth_plays(step_fx_value(s, slot), pass)) return false;
+    for (const FxSlot& f : s.fx)
+        if (f.type == FX_NTH && !nth_plays(f.value, pass)) return false;
     return true;
 }
 
 // The instrument an INS cell on this step names, or -1. Rightmost wins.
 inline int step_ins_instrument(const PhraseStep& s) {
-    if (s.fx3Type == FX_INS) return s.fx3Value & 0xFF;
-    if (s.fx2Type == FX_INS) return s.fx2Value & 0xFF;
-    if (s.fx1Type == FX_INS) return s.fx1Value & 0xFF;
+    for (int slot = FX_SLOTS; slot >= 1; --slot)
+        if (fx_slot(s, slot).type == FX_INS) return fx_slot(s, slot).value & 0xFF;
     return -1;
 }
 
@@ -275,19 +274,19 @@ inline int phrase_certain_hop_row(const Phrase& phrase) {
     for (int row = 0; row < static_cast<int>(phrase.steps.size()); ++row) {
         const PhraseStep step = as_played(phrase.steps[static_cast<size_t>(row)]);
         bool everyPass = true;
-        for (int slot = 1; slot <= 3; ++slot)
-            if (step_fx_type(step, slot) == FX_NTH && !nth_always(step_fx_value(step, slot))) everyPass = false;
+        for (const FxSlot& f : step.fx)
+            if (f.type == FX_NTH && !nth_always(f.value)) everyPass = false;
         if (!everyPass) continue;
-        for (int slot = 1; slot <= 3; ++slot) {
-            if (step_fx_type(step, slot) != FX_HOP) continue;
+        for (int slot = 1; slot <= FX_SLOTS; ++slot) {
+            if (fx_slot(step, slot).type != FX_HOP) continue;
             int left = slot - 1, right = slot + 1;
-            while (left >= 1 && unused(step_fx_type(step, left))) --left;
-            while (right <= 3 && unused(step_fx_type(step, right))) ++right;
+            while (left >= 1 && unused(fx_slot(step, left).type)) --left;
+            while (right <= FX_SLOTS && unused(fx_slot(step, right).type)) ++right;
             // The CHA to the right gates leftwards with its high nibble, the one to the left with its low.
-            const bool gatedFromRight = right <= 3 && step_fx_type(step, right) == FX_CHA &&
-                                        ((step_fx_value(step, right) >> 4) & 0x0F) != 0x0F;
-            const bool gatedFromLeft  = left >= 1 && step_fx_type(step, left) == FX_CHA &&
-                                        (step_fx_value(step, left) & 0x0F) != 0x0F;
+            const FxSlot& r = fx_slot(step, right);
+            const FxSlot& l = fx_slot(step, left);
+            const bool gatedFromRight = r.type == FX_CHA && ((r.value >> 4) & 0x0F) != 0x0F;
+            const bool gatedFromLeft  = l.type == FX_CHA && (l.value & 0x0F) != 0x0F;
             if (!gatedFromRight && !gatedFromLeft) return row;
         }
     }
@@ -355,13 +354,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
     p.volume = default_volume;
     bool arcStrums = false;
 
-    for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
-        int type, value;
-        switch (fxSlot) {
-            case 1:  type = step.fx1Type; value = step.fx1Value; break;
-            case 2:  type = step.fx2Type; value = step.fx2Value; break;
-            default: type = step.fx3Type; value = step.fx3Value; break;
-        }
+    for (const FxSlot& f : step.fx) {
+        const int type = f.type, value = f.value;
 
         switch (type) {
             case FX_OFFSET: p.startPoint = value; break;

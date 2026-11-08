@@ -6,6 +6,7 @@
 // initializer is omitted on save and a missing one loads as it. No floating point, so a .ptp
 // round-trips exactly.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -149,38 +150,29 @@ inline std::string note_name(const Note& n) {
     return std::string(NOTE_NAMES[n.pitch]) + std::to_string(n.octave);
 }
 
+// One command cell: an effect code (FX_NONE = empty), its value, and R+B's switch (see `as_played`).
+struct FxSlot {
+    int  type  = 0x00;
+    int  value = 0x00;
+    bool off   = false;
+};
+inline bool operator==(const FxSlot& a, const FxSlot& b) {
+    return a.type == b.type && a.value == b.value && a.off == b.off;
+}
+inline bool operator!=(const FxSlot& a, const FxSlot& b) { return !(a == b); }
+
+// FX1..FX3. ⚠️ The file names them `fx1Type`, `fx2Value`, `fx3Off`…: the one place a model field does
+// not mirror its JSON key, so `project_io.h` maps index to name.
+inline constexpr int FX_SLOTS = 3;
+using FxSlots = std::array<FxSlot, FX_SLOTS>;
+
 struct PhraseStep {
     Note note = Note::EMPTY();
     int  instrument = 0x00;
     int  volume     = 0x7F;
-    int  fx1Type = 0x00, fx1Value = 0x00;
-    int  fx2Type = 0x00, fx2Value = 0x00;
-    int  fx3Type = 0x00, fx3Value = 0x00;
-    bool fx1Off = false, fx2Off = false, fx3Off = false;   // switched off: see `as_played`
+    FxSlots fx{};
 };
 
-// The flat fx{1,2,3}{Type,Value} fields as slots 1..3. Beside the struct because both the scheduler
-// (last-wins, slot discarded) and `automation.h` (AUS reads the slot to its LEFT) index them.
-inline int  step_fx_type(const PhraseStep& s, int slot) {
-    return slot == 1 ? s.fx1Type : slot == 2 ? s.fx2Type : slot == 3 ? s.fx3Type : 0;
-}
-inline int  step_fx_value(const PhraseStep& s, int slot) {
-    return slot == 1 ? s.fx1Value : slot == 2 ? s.fx2Value : slot == 3 ? s.fx3Value : 0;
-}
-inline void step_set_fx(PhraseStep& s, int slot, int type, int value) {
-    if (slot == 1) { s.fx1Type = type; s.fx1Value = value; }
-    else if (slot == 2) { s.fx2Type = type; s.fx2Value = value; }
-    else if (slot == 3) { s.fx3Type = type; s.fx3Value = value; }
-}
-inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
-    if (slot == 1) s.fx1Value = value;
-    else if (slot == 2) s.fx2Value = value;
-    else if (slot == 3) s.fx3Value = value;
-}
-/** True when any of the three slots carries `type` — the AUTHORED step, before CHA/RND touch it. */
-inline bool step_has_fx(const PhraseStep& s, int type) {
-    return s.fx1Type == type || s.fx2Type == type || s.fx3Type == type;
-}
 /** A step that triggers a note — an OFF does not, and neither does its instrument column. */
 inline bool step_has_note(const PhraseStep& s) { return note_is_pitch(s.note); }
 
@@ -215,40 +207,40 @@ inline bool chain_is_empty(const Chain& c, int index) { return chain_phrase_ref(
 struct TableRow {
     int transpose = 0x00;
     int volume    = -1;
-    int fx1Type = 0x00, fx1Value = 0x00;
-    int fx2Type = 0x00, fx2Value = 0x00;
-    int fx3Type = 0x00, fx3Value = 0x00;
-    bool fx1Off = false, fx2Off = false, fx3Off = false;   // switched off: see `as_played`
+    FxSlots fx{};
 };
+
+// A step and a table row both carry `fx`; these read either. A slot NUMBER is 1..3, as on screen and
+// in the playback state (0 = none); out of range it reads as an empty slot.
+template <typename Row> const FxSlot& fx_slot(const Row& r, int slot) {
+    static const FxSlot none{};
+    return slot >= 1 && slot <= FX_SLOTS ? r.fx[static_cast<size_t>(slot - 1)] : none;
+}
+template <typename Row> FxSlot& fx_slot_ref(Row& r, int slot) {   // ⚠️ slot must be 1..3
+    return r.fx[static_cast<size_t>(slot - 1)];
+}
+// The leftmost slot carrying `type`, or 0.
+template <typename Row> int slot_with_fx(const Row& r, int type) {
+    for (int slot = 1; slot <= FX_SLOTS; ++slot)
+        if (r.fx[static_cast<size_t>(slot - 1)].type == type) return slot;
+    return 0;
+}
+// True when any slot carries `type`.
+template <typename Row> bool has_fx(const Row& r, int type) { return slot_with_fx(r, type) != 0; }
 
 // ─── A command switched off ──────────────────────────────────────────────────────────────────────
 // R+B on a phrase or table command switches it off: it stays in its cell and in the file, and plays
-// as an empty slot. Both row types spell the fields the same way.
-// ⚠️ Playback reads a step or a table row through `as_played`. A reader that takes the raw fields
+// as an empty slot.
+// ⚠️ Playback reads a step or a table row through `as_played`. A reader that takes the raw slots
 // plays a command the user has switched off.
 
-template <typename Row> int row_fx_type(const Row& r, int slot) {
-    return slot == 1 ? r.fx1Type : slot == 2 ? r.fx2Type : slot == 3 ? r.fx3Type : 0x00;
-}
-template <typename Row> bool fx_off(const Row& r, int slot) {
-    return slot == 1 ? r.fx1Off : slot == 2 ? r.fx2Off : slot == 3 ? r.fx3Off : false;
-}
-template <typename Row> void set_fx_off(Row& r, int slot, bool off) {
-    if (slot == 1) r.fx1Off = off;
-    else if (slot == 2) r.fx2Off = off;
-    else if (slot == 3) r.fx3Off = off;
-}
 template <typename Row> Row as_played(Row r) {
-    if (r.fx1Off) { r.fx1Type = 0x00; r.fx1Value = 0x00; r.fx1Off = false; }
-    if (r.fx2Off) { r.fx2Type = 0x00; r.fx2Value = 0x00; r.fx2Off = false; }
-    if (r.fx3Off) { r.fx3Type = 0x00; r.fx3Value = 0x00; r.fx3Off = false; }
+    for (FxSlot& f : r.fx) if (f.off) f = FxSlot{};
     return r;
 }
 // An empty slot is never off, so a command later typed or pasted into it starts on.
 template <typename Row> void drop_off_from_empty(Row& r) {
-    if (r.fx1Type == 0x00) r.fx1Off = false;
-    if (r.fx2Type == 0x00) r.fx2Off = false;
-    if (r.fx3Type == 0x00) r.fx3Off = false;
+    for (FxSlot& f : r.fx) if (f.type == 0x00) f.off = false;
 }
 
 struct Table {
@@ -543,9 +535,10 @@ struct InstrumentPreset {
 
 // A table worth putting in a .pti: any row that transposes, sets a volume or runs an FX in any slot.
 inline bool table_rows_have_content(const std::vector<TableRow>& rows) {
-    for (const TableRow& r : rows)
-        if (r.transpose != 0 || r.volume != -1 || r.fx1Type != 0 || r.fx2Type != 0 || r.fx3Type != 0)
-            return true;
+    for (const TableRow& r : rows) {
+        if (r.transpose != 0 || r.volume != -1) return true;
+        for (const FxSlot& f : r.fx) if (f.type != 0x00) return true;
+    }
     return false;
 }
 

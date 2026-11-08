@@ -7,6 +7,7 @@
 #include "songcore/scales.h"
 #include "ui/buttons.h"
 #include "ui/clipboard.h"
+#include "ui/fx_columns.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
 #include "ui/modules/map_picker_overlay.h"
@@ -423,13 +424,12 @@ bool TrackerLayout::draw_chord_hint(Canvas& c, const AppState& s) const {
     int key = 0;
     std::string where;   // the root's name, or why there is none
     if (s.currentScreen == ScreenType::PHRASE) {
-        const int col = s.cursorColumn;
-        if (col != 5 && col != 7 && col != 9) return false;
+        const int slot = fx_slot_of_column(s.cursorColumn, PHRASE_FX_COLUMN);
+        if (slot == 0 || is_fx_type_column(s.cursorColumn, PHRASE_FX_COLUMN)) return false;
         const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
         const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.cursorRow)];
-        const int                   slot = (col - 3) / 2;
-        if (songcore::step_fx_type(step, slot) != songcore::FX_CHD) return false;
-        value = songcore::step_fx_value(step, slot);
+        if (songcore::fx_slot(step, slot).type != songcore::FX_CHD) return false;
+        value = songcore::fx_slot(step, slot).value;
         if (!songcore::note_is_pitch(step.note)) {
             where = "NEEDS A NOTE ON THIS ROW";
         } else {
@@ -439,14 +439,12 @@ bool TrackerLayout::draw_chord_hint(Canvas& c, const AppState& s) const {
             key   = ns.key;
         }
     } else if (s.currentScreen == ScreenType::TABLE) {
-        const int col = s.tableCursorColumn;
-        if (col != 4 && col != 6 && col != 8) return false;
+        const int slot = fx_slot_of_column(s.tableCursorColumn, TABLE_FX_COLUMN);
+        if (slot == 0 || is_fx_type_column(s.tableCursorColumn, TABLE_FX_COLUMN)) return false;
         const songcore::TableRow& r =
             p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursorRow)];
-        const int slot = (col - 4) / 2;
-        const int type = slot == 0 ? r.fx1Type : slot == 1 ? r.fx2Type : r.fx3Type;
-        if (type != songcore::FX_CHD) return false;
-        value = slot == 0 ? r.fx1Value : slot == 1 ? r.fx2Value : r.fx3Value;
+        if (songcore::fx_slot(r, slot).type != songcore::FX_CHD) return false;
+        value = songcore::fx_slot(r, slot).value;
         // The row's transpose moves the note the chord is built on: 00-7F up, 80-FF down.
         const int tsp = r.transpose < 0x80 ? r.transpose : r.transpose - 256;
         root = std::max(0, std::min(127, 60 + tsp));
