@@ -114,6 +114,8 @@ native/                            The portable program
 │   ├── voice_derive.h               Note → voice parameters
 │   ├── engine_setup.h               Project → engine push (instruments, buses, EQ bank)
 │   ├── host.h / .cpp                SongcoreHost — the one runtime object a shell constructs
+│   ├── host_midi.cpp                …its MIDI side: the live input, mapped knobs, SYNC IN's follow
+│   ├── sample_editor_ops.h / .cpp   The sample editor's engine side, owned by the host
 │   ├── render.h / wav_writer.h      Offline render, WAV output
 │   ├── midi_port.h                  The output port, a message's bytes, the 7-bit scale
 │   ├── midi_out.h / midi_in.h       The MIDI seams, serializer, parser, router
@@ -359,7 +361,7 @@ never read. Uncompressed sizes are frames × 2 and cannot be odd; Ogg streams ar
 
 `native/songcore/` has no platform dependency whatsoever. It is the whole program minus the pixels
 and the device. It is headers, except the sequencer's and the host's bodies (`scheduler.cpp`,
-`host.cpp`), which build as the `songcore` library.
+`host.cpp`, `host_midi.cpp`, `sample_editor_ops.cpp`), which build as the `songcore` library.
 
 `SongcoreHost` (`host.h`) is the object a shell constructs. It owns the one `Project` in the process,
 the sequencer, the engine consumer, the external MIDI consumer and the transport. There is exactly

@@ -264,9 +264,9 @@ private:
 
         // 0..1 while sounding, −1 when not, from the slot actually playing (the preview slot for
         // LEFT/RIGHT/MONO and SYNC auditions).
-        se.playbackPosition = host.sample_playback_position(songcore::SOURCE_PREVIEW_SLOT);
+        se.playbackPosition = host.sample_editor().sample_playback_position(songcore::SOURCE_PREVIEW_SLOT);
         if (se.playbackPosition < 0.0f && !(se.hasStereoData && se.sourceMode != 2))
-            se.playbackPosition = host.sample_playback_position(se.instrumentId);
+            se.playbackPosition = host.sample_editor().sample_playback_position(se.instrumentId);
 
         // Hand-placed markers carry the (method, parameter) they were made under; a change clears them
         // here, once, above every reader. ⚠️ Cleared, not ignored, or BY 08 → 09 → 08 brings them back.
@@ -280,7 +280,7 @@ private:
         // Transients: an empty list under TRANSIENT is the trigger (entering the mode or a new SENS empties it).
         if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT && se.totalFrames > 0 &&
             se.transientMarkers.empty()) {
-            se.transientMarkers = host.detect_transients(se.instrumentId, se.sliceSensitivity);
+            se.transientMarkers = host.sample_editor().detect_transients(se.instrumentId, se.sliceSensitivity);
             se.sliceIndex = 0;   // the selection is not touched: detecting is not choosing
         }
 
@@ -301,7 +301,7 @@ private:
             wfInst_     = se.instrumentId;
 
             const int channel = (se.sourceMode == 0) ? 0 : (se.sourceMode == 1) ? 1 : 2;
-            se.waveformData   = host.sample_waveform(se.instrumentId, SampleEditorModule::WAVEFORM_W,
+            se.waveformData   = host.sample_editor().sample_waveform(se.instrumentId, SampleEditorModule::WAVEFORM_W,
                                                      static_cast<int>(vs), static_cast<int>(ve), channel);
         }
     }

@@ -135,7 +135,7 @@ void InputDispatcher::sample_editor_confirm() {
     }
     before_long_operation();
     // ⚠️ First: an auditioned effect has processed the sample itself, and SAVE would take it.
-    host_.restore_fx_preview_backup();
+    host_.sample_editor().restore_fx_preview_backup();
 
     switch (se.cursorRow) {
         case SampleRow::NAME:

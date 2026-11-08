@@ -288,11 +288,13 @@ if(ANDROID)
 endif()
 
 # ─── songcore: the sequencer and the runtime that owns it ──────────────────────────────────────
-# The bodies of its two largest classes; the rest is header-only. Static, so a tool that only
+# The sequencer's and the host's bodies; the rest is header-only. Static, so a tool that only
 # sequences links only scheduler.cpp's object.
 add_library(songcore STATIC
         songcore/scheduler.cpp
         songcore/host.cpp
+        songcore/host_midi.cpp
+        songcore/sample_editor_ops.cpp
 )
 # PUBLIC: host.h includes the engine's header.
 target_link_libraries(songcore PUBLIC pockettracker)

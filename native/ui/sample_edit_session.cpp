@@ -75,11 +75,11 @@ void SampleEditSession::init() {
     se.sampleFilePath = ins.sampleFilePath.value_or("");
     se.sampleName     = se.sampleFilePath.empty() ? "" : path_stem(se.sampleFilePath);
 
-    se.totalFrames   = host_.sample_length(se.instrumentId);
-    se.sampleRate    = host_.sample_rate_of(se.instrumentId);
-    se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+    se.totalFrames   = ops_.sample_length(se.instrumentId);
+    se.sampleRate    = ops_.sample_rate_of(se.instrumentId);
+    se.hasStereoData = ops_.has_stereo_data(se.instrumentId);
     // BIT opens at the sample's own depth, which is also the highest it can offer.
-    se.sourceBitDepth = host_.sample_bit_depth(se.instrumentId);
+    se.sourceBitDepth = ops_.sample_bit_depth(se.instrumentId);
     se.bitDepth       = se.sourceBitDepth;
 
     // ⚠️ SOURCE opens on STEREO for a stereo sample: any other mode saves one channel.
@@ -129,8 +129,8 @@ void SampleEditSession::close() {
     // Pay any pending audition restore now, or it lands on a slot no longer on screen.
     finish_preview();
 
-    host_.restore_fx_preview_backup();          // drop an un-applied FX preview
-    host_.free_sample_undo(s_.sampleEditor.instrumentId);   // unreachable once the editor is gone
+    ops_.restore_fx_preview_backup();          // drop an un-applied FX preview
+    ops_.free_sample_undo(s_.sampleEditor.instrumentId);   // unreachable once the editor is gone
     host_.clear_previews();                     // the 254/255 scratch slots
 
     s_.currentScreen = s_.previousScreen;
@@ -156,12 +156,12 @@ void SampleEditSession::audition(long long now_ms) {
     previewRestoreInst_ = se.instrumentId;
 
     // The FX row is auditioned by applying it, and the clean audio restored after.
-    host_.restore_fx_preview_backup();
+    ops_.restore_fx_preview_backup();
     if (se.fx_armed()) {
         before_long_operation();
         // ⚠️ No clean copy, no audition: the effect would stay in the sample.
-        if (host_.save_fx_preview_backup(se.instrumentId))
-            host_.apply_sample_fx(se.instrumentId, se.fxType, se.fx_param());
+        if (ops_.save_fx_preview_backup(se.instrumentId))
+            ops_.apply_sample_fx(se.instrumentId, se.fxType, se.fx_param());
         else
             set_status(s_, "OUT OF MEMORY", false);
     }
@@ -173,14 +173,14 @@ void SampleEditSession::audition(long long now_ms) {
     const int pitch = synced ? 0 : se.pitchSemitones;
 
     host_.set_preview_track(-1);   // a waveform being edited is not in the arrangement
-    host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
+    ops_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
                                 se.totalFrames, pitch, sync);
 }
 
 void SampleEditSession::finish_preview() {
     if (!previewRestore_) return;
     previewRestore_ = false;
-    host_.finish_sample_preview(previewRestoreInst_);
+    ops_.finish_sample_preview(previewRestoreInst_);
 }
 
 // ─── The selection: A+DPAD on rows 3..8 ──────────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ void SampleEditSession::nudge_selection_edge(int64_t delta) {
     // SNAP: the nearest zero crossing in the direction of travel, ⚠️ in the signal SAVE writes.
     auto snap = [&](int64_t f) -> int64_t {
         if (!se.snapEnabled) return f;
-        return host_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir, se.sourceMode);
+        return ops_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir, se.sourceMode);
     };
 
     if (se.cursorCol == 0) {
@@ -267,7 +267,7 @@ void SampleEditSession::nudge_slice_marker(int64_t delta) {
     int64_t   want = from + delta;
     // SNAP applies to boundaries as to selection edges, searching in the direction of travel.
     if (se.snapEnabled)
-        want = host_.find_zero_crossing(
+        want = ops_.find_zero_crossing(
             se.instrumentId,
             static_cast<int>(std::clamp<int64_t>(want, 0, static_cast<int64_t>(se.totalFrames) - 1)),
             dir, se.sourceMode);
@@ -325,7 +325,7 @@ void SampleEditSession::tap_slice_marker() {
     int64_t       want = std::clamp<int64_t>(
         static_cast<int64_t>(at * static_cast<float>(se.totalFrames)), 0, last);
     if (se.snapEnabled)
-        want = host_.find_zero_crossing(se.instrumentId, static_cast<int>(want), -1, se.sourceMode);
+        want = ops_.find_zero_crossing(se.instrumentId, static_cast<int>(want), -1, se.sourceMode);
 
     materialise_manual_markers();
     std::vector<SliceMarker>& m = se.manualMarkers;
@@ -347,15 +347,15 @@ bool SampleEditSession::apply_rate_and_bits() {
     const int          oldLen = se.totalFrames;
 
     // ⚠️ Notes already scheduled (up to LONG_OPERATION_MS) keep the old base frequency.
-    if (!host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth)) {
+    if (!ops_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth)) {
         set_status(s_, "OUT OF MEMORY", false);
         return false;
     }
 
-    const int newLen = host_.sample_length(se.instrumentId);
+    const int newLen = ops_.sample_length(se.instrumentId);
     rescale_positions(se, oldLen, newLen);
     se.totalFrames = newLen;
-    se.sampleRate  = host_.sample_rate_of(se.instrumentId);
+    se.sampleRate  = ops_.sample_rate_of(se.instrumentId);
     ++se.audioVersion;   // the feed re-bins the view
     se.isModified = true;
     return true;
@@ -365,7 +365,7 @@ bool SampleEditSession::apply_rate_and_bits() {
 
 void SampleEditSession::refresh_view(bool reset_selection) {
     SampleEditorState& se     = s_.sampleEditor;
-    const int          newLen = host_.sample_length(se.instrumentId);
+    const int          newLen = ops_.sample_length(se.instrumentId);
     se.totalFrames = newLen;
 
     // ⚠️ Reset, not clamp: a clamped selection after a shortening op is one the user never made.
@@ -406,7 +406,7 @@ void SampleEditSession::run_op() {
     SampleEditorState& se     = s_.sampleEditor;
     // ⚠️ First: an auditioned effect has processed the sample itself, and COPY or an op would take it.
     // Not on SLICE_AT, whose tap must not stop the audition it is tapped against.
-    if (se.cursorRow != SampleRow::SLICE_AT) host_.restore_fx_preview_backup();
+    if (se.cursorRow != SampleRow::SLICE_AT) ops_.restore_fx_preview_backup();
     const int          instId = se.instrumentId;
     const int          startF = static_cast<int>(se.selectionStart);
     const int          endF   = static_cast<int>(se.selectionEnd);
@@ -414,7 +414,7 @@ void SampleEditSession::run_op() {
     // Memory refused: the sample is as it was, so the view, the selection and the markers stay too.
     auto out_of_memory = [&] { set_status(s_, "OUT OF MEMORY", false); return false; };
     // ⚠️ No undo copy, no op: the user could not take it back.
-    auto begin_destructive = [&] { return host_.backup_sample(instId) || out_of_memory(); };
+    auto begin_destructive = [&] { return ops_.backup_sample(instId) || out_of_memory(); };
     auto in_place = [&](auto&& op) {   // an op that does NOT change the length
         if (!begin_destructive()) return;
         op();
@@ -442,43 +442,43 @@ void SampleEditSession::run_op() {
             if (cell == nullptr) break;
             switch (cell->op) {
                 case SampleOp::CROP:   // keep the selection, discard the rest
-                    if (startF < endF) resizing([&] { return host_.crop_sample(instId, startF, endF); });
+                    if (startF < endF) resizing([&] { return ops_.crop_sample(instId, startF, endF); });
                     break;
                 case SampleOp::COPY:   // the ONE op that changes nothing, so it takes no backup
-                    if (!host_.copy_region(instId, startF, endF)) out_of_memory();
+                    if (!ops_.copy_region(instId, startF, endF)) out_of_memory();
                     break;
                 case SampleOp::CUT:    // copy, then delete
                     if (startF < endF) resizing([&] {
-                        return host_.copy_region(instId, startF, endF) &&
-                               host_.delete_sample_region(instId, startF, endF);
+                        return ops_.copy_region(instId, startF, endF) &&
+                               ops_.delete_sample_region(instId, startF, endF);
                     });
                     break;
                 case SampleOp::DUPL:   // copy the selection and paste it at the END
                     if (startF < endF) resizing([&] {
-                        return host_.copy_region(instId, startF, endF) &&
-                               host_.paste_region(instId, se.totalFrames);
+                        return ops_.copy_region(instId, startF, endF) &&
+                               ops_.paste_region(instId, se.totalFrames);
                     });
                     break;
                 case SampleOp::PASTE:  // inserts at the selection's START
-                    if (host_.clipboard_length() > 0)
-                        resizing([&] { return host_.paste_region(instId, startF); });
+                    if (ops_.clipboard_length() > 0)
+                        resizing([&] { return ops_.paste_region(instId, startF); });
                     break;
                 case SampleOp::DEL:
                     if (startF < endF)
-                        resizing([&] { return host_.delete_sample_region(instId, startF, endF); });
+                        resizing([&] { return ops_.delete_sample_region(instId, startF, endF); });
                     break;
 
-                case SampleOp::NORM:     in_place([&] { host_.normalize_sample(instId, startF, endF); }); break;
-                case SampleOp::FADE_IN:  in_place([&] { host_.fade_in_sample(instId, startF, endF); }); break;
-                case SampleOp::FADE_OUT: in_place([&] { host_.fade_out_sample(instId, startF, endF); }); break;
-                case SampleOp::SILENCE:  in_place([&] { host_.silence_region(instId, startF, endF); }); break;
-                case SampleOp::REVERSE:  in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
+                case SampleOp::NORM:     in_place([&] { ops_.normalize_sample(instId, startF, endF); }); break;
+                case SampleOp::FADE_IN:  in_place([&] { ops_.fade_in_sample(instId, startF, endF); }); break;
+                case SampleOp::FADE_OUT: in_place([&] { ops_.fade_out_sample(instId, startF, endF); }); break;
+                case SampleOp::SILENCE:  in_place([&] { ops_.silence_region(instId, startF, endF); }); break;
+                case SampleOp::REVERSE:  in_place([&] { ops_.reverse_sample(instId, startF, endF); }); break;
 
                 case SampleOp::UNDO: {   // one level. Resets the window, loop and markers only when
                                          // the length changed: after NORM, a fade or REV they still fit.
                     const int lenBefore = se.totalFrames;
-                    if (!host_.undo_sample(instId)) { out_of_memory(); break; }
-                    refresh_view(host_.sample_length(instId) != lenBefore);
+                    if (!ops_.undo_sample(instId)) { out_of_memory(); break; }
+                    refresh_view(ops_.sample_length(instId) != lenBefore);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
                     break;
                 }
@@ -494,7 +494,7 @@ void SampleEditSession::run_op() {
                 if (!se.fx_armed()) break;
 
                 if (!begin_destructive()) break;
-                host_.apply_sample_fx(instId, se.fxType, se.fx_param());
+                ops_.apply_sample_fx(instId, se.fxType, se.fx_param());
                 refresh_view(/*reset_selection=*/false);
                 se.isModified = true;
                 // Spent — left in the cell, START would audition it over its own result.
@@ -561,20 +561,20 @@ void SampleEditSession::apply_sync() {
     const int instId = se.instrumentId;
     const int oldLen = se.totalFrames;
 
-    host_.restore_fx_preview_backup();   // act on the clean audio
-    if (!host_.backup_sample(instId)) {   // no undo copy, no op
+    ops_.restore_fx_preview_backup();   // act on the clean audio
+    if (!ops_.backup_sample(instId)) {   // no undo copy, no op
         set_status(s_, "OUT OF MEMORY", false);
         return;
     }
-    if (!host_.sync_sample(instId, sync)) {
+    if (!ops_.sync_sample(instId, sync)) {
         set_status(s_, "OUT OF MEMORY", false);
         // ⚠️ Refused after its pitch went through? Then the length moved: show what is there.
-        if (host_.sample_length(instId) == oldLen) return;
+        if (ops_.sample_length(instId) == oldLen) return;
     }
     // Spent either way: TSTRETCH has baked the pending shift in, RPITCH has replaced it.
     se.pitchSemitones = 0;
 
-    rescale_positions(se, oldLen, host_.sample_length(instId));
+    rescale_positions(se, oldLen, ops_.sample_length(instId));
     // ⚠️ RATE resets (the result is the new original; it would decimate twice). BIT stays: SAVE writes it.
     se.rateMode = 0;
     refresh_view(/*reset_selection=*/true);
@@ -588,11 +588,11 @@ bool SampleEditSession::bake_pending_pitch() {
     if (se.pitchSemitones == 0) return true;
 
     const int oldLen = se.totalFrames;
-    if (!host_.pitch_shift_sample(se.instrumentId, static_cast<float>(se.pitchSemitones))) {
+    if (!ops_.pitch_shift_sample(se.instrumentId, static_cast<float>(se.pitchSemitones))) {
         set_status(s_, "OUT OF MEMORY", false);
         return false;
     }
-    const int newLen = host_.sample_length(se.instrumentId);
+    const int newLen = ops_.sample_length(se.instrumentId);
     // Everything frame-measured moves with the audio; the selection is scaled, not reset.
     rescale_positions(se, oldLen, newLen);
     se.totalFrames    = newLen;
@@ -657,12 +657,12 @@ bool SampleEditSession::save_to(const std::string& path, bool adopt_name) {
     SampleEditorState& se   = s_.sampleEditor;
     const std::vector<int> cues = cue_points();
 
-    if (!host_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData,
+    if (!ops_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData,
                                se.bitDepth)) {
         set_status(s_, "SAVE FAILED", false);
         return false;
     }
-    host_.adopt_saved_sample(se.instrumentId, se.bitDepth);
+    ops_.adopt_saved_sample(se.instrumentId, se.bitDepth);
 
     // ⚠️ A mono save reloads the file: the buffer may still be stereo, and the slot must match the file.
     const bool wrote_mono = !(se.hasStereoData && se.sourceMode == 2);
@@ -678,7 +678,7 @@ bool SampleEditSession::save_to(const std::string& path, bool adopt_name) {
     se.sampleFilePath = path;
     if (adopt_name) se.sampleName = path_stem(path);
     se.isModified    = false;
-    se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+    se.hasStereoData = ops_.has_stereo_data(se.instrumentId);
 
     modified_();
     s_.currentScreen = s_.previousScreen;   // a save LEAVES the editor, as it does on Android
@@ -704,7 +704,7 @@ void SampleEditSession::chop() {
     fs_.create_folder(chops, base);
     const std::string dir = chops + "/" + base;
 
-    const int written = host_.chop_sample(se.instrumentId, dir, base, slices, se.sourceMode,
+    const int written = ops_.chop_sample(se.instrumentId, dir, base, slices, se.sourceMode,
                                           se.hasStereoData, se.bitDepth);
     set_status(s_, written > 0 ? ("CHOPPED " + std::to_string(written)) : "CHOP FAILED", written > 0);
 }

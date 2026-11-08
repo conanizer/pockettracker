@@ -22,7 +22,7 @@ class SampleEditSession {
     // `modified`: the project changed (the dispatcher's dirty flag and engine push).
     SampleEditSession(AppState& s, songcore::SongcoreHost& host, FileSystem& fs,
                       std::function<void()> modified)
-        : s_(s), host_(host), fs_(fs), modified_(std::move(modified)) {}
+        : s_(s), host_(host), ops_(host.sample_editor()), fs_(fs), modified_(std::move(modified)) {}
 
     // Build the state from the sample the engine holds; separate from opening because the editor's
     // LOAD re-enters on different audio. ⚠️ Must not touch `previousScreen` (the editor's return target).
@@ -106,6 +106,7 @@ class SampleEditSession {
 
     AppState&               s_;
     songcore::SongcoreHost& host_;
+    songcore::SampleEditorOps& ops_;   // host_'s sample editor
     FileSystem&             fs_;
     std::function<void()>   modified_;
 
