@@ -85,6 +85,17 @@ static_assert(automatable_params_are_full_range(),
               "an automatable BYTE parameter must accept the full 00-FF byte — the ramp interpolates "
               "in that domain and would emit values its own cell cannot hold");
 
+// A ramp emits what the cell itself sends, so a voice command's row names the same controller.
+inline constexpr bool automatable_params_match_voice_commands() {
+    for (const AutomatableParam& p : AUTOMATABLE_PARAMS) {
+        const VoiceCommand* c = voice_command_for_fx(p.fxCode);
+        if (c != nullptr && (p.kind != RampKind::BYTE || p.ccId != c->ccId)) return false;
+    }
+    return true;
+}
+static_assert(automatable_params_match_voice_commands(),
+              "a ramp over a voice command must emit the controller the command's own cell sends");
+
 // An EQ_PRESET endpoint is a slot index; this is why pairing needs no runtime range check.
 inline constexpr bool automatable_preset_params_are_slot_range() {
     for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)

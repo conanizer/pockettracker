@@ -1393,34 +1393,20 @@ void Sequencer::emit_step_fx(StepPlay& s) {
     }
     // The note step recorded its own, on a freshly reset carry.
     if (!triggeredNote) record_voice_commands(ts.carry, params);
-    if (params.reverbSendValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_REVERB_SEND, *params.reverbSendValue / 255.0f);
-    if (params.delaySendValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_DELAY_SEND, *params.delaySendValue / 255.0f);
     if (params.bckValue.has_value())
         router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
     // LPF / HPF / BPF: one record, the type in the CC ID and the cutoff in the value, so the
     // two cannot land a block apart (event.h). With a CUT on the row it carries the CUT's cutoff,
     // as reapply_voice does: two records on one frame would land in either order.
-    if (params.filterModeValue.has_value())
-        router_.cc(voiceFxFrame, trackId,
-                   params.filterModeType == 1 ? CC_FILTER_LP :
-                   params.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
-                   params.filterCutValue.value_or(*params.filterModeValue) / 255.0f);
-    else if (params.filterCutValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
-    if (params.filterResValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
-    // CRU's byte goes over whole; the engine splits it.
-    if (params.driveValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_DRIVE, *params.driveValue / 255.0f);
-    if (params.crushValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_CRUSH, *params.crushValue / 255.0f);
-    if (params.fineTuneValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_FINE_TUNE, *params.fineTuneValue / 255.0f);
-    // LPO sends the AUTHORED byte (the engine decodes it).
-    if (params.loopSlideValue.has_value())
-        router_.cc(voiceFxFrame, trackId, CC_LOOP_SLIDE, (*params.loopSlideValue & 0xFF) / 255.0f);
+    const auto& lanes = params.voiceCc;
+    for (int lane = 0; lane < VOICE_LANES; ++lane) {
+        if (lanes[lane].ccId == 0) continue;
+        if (lane == LANE_FILTER_CUT && lanes[LANE_FILTER_MODE].ccId != 0) continue;
+        int byte = (lane == LANE_FILTER_MODE && lanes[LANE_FILTER_CUT].ccId != 0)
+                       ? lanes[LANE_FILTER_CUT].value : lanes[lane].value;
+        if (lane == LANE_LOOP_SLIDE) byte &= 0xFF;   // a signed byte: wraps, where the others clamp
+        router_.cc(voiceFxFrame, trackId, lanes[lane].ccId, byte / 255.0f);
+    }
     if (params.eqnSlot.has_value())
         router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
     // The mixer faders REPLACE the authored value and hold, so the host restores it on stop()
@@ -1651,17 +1637,9 @@ int Sequencer::getArpeggioNote(int baseMidi, int semi1, int semi2, int mode, int
 void Sequencer::record_voice_commands(NoteCarry& c, const ResolvedStepParams& p) {
     if (p.pitSemitones.has_value())    c.pit = *p.pitSemitones;
     if (p.sliIndex.has_value())        c.slice = *p.sliIndex;
-    if (p.reverbSendValue.has_value()) c.set_cc(CC_REVERB_SEND, *p.reverbSendValue / 255.0f);
-    if (p.delaySendValue.has_value())  c.set_cc(CC_DELAY_SEND, *p.delaySendValue / 255.0f);
-    // The filter switched on before CUT: it clears CUT, which on the same step comes after it.
-    if (p.filterModeValue.has_value())
-        c.set_cc(p.filterModeType == 1 ? CC_FILTER_LP : p.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
-                 *p.filterModeValue / 255.0f);
-    if (p.filterCutValue.has_value())  c.set_cc(CC_FILTER_CUT, *p.filterCutValue / 255.0f);
-    if (p.filterResValue.has_value())  c.set_cc(CC_FILTER_RES, *p.filterResValue / 255.0f);
-    if (p.driveValue.has_value())      c.set_cc(CC_DRIVE, *p.driveValue / 255.0f);
-    if (p.crushValue.has_value())      c.set_cc(CC_CRUSH, *p.crushValue / 255.0f);
-    if (p.fineTuneValue.has_value())   c.set_cc(CC_FINE_TUNE, *p.fineTuneValue / 255.0f);
+    // In lane order: the filter switched on clears CUT, which on the same step comes after it.
+    for (const ResolvedStepParams::VoiceCc& v : p.voiceCc)
+        if (v.ccId != 0) c.set_cc(v.ccId, v.value / 255.0f);
     if (p.eqnSlot.has_value())         { c.eqnSlot = *p.eqnSlot; c.eqMorphed = false; }
     if (p.bckValue.has_value())        c.reverse = (*p.bckValue == 0) ? 1 : 0;
 }
@@ -1710,7 +1688,7 @@ NoteCarry Sequencer::voice_at(const TrackState& ts, int64_t frame, unsigned* fad
                 vibrato_from(b, r.fxCode == FX_PVX, tempo_in_force(*project_), v.vibSpeed, v.vibDepth);
             else if (r.ccId == CC_VOLUME) v.phraseVol = b / 255.0f;
             else if (r.ccId == CC_PAN) v.pan = b / 255.0f;
-            else { v.set_cc(r.ccId, b / 255.0f); mask |= 1u << carry_cc_slot(r.ccId); }
+            else { v.set_cc(r.ccId, b / 255.0f); mask |= 1u << voice_lane(r.ccId); }
         }
     }
     if (faded != nullptr) *faded = mask;
@@ -1719,8 +1697,8 @@ NoteCarry Sequencer::voice_at(const TrackState& ts, int64_t frame, unsigned* fad
 
 void Sequencer::reapply_voice(int64_t frame, int trackId, const NoteCarry& v, unsigned only) {
     const int64_t at = frame + 1;
-    const int lp = carry_cc_slot(CC_FILTER_LP), cut = carry_cc_slot(CC_FILTER_CUT);
-    for (int slot = 0; slot < CARRY_CC_SLOTS; ++slot) {
+    const int lp = LANE_FILTER_MODE, cut = LANE_FILTER_CUT;
+    for (int slot = 0; slot < CARRIED_LANES; ++slot) {
         if (v.ccId[slot] == 0 || !(only & (1u << slot))) continue;
         // A filter switched on and a CUT after it go as ONE write — the type from the one, the
         // cutoff from the other. Two on one frame would land in either order.

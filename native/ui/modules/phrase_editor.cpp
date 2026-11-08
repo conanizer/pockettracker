@@ -181,7 +181,7 @@ PhraseInputResult PhraseEditorModule::handle_input(songcore::Phrase& phrase, int
                     r.lastEditedInstrument = action.value;
                     break;
                 default:
-                    // The type columns store an index into EFFECT_TYPES; the code is what the step keeps.
+                    // The type columns store an index into EFFECTS; the code is what the step keeps.
                     if (const int slot = fx_slot_of_column(cursor_column, PHRASE_FX_COLUMN)) {
                         songcore::FxSlot& f = songcore::fx_slot_ref(step, slot);
                         if (is_fx_type_column(cursor_column, PHRASE_FX_COLUMN))

@@ -36,7 +36,7 @@ enum class CursorValueType {
     TOGGLE_BINARY,
     TOGGLE_TERNARY,
 
-    EFFECT_TYPE,   // an index into songcore::EFFECT_TYPES, not an effect code
+    EFFECT_TYPE,   // an index into songcore::EFFECTS, not an effect code
     EFFECT_VALUE,  // 00-FF
 
     EMPTY,
@@ -327,7 +327,7 @@ inline CursorContext character(char current) {
     return c;
 }
 
-// Effect type, as an index into EFFECT_TYPES (the module converts on write). `type_count` is what this
+// Effect type, as an index into EFFECTS (the module converts on write). `type_count` is what this
 // build reaches; it bounds the stepping, never the cell — a hidden effect read off disk stays.
 inline CursorContext effect_type(int current_type, int fx_slot,
                                  int type_count = songcore::EFFECT_TYPE_COUNT) {

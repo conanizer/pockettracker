@@ -27,7 +27,7 @@ struct PlatformCaps {
     // PROJECT's EXIT row: a handheld launcher needs the process back.
     bool appExit = false;
 
-    // Creating MIDI data: PROJECT > MIDI, EXTERNAL in TYPE, the MIDI commands at EFFECT_TYPES' end.
+    // Creating MIDI data: PROJECT > MIDI, EXTERNAL in TYPE, the MIDI commands at EFFECTS' end.
     // ⚠️ Authoring only: what a file already holds is always shown truthfully.
     bool midi = false;
 

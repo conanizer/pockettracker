@@ -33,7 +33,7 @@ struct PhraseEditorState {
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme                   theme = theme_classic();
 
-    // How far up EFFECT_TYPES an FX-type cell may step (cc::effect_type).
+    // How far up EFFECTS an FX-type cell may step (cc::effect_type).
     int effectTypeCount = songcore::EFFECT_TYPE_COUNT;
 
     // For AUS/AUF only: a ramp can run into a later phrase of the chain, so whether a cell acts depends

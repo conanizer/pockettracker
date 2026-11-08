@@ -79,29 +79,17 @@ class EngineConsumer : public IMidiConsumer {
     static void apply_cc(Engine& engine, int64_t frame, uint8_t track, int param, float v) {
         switch (param) {
             case CC_VOLUME:      engine.scheduleTrackPhraseVol(frame, track, v);  break;
-            // Per-voice: they shape the sounding note and are gone with it, so nothing to restore on
-            // stop(). See the engine's `applyVoiceCc`.
-            case CC_PAN:
-            case CC_REVERB_SEND:
-            case CC_DELAY_SEND:
-            case CC_FILTER_CUT:
-            case CC_FILTER_RES:
-            case CC_FILTER_LP:
-            case CC_FILTER_HP:
-            case CC_FILTER_BP:
-            case CC_DRIVE:
-            case CC_CRUSH:
-            case CC_FINE_TUNE:
-            case CC_LOOP_SLIDE:
-                engine.scheduleVoiceCc(frame, track, param, v);
-                break;
             // The mixer faders. VTR is subject to the EXTERNAL gate; VMV rides TRACK_GLOBAL, which is not.
             case CC_TRACK_VOL:   engine.scheduleTrackVolume(frame, track, v);    break;
             case CC_MASTER_VOL:  engine.scheduleMasterVolume(frame, v);          break;
             // TIM: global like the master fader, ungated for the same reason.
             case CC_DELAY_TIME:  engine.scheduleDelayTime(frame, v);             break;
-            // Any other CC moves external gear only.
-            default: break;
+            // PAN and the voice commands shape the sounding note and are gone with it, so nothing to
+            // restore on stop() (the engine's `applyVoiceCc`). Any other CC moves external gear only.
+            default:
+                if (param == CC_PAN || voice_command_for_cc(param) != nullptr)
+                    engine.scheduleVoiceCc(frame, track, param, v);
+                break;
         }
     }
 

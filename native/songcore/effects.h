@@ -10,6 +10,7 @@
 #include <string>
 #include "effect_codes.h"
 #include "model.h"
+#include "voice_commands.h"
 
 namespace songcore {
 
@@ -32,40 +33,62 @@ inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
 }
 
-// Effect code → 3-letter display name, or "---". (RPT is FX_REPEAT; DEL/REV are the sends.)
-inline std::string effect_name(int code) {
-    switch (code) {
-        case FX_ARC: return "ARC"; case FX_CHA: return "CHA"; case FX_LAT: return "LAT";
-        case FX_GRV: return "GRV"; case FX_HOP: return "HOP"; case FX_TIC: return "TIC";
-        case FX_ARPEGGIO: return "ARP"; case FX_KILL: return "KIL"; case FX_OFFSET: return "OFF";
-        case FX_RND: return "RND"; case FX_RNL: return "RNL"; case FX_REPEAT: return "RPT";
-        case FX_TBL: return "TBL"; case FX_THO: return "THO"; case FX_VOLUME: return "VOL";
-        case FX_PSL: return "PSL"; case FX_PBN: return "PBN"; case FX_PVB: return "PVB";
-        case FX_PVX: return "PVX"; case FX_PIT: return "PIT"; case FX_SLI: return "SLI";
-        case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
-        case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
-        case FX_CUT: return "CUT"; case FX_RES: return "RES";
-        case FX_LPF: return "LPF"; case FX_HPF: return "HPF"; case FX_BPF: return "BPF";
-        case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
-        case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
-        case FX_INS: return "INS"; case FX_TIM: return "TIM"; case FX_NTH: return "NTH";
-        case FX_CHD: return "CHD";
-        case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
-        case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
-        case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
-        case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
-        case FX_CCA: return "CCA"; case FX_CCB: return "CCB";
-        case FX_CCC: return "CCC"; case FX_CCD: return "CCD";
-        default: return "---";
-    }
+// ─── Every effect, in the FX column's cycle order and the picker's reading order ─────────────────
+// A cell stores the CODE, so re-ordering changes no saved song — but it moves the picker and the
+// indices the input tests type.
+// ⚠️ A new effect goes directly above LPO: a release build hides LPO and a build without MIDI the six
+// MIDI commands, both by cutting the tail, so the trims nest (asserted below).
+struct EffectDef {
+    int         code;
+    const char* name;   // RPT is FX_REPEAT; REV and DEL are the sends
+    int         max;    // the largest value byte the cell takes
+};
+
+inline constexpr EffectDef EFFECTS[] = {
+    {FX_NONE, "---", 0xFF},
+    {FX_ARC, "ARC", 0xFF}, {FX_CHA, "CHA", 0xFF}, {FX_LAT, "LAT", 0xFF}, {FX_GRV, "GRV", 0x7F},
+    {FX_HOP, "HOP", 0xFF}, {FX_TIC, "TIC", 0xFF}, {FX_ARPEGGIO, "ARP", 0xFF}, {FX_KILL, "KIL", 0xFF},
+    {FX_OFFSET, "OFF", 0xFF}, {FX_RND, "RND", 0xFF}, {FX_RNL, "RNL", 0xFF}, {FX_REPEAT, "RPT", 0xFF},
+    {FX_TBL, "TBL", 0x7F}, {FX_THO, "THO", 0xFF}, {FX_VOLUME, "VOL", 0xFF},
+    {FX_PSL, "PSL", 0xFF}, {FX_PBN, "PBN", 0xFF}, {FX_PVB, "PVB", 0xFF}, {FX_PVX, "PVX", 0xFF},
+    {FX_PIT, "PIT", 0xFF}, {FX_SLI, "SLI", 0xFF},
+    {FX_PAN, "PAN", 0xFF}, {FX_BCK, "BCK", 0xFF}, {FX_RSEND, "REV", 0xFF}, {FX_DSEND, "DEL", 0xFF},
+    {FX_EQN, "EQN", 0x7F}, {FX_EQM, "EQM", 0x7F},
+    {FX_VTR, "VTR", 0xFF}, {FX_VMV, "VMV", 0xFF},
+    {FX_AUS, "AUS", 0xFF}, {FX_AUF, "AUF", 0xFF},
+    {FX_CUT, "CUT", 0xFF}, {FX_RES, "RES", 0xFF},
+    {FX_SCA, "SCA", 0xBF}, {FX_SCG, "SCG", 0xBF},
+    {FX_LPF, "LPF", 0xFF}, {FX_HPF, "HPF", 0xFF}, {FX_BPF, "BPF", 0xFF},
+    {FX_DRV, "DRV", 0xFF}, {FX_CRU, "CRU", 0xFF},
+    {FX_FIN, "FIN", 0xFF},
+    {FX_TSX, "TSX", 0xFF},
+    {FX_INS, "INS", 0x7F},
+    {FX_TIM, "TIM", 0xFF},
+    {FX_NTH, "NTH", 0xFF},
+    {FX_CHD, "CHD", 0xFF},
+    {FX_LPO, "LPO", 0xFF},
+    {FX_MPG, "MPG", 0x7F}, {FX_MPB, "MPB", 0xFF},
+    {FX_CCA, "CCA", 0xFF}, {FX_CCB, "CCB", 0xFF}, {FX_CCC, "CCC", 0xFF}, {FX_CCD, "CCD", 0xFF},
+};
+inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECTS) / sizeof(EffectDef));
+
+/** The row for `code`, or nullptr for an unknown one. */
+inline constexpr const EffectDef* effect_def(int code) {
+    for (const EffectDef& e : EFFECTS)
+        if (e.code == code) return &e;
+    return nullptr;
 }
 
-// Max parameter byte: pool refs and MPG 0x7F, SCA/SCG 0xBF, the rest 0xFF.
-inline constexpr int effect_value_max(int effect_type) {
-    if (effect_type == FX_SCA || effect_type == FX_SCG) return 0xBF;
-    return (effect_type == FX_TBL || effect_type == FX_GRV ||
-            effect_type == FX_EQN || effect_type == FX_EQM ||
-            effect_type == FX_MPG || effect_type == FX_INS) ? 127 : 255;
+// Effect code → its 3-letter name, or "---".
+inline std::string effect_name(int code) {
+    const EffectDef* e = effect_def(code);
+    return e != nullptr ? e->name : "---";
+}
+
+// The largest value byte; 0xFF for an unknown code.
+inline constexpr int effect_value_max(int code) {
+    const EffectDef* e = effect_def(code);
+    return e != nullptr ? e->max : 0xFF;
 }
 
 /** The two halves of an SCA/SCG byte. The key is clamped because a hand-written file can hold one the
@@ -73,69 +96,38 @@ inline constexpr int effect_value_max(int effect_type) {
 inline constexpr int scale_cmd_key(int value) { return ((value >> 4) & 0x0F) > 11 ? 11 : ((value >> 4) & 0x0F); }
 inline constexpr int scale_cmd_slot(int value) { return value & 0x0F; }
 
-// The FX column's cycle order and the picker's reading order. A `.ptp` stores the CODE, so re-ordering
-// changes no saved cell — but it moves the picker, the input tests and the hidden tails below.
-inline constexpr int EFFECT_TYPES[] = {
-    FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
-    FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
-    FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI,
-    FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
-    // Mixer faders
-    FX_VTR, FX_VMV,
-    // The automation pair
-    FX_AUS, FX_AUF,
-    // ⚠️ From here on, entries are APPENDED, not placed by subject: inserting would renumber the
-    // indices the recorded EDIT test cases carry, and those have no independent author left.
-    FX_CUT, FX_RES,
-    FX_SCA, FX_SCG,
-    FX_LPF, FX_HPF, FX_BPF,
-    FX_DRV, FX_CRU,
-    FX_FIN,
-    FX_TSX,
-    // INS, TIM, NTH and CHD sit above LPO because the tail is what a release build trims.
-    FX_INS,
-    FX_TIM,
-    FX_NTH,
-    FX_CHD,
-    FX_LPO,
-    // The MIDI commands — must stay the LAST six (asserted below)
-    FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
-};
-inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECT_TYPES) / sizeof(int));
-
 // ⚠️ A build without MIDI (platform_caps.h `midi`) shows only the first EFFECT_TYPE_COUNT_NO_MIDI
 // entries. That is safe only because the six are a TAIL: every remaining index keeps its meaning.
 inline constexpr int MIDI_EFFECT_COUNT         = 6;
 inline constexpr int EFFECT_TYPE_COUNT_NO_MIDI = EFFECT_TYPE_COUNT - MIDI_EFFECT_COUNT;
 
-static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 0] == FX_MPG &&
-                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 1] == FX_MPB &&
-                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 2] == FX_CCA &&
-                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 3] == FX_CCB &&
-                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 4] == FX_CCC &&
-                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 5] == FX_CCD,
-              "the MIDI commands must stay the LAST six entries of EFFECT_TYPES — a build that hides "
+static_assert(EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 0].code == FX_MPG &&
+                  EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 1].code == FX_MPB &&
+                  EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 2].code == FX_CCA &&
+                  EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 3].code == FX_CCB &&
+                  EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 4].code == FX_CCC &&
+                  EFFECTS[EFFECT_TYPE_COUNT_NO_MIDI + 5].code == FX_CCD,
+              "the MIDI commands must stay the LAST six entries of EFFECTS — a build that hides "
               "them shortens the list, so anything after them would be hidden too");
 
-// ⚠️ LPO is hidden from release builds the same way and must sit directly below the MIDI six: the
-// trims nest.
+// ⚠️ LPO is hidden from release builds the same way and must sit directly below the MIDI six.
 inline constexpr int PREVIEW_EFFECT_COUNT     = 1;   // FX_LPO
 inline constexpr int EFFECT_TYPE_COUNT_STABLE = EFFECT_TYPE_COUNT_NO_MIDI - PREVIEW_EFFECT_COUNT;
 
-static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_STABLE] == FX_LPO,
+static_assert(EFFECTS[EFFECT_TYPE_COUNT_STABLE].code == FX_LPO,
               "LPO must sit directly below the MIDI six — a build that hides it shortens the list, "
               "so an effect moved after it would be hidden too");
 
-/** Index of `code` in EFFECT_TYPES, or 0 (FX_NONE) for an unknown effect. */
+/** Index of `code` in EFFECTS, or 0 (FX_NONE) for an unknown effect. */
 inline int effect_type_index(int code) {
     for (int i = 0; i < EFFECT_TYPE_COUNT; ++i)
-        if (EFFECT_TYPES[i] == code) return i;
+        if (EFFECTS[i].code == code) return i;
     return 0;
 }
 
-/** EFFECT_TYPES[i], or FX_NONE when out of range. */
+/** EFFECTS[i]'s code, or FX_NONE when out of range. */
 inline int effect_type_at(int index) {
-    return (index >= 0 && index < EFFECT_TYPE_COUNT) ? EFFECT_TYPES[index] : FX_NONE;
+    return (index >= 0 && index < EFFECT_TYPE_COUNT) ? EFFECTS[index].code : FX_NONE;
 }
 
 // The first row with a HOP that fires on every pass (no NTH, no CHA that could gate it), or -1.
@@ -188,20 +180,12 @@ struct ResolvedStepParams {
     std::optional<int> pitSemitones;
     std::optional<int> sliIndex;
     std::optional<int> panValue;
-    std::optional<int> reverbSendValue;
-    std::optional<int> delaySendValue;
     std::optional<int> bckValue;
-    std::optional<int> filterCutValue;    // CUT
-    std::optional<int> filterResValue;    // RES
-    // LPF / HPF / BPF: one optional for all three, so two on one step resolve last-wins like any
-    // other pair instead of mixing one's type with the other's cutoff.
-    std::optional<int> filterModeValue;   // LPF/HPF/BPF cutoff byte
-    int filterModeType = 0;               // 1 lp | 2 hp | 3 bp; meaningless unless the above is set
-    std::optional<int> driveValue;        // DRV
-    std::optional<int> crushValue;        // CRU — both nibbles still packed, split at the engine
-    std::optional<int> fineTuneValue;     // FIN — authored byte, turned into semitones at the engine
+    // REV, DEL, the filter, DRV, CRU, FIN, LPO (voice_commands.h): per lane, the controller the step
+    // sends there (0 = none) and the authored byte — the engine decodes it.
+    struct VoiceCc { uint8_t ccId = 0; int value = 0; };
+    VoiceCc voiceCc[VOICE_LANES];
     std::optional<int> tsxMultiplier;     // TSX — already decoded to a signed multiplier
-    std::optional<int> loopSlideValue;    // LPO — already decoded to signed sixteenths of a loop
     std::optional<int> chordValue;        // CHD — the authored byte (chords.h)
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
@@ -249,21 +233,9 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_PVX:    p.pvxValue = value; break;
             case FX_LAT:    p.delayTicks = value; break;
             case FX_PAN:    p.panValue = value; break;
-            case FX_RSEND:  p.reverbSendValue = value; break;
-            case FX_DSEND:  p.delaySendValue = value; break;
             case FX_BCK:    p.bckValue = value; break;
-            case FX_CUT:    p.filterCutValue = value; break;
-            case FX_RES:    p.filterResValue = value; break;
-            case FX_LPF: case FX_HPF: case FX_BPF:
-                p.filterModeValue = value;
-                p.filterModeType  = fx_filter_mode(type);
-                break;
-            case FX_DRV:    p.driveValue     = value; break;
-            case FX_CRU:    p.crushValue     = value; break;
-            case FX_FIN:    p.fineTuneValue  = value; break;
             // Sign-decoded here, like PIT, so the scheduler gets a number.
             case FX_TSX:    p.tsxMultiplier = (value < 0x80) ? value : value - 256; break;
-            case FX_LPO:    p.loopSlideValue = loop_slide_sixteenths(value); break;
             case FX_CHD:    p.chordValue = value & 0xFF; arcStrums = true; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
@@ -282,8 +254,11 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_CCA: case FX_CCB: case FX_CCC: case FX_CCD:
                 p.ccSlotValue[fx_cc_slot(type)] = value;
                 break;
-            // ARP / CHA / RND / RNL / TIC and unknown codes: nothing to resolve.
-            default: break;
+            default:
+                if (const VoiceCommand* c = voice_command_for_fx(type))
+                    p.voiceCc[c->lane] = {c->ccId, value};
+                // ARP / CHA / RND / RNL / TIC and unknown codes: nothing to resolve.
+                break;
         }
     }
     return p;

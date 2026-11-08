@@ -80,23 +80,7 @@ struct LiveSlot {
 
 // What the sounding note is playing with, handed to each ARP/RPT retrigger — a retrigger is a new
 // voice, and would otherwise undo a VOL, PAN, CUT… on an empty step, or a fade. Reset by the next note.
-// ⚠️ A new per-voice command must be added here.
-// One slot per controller, in re-apply order; LPF/HPF/BPF share one (each sets type AND cutoff).
-constexpr int CARRY_CC_SLOTS = 8;
-inline constexpr int carry_cc_slot(int ccId) {
-    switch (ccId) {
-        case CC_REVERB_SEND: return 0;
-        case CC_DELAY_SEND:  return 1;
-        case CC_FILTER_LP: case CC_FILTER_HP: case CC_FILTER_BP: return 2;
-        case CC_FILTER_CUT:  return 3;
-        case CC_FILTER_RES:  return 4;
-        case CC_DRIVE:       return 5;
-        case CC_CRUSH:       return 6;
-        case CC_FINE_TUNE:   return 7;
-        default:             return -1;
-    }
-}
-
+// ⚠️ A new per-voice command that is not a controller (voice_commands.h) must be added here.
 struct NoteCarry {
     float velGain   = 1.0f;   // the note's velocity curve, without the VOL channel
     float phraseVol = 1.0f;   // the VOL channel: instrument VOL, a VOL command, or a fade
@@ -105,8 +89,8 @@ struct NoteCarry {
     int   slice     = -1;
     float vibSpeed  = 0.0f;   // PVB / PVX; depth 0 = none
     float vibDepth  = 0.0f;
-    uint8_t ccId[CARRY_CC_SLOTS]    = {};   // 0 = not moved since the note
-    float   ccValue[CARRY_CC_SLOTS] = {};
+    uint8_t ccId[CARRIED_LANES]    = {};   // per lane; 0 = not moved since the note
+    float   ccValue[CARRIED_LANES] = {};
     int     eqnSlot  = -1;                  // EQN, or -1
     bool    eqMorphed = false;              // …or where an EQN fade left the voice
     ExtEqMorphPayload eqMorph{};
@@ -116,12 +100,12 @@ struct NoteCarry {
     int64_t strumFrames = 0;
 
     void set_cc(int id, float v) {
-        const int s = carry_cc_slot(id);
-        if (s < 0) return;
+        const int s = voice_lane(id);
+        if (s < 0 || s >= CARRIED_LANES) return;
         ccId[s] = static_cast<uint8_t>(id);
         ccValue[s] = v;
         // A filter switched on carries its own cutoff, so an earlier CUT no longer describes it.
-        if (s == carry_cc_slot(CC_FILTER_LP)) ccId[carry_cc_slot(CC_FILTER_CUT)] = 0;
+        if (s == LANE_FILTER_MODE) ccId[LANE_FILTER_CUT] = 0;
     }
 };
 
@@ -654,9 +638,9 @@ class Sequencer {
 
     // ─── Retriggers and the note they repeat (NoteCarry) ────────────────────────────────────────
 
-    // `reapply_voice` mask bits beyond the controller slots.
-    static constexpr unsigned CARRY_EQ      = 1u << CARRY_CC_SLOTS;
-    static constexpr unsigned CARRY_REVERSE = 1u << (CARRY_CC_SLOTS + 1);
+    // `reapply_voice` mask bits beyond the controller lanes.
+    static constexpr unsigned CARRY_EQ      = 1u << CARRIED_LANES;
+    static constexpr unsigned CARRY_REVERSE = 1u << (CARRIED_LANES + 1);
     static constexpr unsigned CARRY_ALL     = ~0u;
 
     // One step's per-voice commands into the carry — all but VOL, PAN and vibrato, which their own

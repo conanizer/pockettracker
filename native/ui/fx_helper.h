@@ -7,7 +7,7 @@
 // One group is expanded at a time: the one the cursor is in. Off either end of a group opens the
 // next; the list is a ring.
 // ⚠️ A cell holds an effect code, not an index — some effects sit in two groups (`AUS`/`AUF`, `KIL`).
-// ⚠️ A build hides the tail of `EFFECT_TYPES` exactly as the column's A+RIGHT cycle does; the MIDI
+// ⚠️ A build hides the tail of `EFFECTS` exactly as the column's A+RIGHT cycle does; the MIDI
 // group empties that way and is dropped.
 
 #include <algorithm>
@@ -85,8 +85,8 @@ constexpr bool fx_code_is_grouped(int code) {
 // Every effect sits in at least one group.
 constexpr bool fx_groups_cover_every_effect() {
     for (int i = 0; i < songcore::EFFECT_TYPE_COUNT; ++i)
-        if (songcore::EFFECT_TYPES[i] != songcore::FX_NONE &&
-            !fx_code_is_grouped(songcore::EFFECT_TYPES[i]))
+        if (songcore::EFFECTS[i].code != songcore::FX_NONE &&
+            !fx_code_is_grouped(songcore::EFFECTS[i].code))
             return false;
     return true;
 }
@@ -101,7 +101,7 @@ constexpr bool fx_groups_hold_real_effects_once() {
             if (g.codes[i] == songcore::FX_NONE) return false;
             bool known = false;
             for (int k = 0; k < songcore::EFFECT_TYPE_COUNT; ++k)
-                if (songcore::EFFECT_TYPES[k] == g.codes[i]) known = true;
+                if (songcore::EFFECTS[k].code == g.codes[i]) known = true;
             if (!known) return false;
             for (int j = 0; j < i; ++j)
                 if (g.codes[j] == g.codes[i]) return false;
@@ -164,7 +164,7 @@ struct FxLayout {
     int total_rows() const { return count() + max_group_rows(); }
 };
 
-// The picker for a build showing the first `visible_effect_count` of EFFECT_TYPES.
+// The picker for a build showing the first `visible_effect_count` of EFFECTS.
 // ⚠️ Empty groups are dropped before each survivor gets its `---`; the other order empties nothing.
 inline FxLayout fx_layout_for(int visible_effect_count) {
     FxLayout out;
@@ -281,7 +281,7 @@ inline void fx_move_right(FxHelperState& s) {
     if (width > 0) s.cursorCol = (s.cursorCol + 1) % width;
 }
 
-// ─── The text, indexed like EFFECT_TYPES: "CODE: what it is", then 1–3 lines on the value ────────
+// ─── The text, indexed like EFFECTS: "CODE: what it is", then 1–3 lines on the value ────────
 // At most ~31 characters a line. ⚠️ No apostrophe or semicolon — the font draws them blank.
 
 inline const std::vector<std::vector<std::string>>& effect_descriptions() {

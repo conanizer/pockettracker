@@ -28,7 +28,7 @@ struct TableState {
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme theme = theme_classic();
 
-    // How far up EFFECT_TYPES an FX-type cell may step (cc::effect_type).
+    // How far up EFFECTS an FX-type cell may step (cc::effect_type).
     int effectTypeCount = songcore::EFFECT_TYPE_COUNT;
 };
 

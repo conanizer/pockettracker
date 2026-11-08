@@ -75,11 +75,6 @@ constexpr int FX_LPF      = 0x33;  // LPF  low-pass ON at this cutoff  (00-FF)
 constexpr int FX_HPF      = 0x34;  // HPF  high-pass ON at this cutoff (00-FF)
 constexpr int FX_BPF      = 0x35;  // BPF  band-pass ON at this cutoff (00-FF)
 
-/** The FilterModule type an LPF/HPF/BPF cell turns on (1 lp | 2 hp | 3 bp), or 0 for anything else. */
-inline constexpr int fx_filter_mode(int code) {
-    return code == FX_LPF ? 1 : code == FX_HPF ? 2 : code == FX_BPF ? 3 : 0;
-}
-
 // ─── The two dirt commands: on the sounding note, reset at the next ───────────────────────────────
 // ⚠️ 0x36 is retired and must never be reused.
 constexpr int FX_DRV      = 0x37;  // DRV  overdrive amount (00 = clean, FF = heavy)

@@ -13,6 +13,7 @@
 #include <cstdint>
 
 #include "event.h"
+#include "voice_commands.h"
 
 namespace songcore {
 
@@ -32,15 +33,8 @@ struct NoteCommand {
 // The commands that travel this way: every one that shapes the app's own voice. PAN, VOL and the
 // pitch commands are not among them — they have MIDI's own form.
 constexpr bool travels_as_note_command(uint8_t id) {
-    switch (id) {
-        case CC_REVERB_SEND: case CC_DELAY_SEND:
-        case CC_FILTER_CUT:  case CC_FILTER_RES:
-        case CC_FILTER_LP:   case CC_FILTER_HP:   case CC_FILTER_BP:
-        case CC_DRIVE:       case CC_CRUSH:       case CC_LOOP_SLIDE:
-            return true;
-        default:
-            return false;
-    }
+    const VoiceCommand* c = voice_command_for_cc(id);
+    return c != nullptr && c->noteCommand;
 }
 
 inline void encode_note_command(const NoteCommand& c, uint8_t out[NOTE_COMMAND_BYTES]) {

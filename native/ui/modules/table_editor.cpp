@@ -169,7 +169,7 @@ TableInputResult TableModule::handle_input(songcore::Table& table, int cursor_ro
                 case 1: row.transpose = clamp255(action.value); break;
                 case 2: row.volume    = clamp255(action.value); break;
                 default:
-                    // The type columns store an index into EFFECT_TYPES; the code is what the row keeps.
+                    // The type columns store an index into EFFECTS; the code is what the row keeps.
                     if (const int slot = fx_slot_of_column(cursor_column, TABLE_FX_COLUMN)) {
                         songcore::FxSlot& f = songcore::fx_slot_ref(row, slot);
                         if (is_fx_type_column(cursor_column, TABLE_FX_COLUMN))

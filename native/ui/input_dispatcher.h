@@ -258,7 +258,7 @@ class InputDispatcher {
     // ⚠️ The one resolution point — `open_file_browser` compares against it for remember-last-folder.
     std::string browser_dir(BrowserDir cat);
 
-    // How many EFFECT_TYPES an FX cell can reach in this build (the MIDI tail may be hidden).
+    // How many EFFECTS an FX cell can reach in this build (the MIDI tail may be hidden).
     // ⚠️ The cell's bound and the picker's size both come from here, or the picker meets an unnamed effect.
     int visible_effect_type_count() const;
 

@@ -98,7 +98,8 @@ native/                            The portable program
 │   ├── project_ops.h                Compact, transitive table walks, slot surgery
 │   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
 │   ├── effect_codes.h               The effect codes and how their bytes read — the engine's too
-│   ├── effects.h                    Names, EFFECT_TYPES, resolve_step_params
+│   ├── effects.h                    EFFECTS (name, value limit, menu order), resolve_step_params
+│   ├── voice_commands.h             The commands that move the sounding voice by a controller
 │   ├── automation.h                 AUS/AUF: the automatable registry, the curve, the pairing
 │   ├── table_automation.h           AUS/AUF over a table's rows — shared by the engine and the editor
 │   ├── traversal.h                  Song walks, collect_used_instruments
@@ -586,7 +587,7 @@ drawing persisted data as something else would misrepresent the file on disk. Th
 surfaces sit behind the same kind of flag (`PlatformCaps::midi`), on in every shipping profile, and
 the `LPO` effect behind `loopWindow` as well — which is why it shows wherever MIDI does. Hiding an
 effect works only on a
-**tail** of `EFFECT_TYPES`: a cell stores an index into that array while a `.ptp` stores the effect
+**tail** of `EFFECTS`: a cell stores an index into that array while a `.ptp` stores the effect
 *code*, so shortening the list leaves every remaining index naming the effect it always named. `LPO`
 sits directly below the MIDI six for that reason, which also means the two trims nest — nothing can
 drop an entry from the middle of the list.
@@ -937,8 +938,9 @@ mirror the JSON they serialize to.
 Screen geometry lives in one table per screen that the cursor walks and the module draws, rather than
 in a chain of branches — see [UI Layer](#ui-layer).
 
-**A row's or an enum member's number is its identity: append, never insert.** An FX cell stores an
-*index* into `EFFECT_TYPES` while the project file stores the effect *code*, so inserting an entry
-renumbers every cell a user has already typed. The same applies to `SettingsRow`, `ProjectRow` and
+**A row's or an enum member's number is its identity: append, never insert.** An FX type cell on
+screen holds an *index* into `EFFECTS` while the step and the project file hold the effect *code*, so
+inserting an entry leaves saved songs alone but moves what every index reaches — the cycle, the
+picker, the recorded input tests. The same applies to `SettingsRow`, `ProjectRow` and
 `InstrumentType`, all of which are persisted or recorded by number. Where a build hides a member, it
 hides one from the **end** of the list and the walkers skip it — they never close the gap.
