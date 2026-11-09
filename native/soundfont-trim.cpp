@@ -209,119 +209,96 @@ void append_chunk(std::vector<uint8_t>& out, const char* id, const std::vector<u
     if (body.size() & 1) out.push_back(0);
 }
 
-}  // namespace
+// One zone list's three tables: the preset's (pbag, pgen, pmod) or the instruments' (ibag, igen, imod).
+// A bag's zone runs to the next bag's indices.
+struct ZoneTables {
+    const std::vector<Bag>& bags;
+    const std::vector<Gen>& gens;
+    const std::vector<Mod>& mods;
+};
 
-bool sf_read_preset_list(const char* path, std::vector<SfPreset>& out) {
-    out.clear();
-    if (!path) return false;
-    FILE* f = pt_fopen(path, "rb");
-    if (!f) return false;
-    Hydra h;
-    const bool ok = read_hydra(f, h);
-    std::fclose(f);
-    if (!ok) return false;
+// The trimmed copy of one zone list.
+struct Zones {
+    std::vector<Bag> bags;
+    std::vector<Gen> gens;
+    std::vector<Mod> mods;
+};
 
-    for (int idx : sorted_preset_order(h)) {
-        const Phdr& p = h.phdr[static_cast<size_t>(idx)];
-        out.push_back({ static_cast<int>(p.bank), static_cast<int>(p.preset), name_of(p.name) });
-    }
-    return !out.empty();
+// Instrument `ii`'s bags, false when its range is broken.
+bool inst_bags(const Hydra& h, int ii, size_t& b0, size_t& b1) {
+    b0 = h.inst[static_cast<size_t>(ii)].bagNdx;
+    b1 = h.inst[static_cast<size_t>(ii) + 1].bagNdx;
+    return b0 <= b1 && b1 < h.ibag.size();
 }
 
-bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<uint8_t>& out) {
-    out.clear();
-    if (!path) return false;
-    FILE* f = pt_fopen(path, "rb");
-    if (!f) return false;
-    Hydra h;
-    if (!read_hydra(f, h) || h.smplSize == 0) { std::fclose(f); return false; }
-
-    // Its zones run to the next phdr's — read_hydra guaranteed the terminal.
-    const int realPresets = static_cast<int>(h.phdr.size()) - 1;
-    int target = -1;
-    for (int i = 0; i < realPresets; ++i) {
-        const Phdr& p = h.phdr[static_cast<size_t>(i)];
-        if (p.bank == bank && p.preset == preset) { target = i; break; }
-    }
-    if (target < 0) { std::fclose(f); return false; }
-
-    const size_t pbagBegin = h.phdr[static_cast<size_t>(target)].bagNdx;
-    const size_t pbagEnd   = h.phdr[static_cast<size_t>(target) + 1].bagNdx;
-    if (pbagBegin > pbagEnd || pbagEnd >= h.pbag.size()) { std::fclose(f); return false; }
-
-    // ── which instruments this preset reaches ──
-    std::vector<int> instUsed;
-    for (size_t b = pbagBegin; b < pbagEnd; ++b) {
-        const size_t g0 = h.pbag[b].genNdx, g1 = h.pbag[b + 1].genNdx;
-        if (g0 > g1 || g1 >= h.pgen.size()) continue;
+// What bags [b0, b1) reach: every distinct amount of an `oper` generator below `limit`, into `used`.
+void collect_reached(const ZoneTables& t, size_t b0, size_t b1, uint16_t oper, int limit,
+                     std::vector<int>& used) {
+    for (size_t b = b0; b < b1; ++b) {
+        const size_t g0 = t.bags[b].genNdx, g1 = t.bags[b + 1].genNdx;
+        if (g0 > g1 || g1 >= t.gens.size()) continue;
         for (size_t g = g0; g < g1; ++g) {
-            if (h.pgen[g].oper != GEN_INSTRUMENT) continue;
-            const int wi = h.pgen[g].amount;
-            if (wi >= static_cast<int>(h.inst.size()) - 1) continue;
-            if (std::find(instUsed.begin(), instUsed.end(), wi) == instUsed.end()) instUsed.push_back(wi);
+            if (t.gens[g].oper != oper) continue;
+            const int i = t.gens[g].amount;
+            if (i >= limit) continue;
+            if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
         }
     }
-    std::sort(instUsed.begin(), instUsed.end());
+}
 
-    // ── which sample headers those instruments reach ──
-    std::vector<int> shdrUsed;
-    for (int ii : instUsed) {
-        const size_t ib0 = h.inst[static_cast<size_t>(ii)].bagNdx;
-        const size_t ib1 = h.inst[static_cast<size_t>(ii) + 1].bagNdx;
-        if (ib0 > ib1 || ib1 >= h.ibag.size()) continue;
-        for (size_t b = ib0; b < ib1; ++b) {
-            const size_t g0 = h.ibag[b].genNdx, g1 = h.ibag[b + 1].genNdx;
-            if (g0 > g1 || g1 >= h.igen.size()) continue;
+// Bags [b0, b1) onto `out`, an `oper` generator's amount renumbered through `renumber`; one whose
+// target was not kept is dropped.
+void copy_zones(const ZoneTables& t, size_t b0, size_t b1, uint16_t oper, const std::vector<int>& renumber,
+                Zones& out) {
+    for (size_t b = b0; b < b1; ++b) {
+        out.bags.push_back({ static_cast<uint16_t>(out.gens.size()), static_cast<uint16_t>(out.mods.size()) });
+        const size_t g0 = t.bags[b].genNdx, g1 = t.bags[b + 1].genNdx;
+        if (g0 <= g1 && g1 < t.gens.size()) {
             for (size_t g = g0; g < g1; ++g) {
-                if (h.igen[g].oper != GEN_SAMPLE_ID) continue;
-                const int si = h.igen[g].amount;
-                if (si >= static_cast<int>(h.shdr.size()) - 1) continue;
-                if (std::find(shdrUsed.begin(), shdrUsed.end(), si) == shdrUsed.end()) shdrUsed.push_back(si);
+                Gen gen = t.gens[g];
+                if (gen.oper == oper) {
+                    const int mapped = (gen.amount < renumber.size()) ? renumber[gen.amount] : -1;
+                    if (mapped < 0) continue;
+                    gen.amount = static_cast<uint16_t>(mapped);
+                }
+                out.gens.push_back(gen);
             }
         }
-    }
-    if (shdrUsed.empty()) { std::fclose(f); return false; }
-
-    // ⚠️ Whether ANY sample is compressed decides the whole layout: tsf's decoder changes behaviour at
-    // its first Ogg sample. The two layouts are at the copy loop.
-    bool anyCompressed = false;
-    for (int si : shdrUsed)
-        if ((h.shdr[static_cast<size_t>(si)].sampleType & SAMPLE_TYPE_COMPRESSED) != 0) {
-            anyCompressed = true;
-            break;
+        const size_t m0 = t.bags[b].modNdx, m1 = t.bags[b + 1].modNdx;
+        if (m0 <= m1 && m1 < t.mods.size()) {
+            for (size_t m = m0; m < m1; ++m) out.mods.push_back(t.mods[m]);
         }
+    }
+}
 
-    // By source offset; header order must match byte order (one loop writes both).
-    // ⚠️ In a compressed font the Ogg samples go first: after one Ogg decode tsf reads a PCM header at
-    // its own offset, so a PCM sample before it lands at the wrong index.
-    std::sort(shdrUsed.begin(), shdrUsed.end(), [&](int a, int b) {
-        const Shdr& x = h.shdr[static_cast<size_t>(a)];
-        const Shdr& y = h.shdr[static_cast<size_t>(b)];
-        const bool cx = (x.sampleType & SAMPLE_TYPE_COMPRESSED) != 0;
-        const bool cy = (y.sampleType & SAMPLE_TYPE_COMPRESSED) != 0;
-        if (cx != cy) return cx;
-        return x.start < y.start;
-    });
+// ⚠️ tsf reads `[i + 1]` on pbag and ibag unchecked — a missing terminal reads past the end.
+void close_zones(Zones& z) {
+    z.bags.push_back({ static_cast<uint16_t>(z.gens.size()), static_cast<uint16_t>(z.mods.size()) });
+    z.gens.push_back({ 0, 0 });
+    z.mods.push_back({ 0, 0, 0, 0, 0 });
+}
 
-    // ── copy the sample bytes, and rewrite the headers onto where they landed ──
-    // ⚠️ A region reads a little past its data (loop end, `endAddrsOffset`, the interpolator), so every
-    // sample must be followed by silence in the DECODED buffer. All-PCM: the 46 zero frames are copied
-    // through. Compressed: a dummy uncompressed header after each Ogg sample, all sharing one zero block.
-    // ⚠️ That block goes at the FRONT: tsf rebases later PCM headers in an unsigned 32-bit local, and
-    // an offset ahead of the decode cursor wraps — a segfault.
+// The kept samples' bytes, and their headers rewritten onto where they landed.
+struct SampleCopy {
     std::vector<uint8_t> smpl;
-    const uint32_t padFrame = 0;
+    std::vector<Shdr>    headers;
+    // ⚠️ Parallel to `headers`: the source header, -1 for a pad — a mismatch shifts every sample id after it.
+    std::vector<int>     source;
+};
+
+// Copies `used` (in the order to write them) out of `f`. False on a read error.
+// ⚠️ A region reads a little past its data (loop end, `endAddrsOffset`, the interpolator), so every
+// sample must be followed by silence in the DECODED buffer. All-PCM: the 46 zero frames are copied
+// through. Compressed: a dummy uncompressed header after each Ogg sample, all sharing one zero block.
+// ⚠️ That block goes at the FRONT: tsf rebases later PCM headers in an unsigned 32-bit local, and
+// an offset ahead of the decode cursor wraps — a segfault.
+bool copy_samples(FILE* f, const Hydra& h, const std::vector<int>& used, bool anyCompressed, SampleCopy& out) {
+    std::vector<uint8_t>& smpl = out.smpl;
     if (anyCompressed) smpl.resize(PCM_GAP_FRAMES * 2, 0);
-    std::vector<Shdr>    newShdr;
-    // ⚠️ Parallel to `newShdr`, -1 for a pad — a mismatch shifts every sample id after it.
-    std::vector<int>     kept;
-    newShdr.reserve(shdrUsed.size() * 2 + 1);
-    kept.reserve(shdrUsed.size() * 2);
+    out.headers.reserve(used.size() * 2 + 1);
+    out.source.reserve(used.size() * 2);
 
-    // Pads in `newShdr`; their offsets are patched after the loop.
-    std::vector<size_t> padPositions;
-
-    for (int si : shdrUsed) {
+    for (int si : used) {
         const Shdr& src = h.shdr[static_cast<size_t>(si)];
         Shdr s = src;
 
@@ -332,7 +309,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             const size_t at    = smpl.size();
             smpl.resize(at + bytes);
             if (std::fseek(f, h.smplOffset + static_cast<long>(src.start), SEEK_SET) != 0 ||
-                std::fread(smpl.data() + at, 1, bytes, f) != bytes) { std::fclose(f); return false; }
+                std::fread(smpl.data() + at, 1, bytes, f) != bytes) return false;
 
             s.start = static_cast<uint32_t>(at);
             s.end   = static_cast<uint32_t>(at + bytes);
@@ -350,7 +327,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             // The all-PCM layout's silent tail; a compressed font gets its silence from the pad.
             smpl.resize(at + bytes + (anyCompressed ? 0u : PCM_GAP_FRAMES * 2), 0);
             if (std::fseek(f, h.smplOffset + static_cast<long>(src.start) * 2, SEEK_SET) != 0 ||
-                std::fread(smpl.data() + at, 1, bytes, f) != bytes) { std::fclose(f); return false; }
+                std::fread(smpl.data() + at, 1, bytes, f) != bytes) return false;
 
             const uint32_t base = static_cast<uint32_t>(at / 2);
             s.start     = base;
@@ -358,154 +335,78 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             s.startLoop = base + (src.startLoop >= src.start ? src.startLoop - src.start : 0);
             s.endLoop   = base + (src.endLoop   >= src.start ? src.endLoop   - src.start : 0);
         }
-        newShdr.push_back(s);
-        kept.push_back(si);
+        out.headers.push_back(s);
+        out.source.push_back(si);
 
-        if (anyCompressed) {
-            padPositions.push_back(newShdr.size());
+        if (anyCompressed) {   // decoded, never played: the zero block at the front
             Shdr pad{};
             const char padName[20] = "PT-PAD";
             std::memcpy(pad.name, padName, 20);
+            pad.end           = PCM_GAP_FRAMES;
             pad.sampleRate    = src.sampleRate;
             pad.originalPitch = 60;
             pad.sampleType    = 1;      // mono, uncompressed: frame offsets
-            newShdr.push_back(pad);
-            kept.push_back(-1);         // decoded, never played
+            out.headers.push_back(pad);
+            out.source.push_back(-1);
         }
     }
-    std::fclose(f);
-    if (newShdr.empty() || smpl.empty()) return false;
+    return true;
+}
 
-    // ── the pads, onto the block reserved at the front ──
-    for (size_t pos : padPositions) {
-        newShdr[pos].start     = padFrame;
-        newShdr[pos].end       = padFrame + PCM_GAP_FRAMES;
-        newShdr[pos].startLoop = padFrame;
-        newShdr[pos].endLoop   = padFrame;
+void emit_bags(std::vector<uint8_t>& pdta, const char* id, const std::vector<Bag>& bags) {
+    std::vector<uint8_t> body;
+    for (const Bag& b : bags) { wr_u16(body, b.genNdx); wr_u16(body, b.modNdx); }
+    append_chunk(pdta, id, body);
+}
+
+void emit_mods(std::vector<uint8_t>& pdta, const char* id, const std::vector<Mod>& mods) {
+    std::vector<uint8_t> body;
+    for (const Mod& m : mods) {
+        wr_u16(body, m.srcOper); wr_u16(body, m.destOper);
+        wr_u16(body, static_cast<uint16_t>(m.amount));
+        wr_u16(body, m.amtSrcOper); wr_u16(body, m.transOper);
     }
+    append_chunk(pdta, id, body);
+}
 
-    // ── the renumbering tables ──
-    std::vector<int> instNew(h.inst.size(), -1);
-    for (size_t i = 0; i < instUsed.size(); ++i) {
-        instNew[static_cast<size_t>(instUsed[i])] = static_cast<int>(i);
-    }
-    std::vector<int> shdrNew(h.shdr.size(), -1);
-    for (size_t i = 0; i < kept.size(); ++i) {
-        if (kept[i] >= 0) shdrNew[static_cast<size_t>(kept[i])] = static_cast<int>(i);
-    }
+void emit_gens(std::vector<uint8_t>& pdta, const char* id, const std::vector<Gen>& gens) {
+    std::vector<uint8_t> body;
+    for (const Gen& g : gens) { wr_u16(body, g.oper); wr_u16(body, g.amount); }
+    append_chunk(pdta, id, body);
+}
 
-    // ── the preset's zones ──
-    std::vector<Bag> nPbag; std::vector<Gen> nPgen; std::vector<Mod> nPmod;
-    for (size_t b = pbagBegin; b < pbagEnd; ++b) {
-        nPbag.push_back({ static_cast<uint16_t>(nPgen.size()), static_cast<uint16_t>(nPmod.size()) });
-        const size_t g0 = h.pbag[b].genNdx, g1 = h.pbag[b + 1].genNdx;
-        if (g0 <= g1 && g1 < h.pgen.size()) {
-            for (size_t g = g0; g < g1; ++g) {
-                Gen gen = h.pgen[g];
-                if (gen.oper == GEN_INSTRUMENT) {
-                    const int mapped = (gen.amount < instNew.size()) ? instNew[gen.amount] : -1;
-                    if (mapped < 0) continue;
-                    gen.amount = static_cast<uint16_t>(mapped);
-                }
-                nPgen.push_back(gen);
-            }
-        }
-        const size_t m0 = h.pbag[b].modNdx, m1 = h.pbag[b + 1].modNdx;
-        if (m0 <= m1 && m1 < h.pmod.size()) {
-            for (size_t m = m0; m < m1; ++m) nPmod.push_back(h.pmod[m]);
-        }
-    }
-
-    // ── the instruments' zones ──
-    std::vector<Inst> nInst; std::vector<Bag> nIbag; std::vector<Gen> nIgen; std::vector<Mod> nImod;
-    for (int ii : instUsed) {
-        Inst in{};
-        std::memcpy(in.name, h.inst[static_cast<size_t>(ii)].name, 20);
-        in.bagNdx = static_cast<uint16_t>(nIbag.size());
-        nInst.push_back(in);
-
-        const size_t ib0 = h.inst[static_cast<size_t>(ii)].bagNdx;
-        const size_t ib1 = h.inst[static_cast<size_t>(ii) + 1].bagNdx;
-        if (ib0 > ib1 || ib1 >= h.ibag.size()) continue;
-        for (size_t b = ib0; b < ib1; ++b) {
-            nIbag.push_back({ static_cast<uint16_t>(nIgen.size()), static_cast<uint16_t>(nImod.size()) });
-            const size_t g0 = h.ibag[b].genNdx, g1 = h.ibag[b + 1].genNdx;
-            if (g0 <= g1 && g1 < h.igen.size()) {
-                for (size_t g = g0; g < g1; ++g) {
-                    Gen gen = h.igen[g];
-                    if (gen.oper == GEN_SAMPLE_ID) {
-                        const int mapped = (gen.amount < shdrNew.size()) ? shdrNew[gen.amount] : -1;
-                        if (mapped < 0) continue;   // a zone whose sample could not be copied
-                        gen.amount = static_cast<uint16_t>(mapped);
-                    }
-                    nIgen.push_back(gen);
-                }
-            }
-            const size_t m0 = h.ibag[b].modNdx, m1 = h.ibag[b + 1].modNdx;
-            if (m0 <= m1 && m1 < h.imod.size()) {
-                for (size_t m = m0; m < m1; ++m) nImod.push_back(h.imod[m]);
-            }
-        }
-    }
-    if (nInst.empty() || nPbag.empty()) return false;
-
-    // ── terminal records ──
-    // ⚠️ tsf reads `[i + 1]` on phdr, pbag, inst and ibag unchecked — a missing terminal reads past the end.
-    nPbag.push_back({ static_cast<uint16_t>(nPgen.size()), static_cast<uint16_t>(nPmod.size()) });
-    nPgen.push_back({ 0, 0 });
-    nPmod.push_back({ 0, 0, 0, 0, 0 });
-    nIbag.push_back({ static_cast<uint16_t>(nIgen.size()), static_cast<uint16_t>(nImod.size()) });
-    nIgen.push_back({ 0, 0 });
-    nImod.push_back({ 0, 0, 0, 0, 0 });
-
-    // ── emit ──
+// The one-preset font: `preset`, its zones (`pz`), its instruments and theirs (`iz`), the samples.
+void emit_font(const Phdr& preset, const Zones& pz, const std::vector<Inst>& insts, const Zones& iz,
+               const std::vector<Shdr>& headers, bool anyCompressed, std::vector<uint8_t>& smpl,
+               std::vector<uint8_t>& out) {
     std::vector<uint8_t> pdta;
     {
         std::vector<uint8_t> body;
-        const Phdr& src = h.phdr[static_cast<size_t>(target)];
-        wr_name(body, src.name);
-        wr_u16(body, src.preset); wr_u16(body, src.bank); wr_u16(body, 0);
-        wr_u32(body, src.library); wr_u32(body, src.genre); wr_u32(body, src.morphology);
+        wr_name(body, preset.name);
+        wr_u16(body, preset.preset); wr_u16(body, preset.bank); wr_u16(body, 0);
+        wr_u32(body, preset.library); wr_u32(body, preset.genre); wr_u32(body, preset.morphology);
+        // ⚠️ The terminal: tsf reads phdr's `[i + 1]` unchecked.
         const char eop[20] = "EOP";
         wr_name(body, eop);
         wr_u16(body, 0); wr_u16(body, 0);
-        wr_u16(body, static_cast<uint16_t>(nPbag.size() - 1));
+        wr_u16(body, static_cast<uint16_t>(pz.bags.size() - 1));
         wr_u32(body, 0); wr_u32(body, 0); wr_u32(body, 0);
         append_chunk(pdta, "phdr", body);
     }
-    auto emit_bags = [&](const char* id, const std::vector<Bag>& bags) {
-        std::vector<uint8_t> body;
-        for (const Bag& b : bags) { wr_u16(body, b.genNdx); wr_u16(body, b.modNdx); }
-        append_chunk(pdta, id, body);
-    };
-    auto emit_mods = [&](const char* id, const std::vector<Mod>& mods) {
-        std::vector<uint8_t> body;
-        for (const Mod& m : mods) {
-            wr_u16(body, m.srcOper); wr_u16(body, m.destOper);
-            wr_u16(body, static_cast<uint16_t>(m.amount));
-            wr_u16(body, m.amtSrcOper); wr_u16(body, m.transOper);
-        }
-        append_chunk(pdta, id, body);
-    };
-    auto emit_gens = [&](const char* id, const std::vector<Gen>& gens) {
-        std::vector<uint8_t> body;
-        for (const Gen& g : gens) { wr_u16(body, g.oper); wr_u16(body, g.amount); }
-        append_chunk(pdta, id, body);
-    };
-    emit_bags("pbag", nPbag);
-    emit_mods("pmod", nPmod);
-    emit_gens("pgen", nPgen);
+    emit_bags(pdta, "pbag", pz.bags);
+    emit_mods(pdta, "pmod", pz.mods);
+    emit_gens(pdta, "pgen", pz.gens);
     {
         std::vector<uint8_t> body;
-        for (const Inst& in : nInst) { wr_name(body, in.name); wr_u16(body, in.bagNdx); }
-        const char eoi[20] = "EOI";
+        for (const Inst& in : insts) { wr_name(body, in.name); wr_u16(body, in.bagNdx); }
+        const char eoi[20] = "EOI";   // the terminal, as phdr's
         wr_name(body, eoi);
-        wr_u16(body, static_cast<uint16_t>(nIbag.size() - 1));
+        wr_u16(body, static_cast<uint16_t>(iz.bags.size() - 1));
         append_chunk(pdta, "inst", body);
     }
-    emit_bags("ibag", nIbag);
-    emit_mods("imod", nImod);
-    emit_gens("igen", nIgen);
+    emit_bags(pdta, "ibag", iz.bags);
+    emit_mods(pdta, "imod", iz.mods);
+    emit_gens(pdta, "igen", iz.gens);
     {
         std::vector<uint8_t> body;
         auto put = [&](const Shdr& s) {
@@ -517,7 +418,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             body.push_back(static_cast<uint8_t>(s.pitchCorrection));
             wr_u16(body, s.sampleLink); wr_u16(body, s.sampleType);
         };
-        for (const Shdr& s : newShdr) put(s);
+        for (const Shdr& s : headers) put(s);
         // ⚠️ tsf extends the last header to the chunk's end, so without this one the final sample
         // swallows the rest. In a compressed font it is marked compressed and empty, or the whole Ogg
         // chunk is appended as PCM; in an all-PCM font it must not be.
@@ -549,7 +450,118 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
     wr_u32(out, static_cast<uint32_t>(4 + pdta.size()));
     wr_fourcc(out, "pdta");
     out.insert(out.end(), pdta.begin(), pdta.end());
+}
 
+}  // namespace
+
+bool sf_read_preset_list(const char* path, std::vector<SfPreset>& out) {
+    out.clear();
+    if (!path) return false;
+    PtFile f(pt_fopen(path, "rb"));
+    if (!f) return false;
+    Hydra h;
+    if (!read_hydra(f.get(), h)) return false;
+
+    for (int idx : sorted_preset_order(h)) {
+        const Phdr& p = h.phdr[static_cast<size_t>(idx)];
+        out.push_back({ static_cast<int>(p.bank), static_cast<int>(p.preset), name_of(p.name) });
+    }
+    return !out.empty();
+}
+
+bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<uint8_t>& out) {
+    out.clear();
+    if (!path) return false;
+    PtFile f(pt_fopen(path, "rb"));
+    if (!f) return false;
+    Hydra h;
+    if (!read_hydra(f.get(), h) || h.smplSize == 0) return false;
+
+    // Its zones run to the next phdr's — read_hydra guaranteed the terminal.
+    const int realPresets = static_cast<int>(h.phdr.size()) - 1;
+    int target = -1;
+    for (int i = 0; i < realPresets; ++i) {
+        const Phdr& p = h.phdr[static_cast<size_t>(i)];
+        if (p.bank == bank && p.preset == preset) { target = i; break; }
+    }
+    if (target < 0) return false;
+
+    const size_t pbagBegin = h.phdr[static_cast<size_t>(target)].bagNdx;
+    const size_t pbagEnd   = h.phdr[static_cast<size_t>(target) + 1].bagNdx;
+    if (pbagBegin > pbagEnd || pbagEnd >= h.pbag.size()) return false;
+
+    const ZoneTables presetZones{ h.pbag, h.pgen, h.pmod };
+    const ZoneTables instZones{ h.ibag, h.igen, h.imod };
+
+    // ── which instruments this preset reaches, and which sample headers those reach ──
+    std::vector<int> instUsed;
+    collect_reached(presetZones, pbagBegin, pbagEnd, GEN_INSTRUMENT, static_cast<int>(h.inst.size()) - 1,
+                    instUsed);
+    std::sort(instUsed.begin(), instUsed.end());
+
+    std::vector<int> shdrUsed;
+    for (int ii : instUsed) {
+        size_t b0, b1;
+        if (inst_bags(h, ii, b0, b1))
+            collect_reached(instZones, b0, b1, GEN_SAMPLE_ID, static_cast<int>(h.shdr.size()) - 1, shdrUsed);
+    }
+    if (shdrUsed.empty()) return false;
+
+    // ⚠️ Whether ANY sample is compressed decides the whole layout: tsf's decoder changes behaviour at
+    // its first Ogg sample. The two layouts are in `copy_samples`.
+    bool anyCompressed = false;
+    for (int si : shdrUsed)
+        if ((h.shdr[static_cast<size_t>(si)].sampleType & SAMPLE_TYPE_COMPRESSED) != 0) {
+            anyCompressed = true;
+            break;
+        }
+
+    // By source offset; header order must match byte order (one loop writes both).
+    // ⚠️ In a compressed font the Ogg samples go first: after one Ogg decode tsf reads a PCM header at
+    // its own offset, so a PCM sample before it lands at the wrong index.
+    std::sort(shdrUsed.begin(), shdrUsed.end(), [&](int a, int b) {
+        const Shdr& x = h.shdr[static_cast<size_t>(a)];
+        const Shdr& y = h.shdr[static_cast<size_t>(b)];
+        const bool cx = (x.sampleType & SAMPLE_TYPE_COMPRESSED) != 0;
+        const bool cy = (y.sampleType & SAMPLE_TYPE_COMPRESSED) != 0;
+        if (cx != cy) return cx;
+        return x.start < y.start;
+    });
+
+    SampleCopy samples;
+    if (!copy_samples(f.get(), h, shdrUsed, anyCompressed, samples)) return false;
+    f.reset();
+    if (samples.headers.empty() || samples.smpl.empty()) return false;
+
+    // ── renumber, and copy the zones that still reach something ──
+    std::vector<int> instNew(h.inst.size(), -1);
+    for (size_t i = 0; i < instUsed.size(); ++i) {
+        instNew[static_cast<size_t>(instUsed[i])] = static_cast<int>(i);
+    }
+    std::vector<int> shdrNew(h.shdr.size(), -1);
+    for (size_t i = 0; i < samples.source.size(); ++i) {
+        if (samples.source[i] >= 0) shdrNew[static_cast<size_t>(samples.source[i])] = static_cast<int>(i);
+    }
+
+    Zones pz;
+    copy_zones(presetZones, pbagBegin, pbagEnd, GEN_INSTRUMENT, instNew, pz);
+
+    Zones iz;
+    std::vector<Inst> insts;
+    for (int ii : instUsed) {
+        Inst in{};
+        std::memcpy(in.name, h.inst[static_cast<size_t>(ii)].name, 20);
+        in.bagNdx = static_cast<uint16_t>(iz.bags.size());
+        insts.push_back(in);
+        size_t b0, b1;
+        if (inst_bags(h, ii, b0, b1)) copy_zones(instZones, b0, b1, GEN_SAMPLE_ID, shdrNew, iz);
+    }
+    if (insts.empty() || pz.bags.empty()) return false;
+    close_zones(pz);
+    close_zones(iz);
+
+    emit_font(h.phdr[static_cast<size_t>(target)], pz, insts, iz, samples.headers, anyCompressed,
+              samples.smpl, out);
     return true;
 }
 

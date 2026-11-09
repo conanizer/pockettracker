@@ -9,6 +9,7 @@
 // variable would give each its own copy.
 
 #include <cstdio>
+#include <memory>
 #include <string>
 
 // A URI → an open file descriptor, or −1. `mode` is `pt_fopen`'s; a write mode may create.
@@ -40,6 +41,10 @@ bool pt_path_is_uri(const char* path);
 // `std::fopen`, or the host hook for a URI. Null on failure.
 // ⚠️ Some decoders own the handle once given it (`stb_vorbis_open_file` closes it); keep no copy.
 FILE* pt_fopen(const char* path, const char* mode);
+
+// A `pt_fopen` handle that closes itself.
+struct PtFileClose { void operator()(FILE* f) const { std::fclose(f); } };
+using PtFile = std::unique_ptr<FILE, PtFileClose>;
 
 // The whole file into `out`. False if it cannot be opened or read to its end.
 bool pt_read_file(const char* path, std::string& out);
