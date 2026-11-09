@@ -828,6 +828,36 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
     }
 }
 
+// The sampler's drive and crush for this piece; returns the downsample, which is in the read. A change
+// on the sounding note starts the old read's fade — before it, the note just starts there.
+static int setSamplerShaping(Voice& voice) {
+    voice.chain.drive.setDrive(paramWithMod(voice, PARAM_DRIVE, 255));
+    voice.chain.crush.setParams(paramWithMod(voice, PARAM_CRUSH, 15), 0);
+    const int ds = paramWithMod(voice, PARAM_DOWNSAMPLE, 15);
+    if (ds != voice.dsLast) {
+        if (voice.chain.started) {
+            voice.dsPrev = voice.dsLast;
+            voice.dsFade.start(1.0f, 0.0f, GLIDE_SAMPLES);
+        }
+        voice.dsLast = ds;
+    }
+    return ds;
+}
+
+// A mod routed to VOL, across one piece: an LFO scales the level, an envelope adds to it.
+struct VolMod { float from, step, amount; bool scales; };
+
+// The voice's VOL mods in slot order; returns how many.
+static int collectVolMods(const Voice& voice, VolMod (&out)[4]) {
+    int n = 0;
+    for (int m = 0; m < 4; m++) {
+        const VoiceModSlot& mod = voice.voiceMods[m];
+        if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
+        out[n++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == 3};
+    }
+    return n;
+}
+
 // One piece of one sampler voice — frames [from, to) of the block — into the output and sends.
 void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to) {
     if (voice.chordExtra > 0) mixSamplerPieceAs<true>(voice, b, from, to);
@@ -847,62 +877,8 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         return;
     }
 
-    voice.chain.drive.setDrive(paramWithMod(voice, PARAM_DRIVE, 255));
-    voice.chain.crush.setParams(paramWithMod(voice, PARAM_CRUSH, 15), 0);   // the downsample is in the read, below
-    const int effDownsample = paramWithMod(voice, PARAM_DOWNSAMPLE, 15);
-    if (effDownsample != voice.dsLast) {
-        if (voice.chain.started) {   // a change on the sounding note — before it, just where it starts
-            voice.dsPrev     = voice.dsLast;
-            voice.dsFade.start(1.0f, 0.0f, GLIDE_SAMPLES);
-        }
-        voice.dsLast = effDownsample;
-    }
-    {
-        int sl = voice.sampleLength;
-        // Re-derived every piece so a mod route can move them while the note rings. ⚠️ Not an
-        // exact-frame window: the 0-255 pair cannot express it, so that one is carried on the voice.
-        if (voice.windowStartFrame >= 0) {
-            voice.actualStart = std::max(0, std::min(voice.windowStartFrame, sl - 2));
-            voice.actualEnd   = std::max(voice.actualStart + 1, std::min(voice.windowEndFrame, sl - 1));
-        } else if (voice.sliceStartFrame >= 0) {
-            derive_slice_window(voice.sliceStartFrame, voice.sliceEndFrame,
-                                voice.modDestValues[PARAM_SAMPLE_START], voice.modDestValues[PARAM_SAMPLE_END],
-                                voice.params.base[PARAM_SAMPLE_END], sl, voice.actualStart, voice.actualEnd);
-        } else {
-            float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
-            float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
-            derive_sample_window(rawStart, rawEnd, sl, voice.actualStart, voice.actualEnd);
-        }
-        float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
-        voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
-        voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
-
-        // LPO moves both loop bounds alike (the length is the pitch), from the running count of
-        // sixteenths, clamped to the sample. ⚠️ The playhead moves too, or a step is heard a loop late.
-        const int len = voice.actualLoopEnd - voice.actualLoopStart;
-        int       off = 0;
-        if (voice.loopSlideSixteenths != 0 && len > 0) {
-            const int maxSixteenths = (int)(((int64_t)(voice.actualEnd - voice.actualLoopEnd) * 16) / len);
-            const int minSixteenths = (int)(((int64_t)(voice.actualStart - voice.actualLoopStart) * 16) / len);
-            voice.loopSlideSixteenths = std::max(minSixteenths,
-                                                 std::min(voice.loopSlideSixteenths, maxSixteenths));
-            off = (int)(((int64_t)voice.loopSlideSixteenths * len) / 16);
-        }
-        if (off != voice.loopSlideFrames) {
-            // ⚠️ Only while the playhead is inside the loop: the intro before the first wrap and
-            // a released note's tail are not positions the window owns.
-            const int wasStart = voice.actualLoopStart + voice.loopSlideFrames;
-            const int wasEnd   = voice.actualLoopEnd   + voice.loopSlideFrames;
-            if (voice.position >= (double)wasStart && voice.position < (double)wasEnd)
-                voice.position += (double)(off - voice.loopSlideFrames);
-            for (int k = 0; k < voice.chordExtra; ++k)
-                if (voice.chordPos[k] >= (double)wasStart && voice.chordPos[k] < (double)wasEnd)
-                    voice.chordPos[k] += (double)(off - voice.loopSlideFrames);
-            voice.loopSlideFrames = off;
-        }
-        voice.actualLoopStart += off;
-        voice.actualLoopEnd   += off;
-    }
+    const int effDownsample = setSamplerShaping(voice);
+    voice.followWindow();
 
     // ⚠️ After the loop bounds: oscillator mode derives its rate from the loop's length.
     float modulatedRate = getModulatedPlaybackRate(voice);
@@ -945,15 +921,8 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
     const float panLFrom = voice.prevPanLeft,  panLStep = voice.panLeft  - voice.prevPanLeft;
     const float panRFrom = voice.prevPanRight, panRStep = voice.panRight - voice.prevPanRight;
     const float volume   = voice.volume;
-    // The mods routed to VOL, in slot order: an LFO scales the level, an envelope adds to it.
-    struct VolMod { float from, step, amount; bool scales; };
-    VolMod volMods[4];
-    int    volModCount = 0;
-    for (int m = 0; m < 4; m++) {
-        const VoiceModSlot& mod = voice.voiceMods[m];
-        if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
-        volMods[volModCount++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == 3};
-    }
+    VolMod    volMods[4];
+    const int volModCount = collectVolMods(voice, volMods);
     const float volRouteFrom = voice.prevModDestValues[PARAM_VOL];
     const float volRouteStep = voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL];
     const float volGlideFrom = voice.volGlideFrom;

@@ -447,6 +447,55 @@ struct Voice : public IAudioVoice {
         }
     }
 
+    // The window and the loop again, so a mod route can move them while the note rings, then LPO's
+    // slide on top. ⚠️ An exact-frame window is not re-derived: the 0-255 pair cannot express it.
+    void followWindow() {
+        const int sl = sampleLength;
+        if (windowStartFrame >= 0) {
+            actualStart = std::max(0, std::min(windowStartFrame, sl - 2));
+            actualEnd   = std::max(actualStart + 1, std::min(windowEndFrame, sl - 1));
+        } else if (sliceStartFrame >= 0) {
+            derive_slice_window(sliceStartFrame, sliceEndFrame, modDestValues[PARAM_SAMPLE_START],
+                                modDestValues[PARAM_SAMPLE_END], params.base[PARAM_SAMPLE_END], sl,
+                                actualStart, actualEnd);
+        } else {
+            const float rawStart = params.base[PARAM_SAMPLE_START] + modDestValues[PARAM_SAMPLE_START];
+            const float rawEnd   = params.base[PARAM_SAMPLE_END]   + modDestValues[PARAM_SAMPLE_END];
+            derive_sample_window(rawStart, rawEnd, sl, actualStart, actualEnd);
+        }
+        const float rawLoop = params.base[PARAM_LOOP_START] + modDestValues[PARAM_LOOP_START];
+        actualLoopStart = std::max(actualStart, std::min((int)(rawLoop * sl / 255.0f), actualEnd - 1));
+        actualLoopEnd   = std::max(actualLoopStart + 1, std::min((int)((float)loopEndNorm * sl / 255.0f), actualEnd));
+        slideLoop();
+    }
+
+    // LPO moves both loop bounds alike (the length is the pitch), from the running count of
+    // sixteenths, clamped to the sample. ⚠️ The playhead moves too, or a step is heard a loop late.
+    void slideLoop() {
+        const int len = actualLoopEnd - actualLoopStart;
+        int       off = 0;
+        if (loopSlideSixteenths != 0 && len > 0) {
+            const int maxSixteenths = (int)(((int64_t)(actualEnd - actualLoopEnd) * 16) / len);
+            const int minSixteenths = (int)(((int64_t)(actualStart - actualLoopStart) * 16) / len);
+            loopSlideSixteenths = std::max(minSixteenths, std::min(loopSlideSixteenths, maxSixteenths));
+            off = (int)(((int64_t)loopSlideSixteenths * len) / 16);
+        }
+        if (off != loopSlideFrames) {
+            // ⚠️ Only while the playhead is inside the loop: the intro before the first wrap and
+            // a released note's tail are not positions the window owns.
+            const int wasStart = actualLoopStart + loopSlideFrames;
+            const int wasEnd   = actualLoopEnd   + loopSlideFrames;
+            if (position >= (double)wasStart && position < (double)wasEnd)
+                position += (double)(off - loopSlideFrames);
+            for (int k = 0; k < chordExtra; ++k)
+                if (chordPos[k] >= (double)wasStart && chordPos[k] < (double)wasEnd)
+                    chordPos[k] += (double)(off - loopSlideFrames);
+            loopSlideFrames = off;
+        }
+        actualLoopStart += off;
+        actualLoopEnd   += off;
+    }
+
     void stop() {
         isActive = false;
         isFadingOut = false;
