@@ -108,17 +108,12 @@ void InputDispatcher::theme_roll_palette(bool rowOnly) {
     }
 
     es.seed = es.seed * 1664525u + 1013904223u;
-    const ThemeRollResult r = theme_roll(s_.theme, locks, es.scheme, es.seed);
-
-    if (!r.ok) {
-        // ⚠️ The palette is left alone: a half-legal best attempt is worse than no change.
-        es.message = rowOnly ? "ROW UNSOLVABLE" : "LOCKS UNSOLVABLE";
+    const std::optional<Theme> rolled = theme_roll(s_.theme, locks, es.scheme, es.seed);
+    if (!rolled) {
+        es.message = rowOnly ? "ROW UNSOLVABLE" : "LOCKS UNSOLVABLE";   // the palette is left alone
         return;
     }
-
-    const std::string keepName = s_.theme.name;
-    s_.theme      = r.theme;
-    s_.theme.name = keepName;
+    s_.theme = *rolled;   // its name kept: the roll carries it
     theme_refresh_message();
 }
 
