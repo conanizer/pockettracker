@@ -702,8 +702,14 @@ class InputDispatcher {
     void browser_cycle_sort(int delta);
     // Move the cursor, keeping the window around it; `page` is LEFT/RIGHT's jump.
     void browser_move_cursor(int delta, bool page);
-    // A: open a folder, go up, or load the file — per `browserPurpose`.
+    // A: open a folder, go up, or load the file — per `browserPurpose`. In a SELECT mode, the YES.
     void browser_confirm();
+    void browser_confirm_delete();
+    void browser_confirm_root();
+    // The file `browserPurpose` opened the browser for.
+    void browser_load(const BrowserItem& item);
+    // A scale, groove, reverb or delay file into its place; false when it does not parse.
+    bool load_browser_preset(AppState::BrowserPurpose purpose, const std::string& path);
     // The selection's paths, without "..".
     std::vector<std::string> browser_selected_paths() const;
     // Copy or move the clipboard into the directory on screen, de-duplicating names.
