@@ -65,7 +65,7 @@ namespace {
     }
 }
 
-void DustChain::prepare(double sr, int /*blockSize*/, int numChannels)
+void DustChain::prepare(double sr, int numChannels)
 {
     sampleRate = sr;
     const int nc = std::max(1, numChannels);
@@ -120,274 +120,275 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
     if (n == 0 || nc == 0) return;
 
     if (fresh) { amountFrom = dustAmount; fresh = false; }
-    const float amountStep = (dustAmount - amountFrom) / (float)n;
-    const float amount0    = amountFrom;
+    const AmountRamp amount{ amountFrom, (dustAmount - amountFrom) / (float)n };
     amountFrom = dustAmount;
-    auto amountAt = [&](int sample) { return amount0 + amountStep * (float)(sample + 1); };
 
     // Stages 2 and 8 share one cutoff.
     const float lpCutoff = kLPCutoffMax * std::pow(kLPCutoffMin / kLPCutoffMax, dustAmount);
     const float lpCoef   = 1.0f - std::exp(-kTwoPi * lpCutoff / (float)sampleRate);
-    auto lowPass = [&](std::vector<float>& state) {
-        for (int ch = 0; ch < nc; ++ch) {
-            float s = state[(size_t)ch];
-            for (int i = 0; i < n; ++i) {
-                float& x = buf[i * channelCount + ch];
-                s += lpCoef * (x - s);
-                x = s;
-            }
-            state[(size_t)ch] = s;
-        }
-    };
 
-    // 1. Low-shelf
-    {
-        for (int ch = 0; ch < nc; ++ch) {
-            auto& cs = chans[(size_t)ch];
-            for (int i = 0; i < n; ++i) {
-                float& x = buf[i * channelCount + ch];
-                float y = lsB0*x + lsB1*cs.lsX1 + lsB2*cs.lsX2 - lsA1*cs.lsY1 - lsA2*cs.lsY2;
-                cs.lsX2=cs.lsX1; cs.lsX1=x; cs.lsY2=cs.lsY1; cs.lsY1=y;
-                x = y;
-            }
-        }
-    }
+    const Frames f{ buf, n, nc, channelCount };
+    lowShelf(f);
+    lowPass(f, lpState, lpCoef);
+    tube(f);
+    fetCompress(f, amount);
+    wowAndDrift(f, amount);
+    bitcrush(f);
+    softClip(f);
+    lowPass(f, lpState2, lpCoef);   // with stage 2, −12 dB/oct
+}
 
-    // 2. Low-pass
-    lowPass(lpState);
-
-    // 3. Tube (Airwindows Tube2 at Tube 1.0, InputPad 0.5). At 2× rates, averaging cuts aliasing.
-    {
-        const bool highSR = tubeHighSR;
-        for (int ch = 0; ch < nc; ++ch) {
-            auto& s = chans[(size_t)ch];
-            for (int i = 0; i < n; ++i) {
-                float& xref = buf[i * channelCount + ch];
-                double d = (double)xref * (double)kTubeInputPad;
-                if (d >  1.0) d =  1.0;
-                if (d < -1.0) d = -1.0;
-                if (highSR) {
-                    double prev = s.tubePrevA;
-                    s.tubePrevA = (float)d;
-                    d = (d + prev) * 0.5;
-                }
-                {
-                    double sharpen = -d;
-                    sharpen = (sharpen > 0.0) ? 1.0 + std::sqrt( sharpen)
-                                              : 1.0 - std::sqrt(-sharpen);
-                    d -= d * std::fabs(d) * sharpen * 0.25;
-                }
-                d -= d * std::fabs(d) * 0.5;
-                d *= 2.0;
-                if (highSR) {
-                    double prev = s.tubePrevC;
-                    s.tubePrevC = (float)d;
-                    d = (d + prev) * 0.5;
-                }
-                {
-                    double slew = (double)s.tubePrevE - d;
-                    s.tubePrevE = (float)d;
-                    slew = (slew > 0.0) ? 1.0 + std::sqrt( slew) * 0.5
-                                        : 1.0 - std::sqrt(-slew) * 0.5;
-                    d -= d * std::fabs(d) * slew * 0.5;
-                }
-                if (d >  0.52) d =  0.52;
-                if (d < -0.52) d = -0.52;
-                d *= 1.923076923076923;
-                xref = (float)d * tubePostGainLin;
-            }
+// 1. Low-shelf
+void DustChain::lowShelf(const Frames& f)
+{
+    for (int ch = 0; ch < f.channels; ++ch) {
+        auto& cs = chans[(size_t)ch];
+        for (int i = 0; i < f.n; ++i) {
+            float& x = f.at(i, ch);
+            float y = lsB0*x + lsB1*cs.lsX1 + lsB2*cs.lsX2 - lsA1*cs.lsY1 - lsA2*cs.lsY2;
+            cs.lsX2=cs.lsX1; cs.lsX1=x; cs.lsY2=cs.lsY1; cs.lsY1=y;
+            x = y;
         }
     }
+}
 
-    // 4. FET compressor (APComp): fully linked, feed-forward, tanh ceiling at 0 dBFS.
-    {
-        const double ratioVal         = kCompRatio;
-        const double convexityVal     = kCompConvexity;
-        const double inertiaCoef      = kCompInertia;
-        const double inertiaDecayCoef = 0.99 + kCompInertiaDecay * 0.01;
+// 2 and 8. A one-pole low-pass at `coef`, per channel.
+void DustChain::lowPass(const Frames& f, std::vector<float>& state, float coef)
+{
+    for (int ch = 0; ch < f.channels; ++ch) {
+        float s = state[(size_t)ch];
+        for (int i = 0; i < f.n; ++i) {
+            float& x = f.at(i, ch);
+            s += coef * (x - s);
+            x = s;
+        }
+        state[(size_t)ch] = s;
+    }
+}
 
-        // These approach 1 (held), so exp(…) rather than 1 − exp(…).
-        const double attackCoeff  = std::exp(-1.0 / ((double)sampleRate * kCompAttackSec));
-        const double releaseCoeff = std::exp(-1.0 / ((double)sampleRate * kCompReleaseSec));
-
-        const int ncp = std::min(nc, 2);
-        auto& sL = chans[0];
-        auto& sR = (ncp >= 2) ? chans[1] : chans[0];
-
-        for (int sample = 0; sample < n; ++sample)
-        {
-            const double thresholdDb = (double)(amountAt(sample) * kCompThresholdMin);
-            float  inputSample[2] = { 0.0f, 0.0f };
-            double inAbsDb[2]     = { 0.0,  0.0  };
-            double grDb[2]        = { 0.0,  0.0  };
-
-            // Envelope → gain reduction → inertia.
-            for (int ch = 0; ch < ncp; ++ch)
+// 3. Tube (Airwindows Tube2 at Tube 1.0, InputPad 0.5). At 2× rates, averaging cuts aliasing.
+void DustChain::tube(const Frames& f)
+{
+    const bool highSR = tubeHighSR;
+    for (int ch = 0; ch < f.channels; ++ch) {
+        auto& s = chans[(size_t)ch];
+        for (int i = 0; i < f.n; ++i) {
+            float& xref = f.at(i, ch);
+            double d = (double)xref * (double)kTubeInputPad;
+            if (d >  1.0) d =  1.0;
+            if (d < -1.0) d = -1.0;
+            if (highSR) {
+                double prev = s.tubePrevA;
+                s.tubePrevA = (float)d;
+                d = (d + prev) * 0.5;
+            }
             {
-                ChannelState& cs = (ch == 0) ? sL : sR;
-
-                inputSample[ch] = buf[sample * channelCount + ch];
-
-                inAbsDb[ch] = gainToDb((double)std::fabs(inputSample[ch]));
-                double inDb = inAbsDb[ch];
-                if (std::isnan(inDb)) inDb = -200.0;
-                inDb = std::clamp(inDb, -200.0, 4.0);
-
-                if (inDb > cs.slewedSignal)
-                    cs.slewedSignal = attackCoeff  * (cs.slewedSignal - inDb) + inDb;
-                else
-                    cs.slewedSignal = releaseCoeff * (cs.slewedSignal - inDb) + inDb;
-
-                if (cs.slewedSignal > thresholdDb) {
-                    const double targetLevel = thresholdDb + (cs.slewedSignal - thresholdDb) / ratioVal;
-                    double gr = cs.slewedSignal - targetLevel;
-                    gr = std::pow(gr, convexityVal);
-                    cs.gainReductionDb = gr;
-                } else {
-                    cs.slewedSignal    = thresholdDb;
-                    cs.gainReductionDb = 0.0;
-                }
-                cs.slewedSignal = std::clamp(cs.slewedSignal, -200.0, 1000.0);
-
-                // Inertia: the velocity overshoot is the FET snap.
-                double grLinear = dbToGain(cs.gainReductionDb);
-                cs.inertiaVelocity += inertiaCoef * grLinear * -0.001;
-                cs.inertiaVelocity *= inertiaDecayCoef;
-                cs.inertiaVelocity  = std::clamp(cs.inertiaVelocity, -100.0, 100.0);
-                grLinear += cs.inertiaVelocity;
-                grLinear  = std::clamp(grLinear, -1000.0, 1000.0);
-                cs.gainReductionDb  = gainToDb(grLinear);
-
-                grDb[ch] = cs.gainReductionDb;
+                double sharpen = -d;
+                sharpen = (sharpen > 0.0) ? 1.0 + std::sqrt( sharpen)
+                                          : 1.0 - std::sqrt(-sharpen);
+                d -= d * std::fabs(d) * sharpen * 0.25;
             }
-
-            // Linked: both take the louder channel's reduction.
-            if (ncp > 1) {
-                const double maxGr = std::max(grDb[0], grDb[1]);
-                grDb[0] = grDb[1] = maxGr;
+            d -= d * std::fabs(d) * 0.5;
+            d *= 2.0;
+            if (highSR) {
+                double prev = s.tubePrevC;
+                s.tubePrevC = (float)d;
+                d = (d + prev) * 0.5;
             }
-
-
-            float preMakeup[2] = { 0.0f, 0.0f };
-            for (int ch = 0; ch < ncp; ++ch) {
-                const double outDb   = inAbsDb[ch] - grDb[ch];
-                float outLin = (float)dbToGain(outDb);
-                if (inputSample[ch] < 0.0f) outLin = -outLin;
-                outLin = std::tanh(outLin);
-                if (std::isnan(outLin)) outLin = 0.0f;
-                preMakeup[ch] = outLin;
-            }
-
-            // Auto-makeup.
-            float inEn = 0.0f, outEn = 0.0f;
-            for (int ch = 0; ch < ncp; ++ch) {
-                inEn  += inputSample[ch] * inputSample[ch];
-                outEn += preMakeup[ch]   * preMakeup[ch];
-            }
-            compInEnvSq  += (inEn  - compInEnvSq)  * ((inEn  > compInEnvSq)  ? compEnvAtkCoef : compEnvRelCoef);
-            compOutEnvSq += (outEn - compOutEnvSq) * ((outEn > compOutEnvSq) ? compEnvAtkCoef : compEnvRelCoef);
-
-            float makeupLin = 1.0f;
-            if (compInEnvSq > 1.0e-9f && compOutEnvSq > 1.0e-9f) {
-                const float drive = 1.0f + amountAt(sample) * kCompMakeupDrive;
-                makeupLin = std::sqrt(compInEnvSq / compOutEnvSq) * drive;
-            }
-
-            for (int ch = 0; ch < ncp; ++ch) {
-                buf[sample * channelCount + ch] = preMakeup[ch] * makeupLin;
-            }
-        }
-    }
-
-    // 5. Wow and drift: the HF band's read position moves (sine + random walk), the LF band is only
-    // delayed by the centre, and the two re-sum.
-    {
-        const float wowFreq   = kWowFreqMin  + dustAmount * (kWowFreqMax  - kWowFreqMin);
-        const float driftLpHz = kDriftLpMin  + dustAmount * (kDriftLpMax  - kDriftLpMin);
-        const float phaseInc  = kTwoPi * wowFreq / (float)sampleRate;
-        const float dCoef     = 1.0f - std::exp(-kTwoPi * driftLpHz / (float)sampleRate);
-        const float dScale    = 1.0f / std::sqrt(dCoef * 0.5f);
-
-        for (int sample = 0; sample < n; ++sample)
-        {
-            wowPhase += phaseInc;
-            if (wowPhase > kTwoPi) wowPhase -= kTwoPi;
-            const float amount   = amountAt(sample);
-            const float wowAmp   = kWowAmpMin   + amount * (kWowAmpMax   - kWowAmpMin);
-            const float driftAmp = kDriftAmpMin + amount * (kDriftAmpMax - kDriftAmpMin);
-            const float wowOff   = std::sin(wowPhase) * wowAmp;
-
-            driftRng = driftRng * 1664525u + 1013904223u;
-            const float noise = (float)((int32_t)driftRng) * (1.0f / 2147483648.0f);
-            driftLpZ += dCoef * (noise - driftLpZ);
-            const float driftOff = std::tanh(driftLpZ * dScale) * driftAmp;
-
-
-            const float modOff = wowOff + driftOff;
-
-            for (int ch = 0; ch < nc; ++ch)
             {
-                ChannelState& cs = chans[(size_t)ch];
-                float& samp = buf[sample * channelCount + ch];
-
-                // Read before writing, so the LF delay is exactly the centre.
-                const float lfDelayed = cs.wowLfBuf[cs.wowLfWriteIdx];
-
-                const float readPosF = (float)cs.wowHfWriteIdx - (float)kWowCenterDelay - modOff;
-                float wrapped = readPosF + 2.0f * (float)kWowHfBufSize;
-                while (wrapped >= (float)kWowHfBufSize) wrapped -= (float)kWowHfBufSize;
-                const int   idx0 = (int)wrapped;
-                const int   idx1 = (idx0 + 1) % kWowHfBufSize;
-                const float frac = wrapped - (float)idx0;
-                const float hfDelayed = cs.wowHfBuf[idx0] * (1.0f - frac)
-                                      + cs.wowHfBuf[idx1] * frac;
-
-                const float in = samp;
-                cs.wowSplitLpZ += wowSplitLpCoef * (in - cs.wowSplitLpZ);
-                const float lfNow = cs.wowSplitLpZ;
-                const float hfNow = in - lfNow;
-
-                cs.wowLfBuf[cs.wowLfWriteIdx] = lfNow;
-                cs.wowHfBuf[cs.wowHfWriteIdx] = hfNow;
-                cs.wowLfWriteIdx = (cs.wowLfWriteIdx + 1) % kWowCenterDelay;
-                cs.wowHfWriteIdx = (cs.wowHfWriteIdx + 1) % kWowHfBufSize;
-
-                samp = lfDelayed + hfDelayed;
+                double slew = (double)s.tubePrevE - d;
+                s.tubePrevE = (float)d;
+                slew = (slew > 0.0) ? 1.0 + std::sqrt( slew) * 0.5
+                                    : 1.0 - std::sqrt(-slew) * 0.5;
+                d -= d * std::fabs(d) * slew * 0.5;
             }
+            if (d >  0.52) d =  0.52;
+            if (d < -0.52) d = -0.52;
+            d *= 1.923076923076923;
+            xref = (float)d * tubePostGainLin;
         }
     }
+}
 
-    // 6. Bitcrush, after the compressor so the hiss does not pump with the makeup.
+// 4. FET compressor (APComp): fully linked, feed-forward, tanh ceiling at 0 dBFS. The first two
+// channels only.
+void DustChain::fetCompress(const Frames& f, const AmountRamp& amount)
+{
+    const double inertiaDecayCoef = 0.99 + kCompInertiaDecay * 0.01;
+    // These approach 1 (held), so exp(…) rather than 1 − exp(…).
+    const double attackCoeff  = std::exp(-1.0 / ((double)sampleRate * kCompAttackSec));
+    const double releaseCoeff = std::exp(-1.0 / ((double)sampleRate * kCompReleaseSec));
+
+    const int ncp = std::min(f.channels, 2);
+    for (int sample = 0; sample < f.n; ++sample)
     {
-        constexpr float scale = (float)(1 << kBitcrushBits) * 0.5f;
-        const     float invSc = 1.0f / scale;
-        for (int ch = 0; ch < nc; ++ch) {
-            for (int i = 0; i < n; ++i) {
-                float& x = buf[i * channelCount + ch];
-                x = std::round(x * scale) * invSc;
-            }
-        }
-    }
+        const double thresholdDb = (double)(amount.at(sample) * kCompThresholdMin);
+        float  inputSample[2] = { 0.0f, 0.0f };
+        double inAbsDb[2]     = { 0.0,  0.0  };
+        double grDb[2]        = { 0.0,  0.0  };
 
-    // 7. Soft-clip: linear below the knee, tanh above.
+        // Envelope → gain reduction → inertia.
+        for (int ch = 0; ch < ncp; ++ch)
+        {
+            ChannelState& cs = chans[(size_t)ch];
+
+            inputSample[ch] = f.at(sample, ch);
+
+            inAbsDb[ch] = gainToDb((double)std::fabs(inputSample[ch]));
+            double inDb = inAbsDb[ch];
+            if (std::isnan(inDb)) inDb = -200.0;
+            inDb = std::clamp(inDb, -200.0, 4.0);
+
+            if (inDb > cs.slewedSignal)
+                cs.slewedSignal = attackCoeff  * (cs.slewedSignal - inDb) + inDb;
+            else
+                cs.slewedSignal = releaseCoeff * (cs.slewedSignal - inDb) + inDb;
+
+            if (cs.slewedSignal > thresholdDb) {
+                const double targetLevel = thresholdDb + (cs.slewedSignal - thresholdDb) / (double)kCompRatio;
+                double gr = cs.slewedSignal - targetLevel;
+                gr = std::pow(gr, (double)kCompConvexity);
+                cs.gainReductionDb = gr;
+            } else {
+                cs.slewedSignal    = thresholdDb;
+                cs.gainReductionDb = 0.0;
+            }
+            cs.slewedSignal = std::clamp(cs.slewedSignal, -200.0, 1000.0);
+
+            // Inertia: the velocity overshoot is the FET snap.
+            double grLinear = dbToGain(cs.gainReductionDb);
+            cs.inertiaVelocity += (double)kCompInertia * grLinear * -0.001;
+            cs.inertiaVelocity *= inertiaDecayCoef;
+            cs.inertiaVelocity  = std::clamp(cs.inertiaVelocity, -100.0, 100.0);
+            grLinear += cs.inertiaVelocity;
+            grLinear  = std::clamp(grLinear, -1000.0, 1000.0);
+            cs.gainReductionDb  = gainToDb(grLinear);
+
+            grDb[ch] = cs.gainReductionDb;
+        }
+
+        // Linked: both take the louder channel's reduction.
+        if (ncp > 1) {
+            const double maxGr = std::max(grDb[0], grDb[1]);
+            grDb[0] = grDb[1] = maxGr;
+        }
+
+        float preMakeup[2] = { 0.0f, 0.0f };
+        for (int ch = 0; ch < ncp; ++ch) {
+            const double outDb   = inAbsDb[ch] - grDb[ch];
+            float outLin = (float)dbToGain(outDb);
+            if (inputSample[ch] < 0.0f) outLin = -outLin;
+            outLin = std::tanh(outLin);
+            if (std::isnan(outLin)) outLin = 0.0f;
+            preMakeup[ch] = outLin;
+        }
+
+        // Auto-makeup.
+        float inEn = 0.0f, outEn = 0.0f;
+        for (int ch = 0; ch < ncp; ++ch) {
+            inEn  += inputSample[ch] * inputSample[ch];
+            outEn += preMakeup[ch]   * preMakeup[ch];
+        }
+        compInEnvSq  += (inEn  - compInEnvSq)  * ((inEn  > compInEnvSq)  ? compEnvAtkCoef : compEnvRelCoef);
+        compOutEnvSq += (outEn - compOutEnvSq) * ((outEn > compOutEnvSq) ? compEnvAtkCoef : compEnvRelCoef);
+
+        float makeupLin = 1.0f;
+        if (compInEnvSq > 1.0e-9f && compOutEnvSq > 1.0e-9f) {
+            const float drive = 1.0f + amount.at(sample) * kCompMakeupDrive;
+            makeupLin = std::sqrt(compInEnvSq / compOutEnvSq) * drive;
+        }
+
+        for (int ch = 0; ch < ncp; ++ch) f.at(sample, ch) = preMakeup[ch] * makeupLin;
+    }
+}
+
+// 5. Wow and drift: the HF band's read position moves (sine + random walk), the LF band is only
+// delayed by the centre, and the two re-sum.
+void DustChain::wowAndDrift(const Frames& f, const AmountRamp& amount)
+{
+    const float wowFreq   = kWowFreqMin  + dustAmount * (kWowFreqMax  - kWowFreqMin);
+    const float driftLpHz = kDriftLpMin  + dustAmount * (kDriftLpMax  - kDriftLpMin);
+    const float phaseInc  = kTwoPi * wowFreq / (float)sampleRate;
+    const float dCoef     = 1.0f - std::exp(-kTwoPi * driftLpHz / (float)sampleRate);
+    const float dScale    = 1.0f / std::sqrt(dCoef * 0.5f);
+
+    for (int sample = 0; sample < f.n; ++sample)
     {
-        constexpr float knee   = kClipKnee;
-        constexpr float rem    = 1.0f - kClipKnee;
-        constexpr float invRem = 1.0f / rem;
-        for (int ch = 0; ch < nc; ++ch) {
-            for (int i = 0; i < n; ++i) {
-                float& x = buf[i * channelCount + ch];
-                const float s = x;
-                if (s > knee)
-                    x = knee + rem * std::tanh((s - knee) * invRem);
-                else if (s < -knee)
-                    x = -(knee + rem * std::tanh((-s - knee) * invRem));
-            }
+        wowPhase += phaseInc;
+        if (wowPhase > kTwoPi) wowPhase -= kTwoPi;
+        const float a        = amount.at(sample);
+        const float wowAmp   = kWowAmpMin   + a * (kWowAmpMax   - kWowAmpMin);
+        const float driftAmp = kDriftAmpMin + a * (kDriftAmpMax - kDriftAmpMin);
+        const float wowOff   = std::sin(wowPhase) * wowAmp;
+
+        driftRng = driftRng * 1664525u + 1013904223u;
+        const float noise = (float)((int32_t)driftRng) * (1.0f / 2147483648.0f);
+        driftLpZ += dCoef * (noise - driftLpZ);
+        const float driftOff = std::tanh(driftLpZ * dScale) * driftAmp;
+
+        const float modOff = wowOff + driftOff;
+
+        for (int ch = 0; ch < f.channels; ++ch)
+        {
+            ChannelState& cs = chans[(size_t)ch];
+            float& samp = f.at(sample, ch);
+
+            // Read before writing, so the LF delay is exactly the centre.
+            const float lfDelayed = cs.wowLfBuf[cs.wowLfWriteIdx];
+
+            const float readPosF = (float)cs.wowHfWriteIdx - (float)kWowCenterDelay - modOff;
+            float wrapped = readPosF + 2.0f * (float)kWowHfBufSize;
+            while (wrapped >= (float)kWowHfBufSize) wrapped -= (float)kWowHfBufSize;
+            const int   idx0 = (int)wrapped;
+            const int   idx1 = (idx0 + 1) % kWowHfBufSize;
+            const float frac = wrapped - (float)idx0;
+            const float hfDelayed = cs.wowHfBuf[idx0] * (1.0f - frac)
+                                  + cs.wowHfBuf[idx1] * frac;
+
+            const float in = samp;
+            cs.wowSplitLpZ += wowSplitLpCoef * (in - cs.wowSplitLpZ);
+            const float lfNow = cs.wowSplitLpZ;
+            const float hfNow = in - lfNow;
+
+            cs.wowLfBuf[cs.wowLfWriteIdx] = lfNow;
+            cs.wowHfBuf[cs.wowHfWriteIdx] = hfNow;
+            cs.wowLfWriteIdx = (cs.wowLfWriteIdx + 1) % kWowCenterDelay;
+            cs.wowHfWriteIdx = (cs.wowHfWriteIdx + 1) % kWowHfBufSize;
+
+            samp = lfDelayed + hfDelayed;
         }
     }
+}
 
-    // 8. Low-pass again at stage 2's cutoff — together −12 dB/oct.
-    lowPass(lpState2);
+// 6. Bitcrush, after the compressor so the hiss does not pump with the makeup.
+void DustChain::bitcrush(const Frames& f)
+{
+    constexpr float scale = (float)(1 << kBitcrushBits) * 0.5f;
+    const     float invSc = 1.0f / scale;
+    for (int ch = 0; ch < f.channels; ++ch) {
+        for (int i = 0; i < f.n; ++i) {
+            float& x = f.at(i, ch);
+            x = std::round(x * scale) * invSc;
+        }
+    }
+}
+
+// 7. Soft-clip: linear below the knee, tanh above.
+void DustChain::softClip(const Frames& f)
+{
+    constexpr float knee   = kClipKnee;
+    constexpr float rem    = 1.0f - kClipKnee;
+    constexpr float invRem = 1.0f / rem;
+    for (int ch = 0; ch < f.channels; ++ch) {
+        for (int i = 0; i < f.n; ++i) {
+            float& x = f.at(i, ch);
+            const float s = x;
+            if (s > knee)
+                x = knee + rem * std::tanh((s - knee) * invRem);
+            else if (s < -knee)
+                x = -(knee + rem * std::tanh((-s - knee) * invRem));
+        }
+    }
 }
 
 } // namespace skdust

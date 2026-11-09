@@ -32,7 +32,7 @@ public:
 
     static constexpr int latencySamples() { return kWowCenterDelay; }
 
-    void prepare(double sampleRate, int blockSize, int numChannels);
+    void prepare(double sampleRate, int numChannels);
     void reset();
 
     // A change is reached across the next block, sample by sample: the wobble's depth, the
@@ -122,6 +122,27 @@ private:
     std::vector<float> lpState2;
 
     std::vector<ChannelState> chans;
+
+    // One block, interleaved: frame i of channel ch is buf[i * stride + ch].
+    struct Frames {
+        float* buf;
+        int    n, channels, stride;
+        float& at(int i, int ch) const { return buf[i * stride + ch]; }
+    };
+    // The knob across the block: it reaches the new value on the last frame.
+    struct AmountRamp {
+        float from, step;
+        float at(int i) const { return from + step * (float)(i + 1); }
+    };
+
+    // The stages, in the order `process` runs them.
+    void lowShelf(const Frames& f);
+    void lowPass(const Frames& f, std::vector<float>& state, float coef);
+    void tube(const Frames& f);
+    void fetCompress(const Frames& f, const AmountRamp& amount);
+    void wowAndDrift(const Frames& f, const AmountRamp& amount);
+    void bitcrush(const Frames& f);
+    void softClip(const Frames& f);
 };
 
 } // namespace skdust

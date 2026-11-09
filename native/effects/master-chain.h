@@ -19,7 +19,7 @@ struct MasterChain {
     // No default rate: every module bakes it in.
     void reset(float sampleRate) {
         ott.reset(sampleRate);
-        dust.prepare(sampleRate, 512, 2);
+        dust.prepare(sampleRate, 2);
         dust.reset();
         limiter.reset();
         masterEq.reset(sampleRate);

@@ -583,7 +583,7 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
                           "a latency of a chunk or more would overwrite unread input");
 
             skdust::DustChain dust;
-            dust.prepare((double)sampleRate, CHUNK, 2);
+            dust.prepare((double)sampleRate, 2);
             dust.setDustAmount(fxValue / 255.0f);
             for (int pos = 0; pos < len + latency; pos += CHUNK) {
                 int n = std::min(CHUNK, len + latency - pos);
