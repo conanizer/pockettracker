@@ -1,0 +1,9 @@
+What's new:
+
+• LEG: a note carries on the one still sounding, and chords slide
+• Switch a phrase or table command off without deleting it (R+B)
+• Hold A on a value to read it in Hz or ms
+• ONE HAND: buttons that stay held, for one-handed play
+• Changing an instrument's type asks whether to keep its settings
+• Mute and solo are one switch per track
+• Many fixes, among them songs with non-English names and a filter that could silence the app
