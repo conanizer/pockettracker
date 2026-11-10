@@ -109,6 +109,7 @@ struct SamplerNoteArgs {
     float vibratoSpeed = 0.0f;
     float vibratoDepth = 0.0f;
     int   tableStartRow = -1;
+    float legatoFrames = -1.0f; // LEG: the slide's length in frames, 0 = at once; -1 = a plain note
     bool  valid = false;        // false = the note is dropped (empty slot)
 };
 
@@ -135,6 +136,7 @@ struct SoundfontNoteArgs {
     int   noteOctave = 4;
     int   notePitch = 0;
     int   tableStartRow = -1;
+    float legatoFrames = -1.0f;   // as SamplerNoteArgs
     float detuneSemitones = 0.0f;
     bool  valid = false;        // false = dropped (no soundfontPath, or the SF2 never loaded)
 };
@@ -247,6 +249,7 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
     a.vibratoSpeed       = f32_from_bits(n.vibSpdBits);
     a.vibratoDepth       = f32_from_bits(n.vibDepBits);
     a.tableStartRow      = n.tableRow;
+    a.legatoFrames       = n.legato ? n.legatoTicks * framesPerTic : -1.0f;
     a.valid              = true;
     return a;
 }
@@ -297,6 +300,7 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     a.noteOctave       = noteOctave;
     a.notePitch        = notePitch;
     a.tableStartRow    = n.tableRow;
+    a.legatoFrames     = n.legato ? n.legatoTicks * framesPerTic : -1.0f;
     // Detune reaches the SF voice as a fractional pitch-wheel offset (the sampler bakes it into
     // baseFreq).
     a.detuneSemitones  = detune_semitones(p.detune);

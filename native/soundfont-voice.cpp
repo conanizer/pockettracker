@@ -341,6 +341,8 @@ void SoundfontVoice::fireArmedNote(tsf* h, int atFrame) {
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
     // The instrument's ADSR override, just before note_on, which captures it per voice. -1 = the file's.
     tsf_preset_apply_overrides(h, a.bank, a.preset, a.envAtk, a.envDec, a.envSus, a.envRel);
+    rootNote = a.midiNote;
+    keyShiftCount = 0;
     if (a.keyCount == 0) {
         tsf_channel_note_on(h, _trackId, a.midiNote, a.midiVelocity / 127.0f);
         activeNote    = a.midiNote;
@@ -362,6 +364,32 @@ void SoundfontVoice::fireArmedNote(tsf* h, int atFrame) {
     isActive   = true;
 }
 
+void SoundfontVoice::legatoChord(const int8_t* semis, int count, float frames) {
+    float to[4];
+    for (int i = 0; i < 4; ++i) to[i] = (float)semis[std::min(i, count - 1)];
+    chordGlideTo(to, frames);
+}
+
+void SoundfontVoice::chordGlideTo(const float semis[4], float frames) {
+    if (chordKeyCount == 0) return;
+    int keys[4] = {}, n = 0;
+    if (chordWith >= 0) keys[n++] = chordWith;
+    for (int k = 0; k < chordKeyCount && n < 4; ++k) keys[n++] = chordKeys[k];
+    for (int i = 1; i < n; ++i)
+        for (int j = i; j > 0 && keys[j - 1] > keys[j]; --j) std::swap(keys[j - 1], keys[j]);
+    float was[4] = {};
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < keyShiftCount; ++j)
+            if (keyShiftKey[j] == keys[i]) was[i] = keyShift[j] + keyGlide[j];
+    for (int i = 0; i < n; ++i) {
+        keyShiftKey[i]  = keys[i];
+        keyShift[i]     = semis[i] - (float)(keys[i] - rootNote);
+        keyGlide[i]     = frames > 0.0f ? was[i] - keyShift[i] : 0.0f;
+        keyGlideRate[i] = frames > 0.0f ? -keyGlide[i] / frames : 0.0f;
+    }
+    keyShiftCount = n;
+}
+
 void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     int slot = sfSlot;
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
@@ -375,9 +403,18 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         needsPitchReset = false;
     }
 
+    for (int i = 0; i < keyShiftCount; ++i) {
+        float& g = keyGlide[i];
+        if (g != 0.0f) {
+            const float step = keyGlideRate[i] * (float)numFrames;
+            g = fabsf(step) >= fabsf(g) ? 0.0f : g + step;
+        }
+        tsf_channel_set_key_shift(h, _trackId, keyShiftKey[i], keyShift[i] + g);
+    }
+
     // The wheel persists in TSF, so with no pitch source at all it is re-centred explicitly. Detune, a
-    // held slide offset, FIN (params.base[PARAM_PITCH]) and the MIDI wheel count as sources.
-    if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f &&
+    // held slide offset, a LEG, FIN (params.base[PARAM_PITCH]) and the MIDI wheel count as sources.
+    if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f && legatoShift == 0.0f &&
         modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f &&
         params.base[PARAM_PITCH] == 0.0f && midiWheel == 0.0f) {
         tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
@@ -389,8 +426,9 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     advancePitchSlide(*this, numFrames);
     advanceVibratoPhase(*this, numFrames, sampleRate);
 
-    // Detune + slide + mod routes + FIN + the MIDI wheel (the last two cleared by every trigger).
-    float pitchMod = detuneSemitones + pitchOffset + modDestValues[PARAM_PITCH]
+    // Detune + LEG + slide + mod routes + FIN + the MIDI wheel (the last two cleared by every trigger).
+    // ⚠️ Past PITCH_RANGE the wheel clamps: a LEG more than four octaves from the key held stops there.
+    float pitchMod = detuneSemitones + legatoShift + pitchOffset + modDestValues[PARAM_PITCH]
                    + params.base[PARAM_PITCH] + midiWheel;
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 

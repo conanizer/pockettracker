@@ -135,6 +135,11 @@ inline constexpr bool nth_always(int value) { return (value & 0xFF) == 0x00 || (
 // phrase row with a note, or a table row in a column that steps once per note; ARP and RPT repeat it.
 constexpr int FX_CHD      = 0x3F;
 
+// LEG xx: the row's note does not restart the sound — the note still sounding on the track moves to
+// its pitch, at once (00) or sliding over xx ticks. Nothing sounding, or another instrument: a plain
+// note. Phrase only.
+constexpr int FX_LEG      = 0x40;
+
 }  // namespace songcore
 
 #endif

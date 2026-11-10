@@ -5,6 +5,7 @@
 // consumer — the engine, the cable, the trace writer. Arguments are copied verbatim; nothing here
 // derives audio. Transport is not an Event: it goes to on_play / on_stop.
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -42,6 +43,7 @@ struct NoteArgs {
     int64_t strumFrames  = 0;   // between one chord note and the next
     int     strumOrder[4] = {}; // what goes on the bus: when each of chordNotes sounds, 0 = first
     int64_t strumStep    = 0;   // …and how far apart; 0 = together
+    int     legato       = -1;  // LEG's ticks, or -1: a plain note
 };
 
 // ─── Consumer interface ─────────────────────────────────────────────────────────────────────────
@@ -138,6 +140,8 @@ struct MidiRouter {
         for (int i = 0; i < a.chordCount && i < 4; ++i) n.chord[i] = static_cast<int8_t>(a.chordNotes[i]);
         n.strumStep = static_cast<uint32_t>(a.strumStep);
         for (int i = 0; i < a.chordCount && i < 4; ++i) n.strumOrder[i] = static_cast<uint8_t>(a.strumOrder[i]);
+        n.legato      = a.legato >= 0 ? 1 : 0;
+        n.legatoTicks = static_cast<uint8_t>(a.legato >= 0 ? a.legato : 0);
         emit(ev);
     }
 
@@ -215,6 +219,14 @@ struct MidiRouter {
     void ext_eq_morph(int64_t frame, int track, const ExtEqMorphPayload& bands) {
         Event ev = base(frame, track, INSTRUMENT_NONE, EV_EXT_EQ_MORPH);
         ev.extEqMorph = bands;
+        emit(ev);
+    }
+
+    // An AUS/AUF tick over CHD: each chord note's place, semitones from the track's note.
+    void ext_chord_glide(int64_t frame, int track, const float semis[4], int64_t frames) {
+        Event ev = base(frame, track, INSTRUMENT_NONE, EV_EXT_CHORD_GLIDE);
+        for (int i = 0; i < 4; ++i) ev.extChordGlide.cents[i] = static_cast<int16_t>(std::lround(semis[i] * 100.0f));
+        ev.extChordGlide.frames = static_cast<uint32_t>(frames > 0 ? frames : 0);
         emit(ev);
     }
 

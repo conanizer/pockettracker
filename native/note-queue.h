@@ -40,6 +40,9 @@ struct ScheduledNote {
 
     int tableStartRow;       // THO: -1 = default (0 or TIC00 continuity), else 0-15
 
+    // LEG: the slide onto the note still sounding, in frames (0 = at once); -1 = a plain note.
+    float legatoFrames = -1.0f;
+
     // SoundFont notes only.
     bool isSoundfont = false;
     int  sfSlot      = -1;      // into soundfonts[]
@@ -201,6 +204,7 @@ enum ParamUpdateAction {
     // sends at the trigger, so an edit reaches sounding voices only through this.
     PARAM_UPDATE_INSTRUMENT,      // every sounding voice of `instrId` re-reads that instrument
     PARAM_UPDATE_WHEEL,           // the track's voices, fading ones too: midiWheel = value   [MIDI in]
+    PARAM_UPDATE_CHORD_GLIDE,     // the track's chord: each note to `chordSemis`, over `value` frames [CHD + AUS/AUF]
 };
 
 // One EQ setting in the file's hex, not Hz/dB/Q: interpolating hex keeps a sweep linear in
@@ -222,6 +226,7 @@ struct ScheduledParamUpdate {
     // ⚠️ Call sites initialise this struct positionally and stop before here — add fields below, never above.
     EqBandsHex eqBands{};    // EQ_BANDS / MASTER_EQ_BANDS only
     int instrId = -1;        // INSTRUMENT only
+    float chordSemis[4] = {};  // CHORD_GLIDE only: semitones from the note, lowest first
     uint32_t gen = 0;        // stamped by the queue — see CancelLedger
 
     bool operator>(const ScheduledParamUpdate& other) const {

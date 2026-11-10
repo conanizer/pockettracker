@@ -173,6 +173,7 @@ struct TrackState {
     bool  pitchBendActive = false;
     bool  vibratoActive = false;
     int   lastNoteMidi = -1;
+    int   lastChordRoot = -1;   // where the last note sounds, for its chord: MIDI plus PIT and ARP, unclamped
 
     int   lastTableOverride = -1;
     int   lastTableStartRow = -1;
@@ -531,6 +532,12 @@ class Sequencer {
                          int chainId, const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
                          int64_t stepDuration, int trackId, TrackState& trackState,
                          int64_t noteFrame, int64_t fxFrame);
+
+    // A CHD ramp's tics on one step (automation.h, RampKind::CHORD).
+    void emit_chord_ramp(const RampSpec& r, int stepIndex, int64_t targetFrame, int64_t framesPerTic,
+                         int trackId, const TrackState& ts, int64_t noteFrame);
+    // The CHD byte a CHD ramp arrives at on the step being scheduled, or −1.
+    int chord_ramp_arrival() const;
 
     // EQM rides TRACK_GLOBAL and EQN the track's lane, like the per-step pair.
     void emit_eq_morph(int64_t frame, const RampSpec& r, int trackId, const ExtEqMorphPayload& m);

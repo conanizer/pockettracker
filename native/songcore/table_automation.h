@@ -87,7 +87,7 @@ inline TableRampSet find_table_ramps(const RowT* rows, int rowCount) {
     songcore::pair_ramps(
             rowCount < 16 ? rowCount : 16,
             [&](int row) { return songcore::ramp_row_fx(rows[row]); },
-            [](int type) {
+            [](int, int type) {
                 const Arm* a = arm_for(type);
                 if (a == nullptr || !a->rampable) return songcore::RampArm::NONE;
                 return a->eqPreset ? songcore::RampArm::EQ_SLOT : songcore::RampArm::VALUE;

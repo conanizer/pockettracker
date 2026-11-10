@@ -9,7 +9,7 @@ static_assert(SCHEMA_VERSION == 2, "schema bump requires regenerated goldens + d
 
 static_assert(EV_EXT_PITCH_RATE == 0x01 && EV_EXT_VIBRATO == 0x02 && EV_EXT_TABLE_ROW == 0x03 &&
               EV_EXT_REVERSE == 0x04 && EV_EXT_EQ_SLOT == 0x05 && EV_EXT_MASTER_EQ == 0x06 &&
-              EV_EXT_EQ_MORPH == 0x07 && EV_EXT_MASTER_EQ_MORPH == 0x08,
+              EV_EXT_EQ_MORPH == 0x07 && EV_EXT_MASTER_EQ_MORPH == 0x08 && EV_EXT_CHORD_GLIDE == 0x09,
               "EXT tags are frozen");
 static_assert(EV_NOTE_OFF == 0x80 && EV_NOTE_ON == 0x90 && EV_CC == 0xB0 &&
               EV_PROGRAM == 0xC0 && EV_PITCH_BEND == 0xE0,
@@ -30,13 +30,14 @@ static_assert(sortRank(EV_NOTE_ON) == 2 && sortRank(EV_NOTE_OFF) == 1 &&
               "canonical sort ranks are frozen");
 
 // Payload shapes: note(1)+vel(1)+pad(2) + 15 × 4-byte fields + the chord (9, padded to 12) + the strum
-// step (4) = 80. A size change is a field added/removed/reordered — a schema bump with regenerated
-// goldens. The chord was added without one: the trace prints it only on a chord, so every trace
-// without one is unchanged.
-static_assert(sizeof(NoteOnPayload) == 80, "NoteOnPayload shape changed — schema bump required");
+// step (4) + LEG (2, padded to 4) = 84. A size change is a field added/removed/reordered — a schema
+// bump with regenerated goldens. The chord and LEG were added without one: the trace prints each only
+// where it is used, so every trace without them is unchanged.
+static_assert(sizeof(NoteOnPayload) == 84, "NoteOnPayload shape changed — schema bump required");
 static_assert(sizeof(Event) - sizeof(NoteOnPayload) >= 12, "envelope shape changed");
 // 3 bands × (type, freq, gain, q), one authored hex byte each. A size change moves the trace's k=v
 // order — a schema bump.
 static_assert(sizeof(ExtEqMorphPayload) == 12, "ExtEqMorphPayload shape changed — schema bump required");
+static_assert(sizeof(ExtChordGlidePayload) == 12, "ExtChordGlidePayload shape changed — schema bump required");
 
 }  // namespace songcore

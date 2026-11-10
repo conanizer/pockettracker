@@ -311,6 +311,7 @@ public:
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
     // An AUS/AUF morph tick carries band values, not a slot: a point between two presets.
     void scheduleVoiceEqBands(int64_t targetFrame, int trackId, const EqBandsHex& bands);
+    void scheduleVoiceChordGlide(int64_t targetFrame, int trackId, const float semis[4], uint32_t frames);
     void scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& bands);
     void scheduleTrackVolume(int64_t targetFrame, int trackId, float volume);          // VTR xx
     void scheduleMasterVolume(int64_t targetFrame, float volume);                      // VMV xx
@@ -498,6 +499,7 @@ private:
     // Start a resolved note in its voice type's pool. A new voice type gets its own, never an inline arm.
     void triggerSoundfontNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
     void triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
+    bool legatoSamplerNote(const ScheduledNote& note);
 
     // What one processAudioBlock call's stages share, built per block. Each ramp is a (start, end)
     // pair interpolated per sample across the block.

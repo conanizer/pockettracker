@@ -70,8 +70,9 @@ inline AutomationEqBand automation_eq_band_at(const AutomationEqBand& from, cons
 
 constexpr int RAMP_EQ_PRESET_SLOTS = 128;
 
-// What the effect to the left of an AUS is to a ramp.
-enum class RampArm { NONE, VALUE, EQ_SLOT };   // EQ_SLOT: its endpoints are EQ preset slots
+// What the effect to the left of an AUS is to a ramp. EQ_SLOT: its endpoints are EQ preset slots;
+// BLOCKED: it is the parameter, but this row cannot ramp it, so the AUS opens nothing.
+enum class RampArm { NONE, VALUE, EQ_SLOT, BLOCKED };
 
 // One row's or step's three FX slots, as 1-3 ([0] unused).
 struct RampRowFx {
@@ -100,7 +101,8 @@ struct RampPair {
 // closes it; the last AUS wins (no nesting); an AUS still open at the end produces nothing. On one
 // row the AUFs close before the AUSes open, whatever their columns, so a fade can start where one
 // ends. An EQ endpoint that is not a slot ends the search at the AUS, and at an AUF leaves the AUS
-// open for a later one. `row_at(pos)` → RampRowFx, `arm_of(type)` → RampArm, `emit(const RampPair&)`.
+// open for a later one. `row_at(pos)` → RampRowFx, `arm_of(pos, type)` → RampArm,
+// `emit(const RampPair&)`.
 template <typename RowAt, typename ArmOf, typename Emit>
 inline void pair_ramps(int count, RowAt row_at, ArmOf arm_of, Emit emit) {
     const auto endpoint_ok = [](RampArm a, int v) {
@@ -121,9 +123,10 @@ inline void pair_ramps(int count, RowAt row_at, ArmOf arm_of, Emit emit) {
         for (int slot = 1; slot <= 3; ++slot) {
             if (fx.type[slot] != FX_AUS) continue;
             for (int left = slot - 1; left >= 1; --left) {
-                const RampArm arm = arm_of(fx.type[left]);
+                const RampArm arm = arm_of(pos, fx.type[left]);
                 if (arm == RampArm::NONE) continue;
-                if (!endpoint_ok(arm, fx.value[left])) break;   // the nearest one IS the parameter
+                // The nearest one IS the parameter.
+                if (arm == RampArm::BLOCKED || !endpoint_ok(arm, fx.value[left])) break;
                 open           = RampPair{};
                 open.paramType = fx.type[left];
                 open.arm       = arm;

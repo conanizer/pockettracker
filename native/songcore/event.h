@@ -63,6 +63,7 @@ enum EventType : uint8_t {
     // so it cannot be folded into the two above.
     EV_EXT_EQ_MORPH        = 0x07,  // an AUS/AUF tick over EQN
     EV_EXT_MASTER_EQ_MORPH = 0x08,  // an AUS/AUF tick over EQM (track = TRACK_GLOBAL)
+    EV_EXT_CHORD_GLIDE     = 0x09,  // an AUS/AUF tick over CHD
     EV_NOTE_OFF       = 0x80,
     EV_NOTE_ON        = 0x90,
     EV_CC             = 0xB0,
@@ -151,6 +152,8 @@ constexpr int cc_slot_index(uint8_t param) {
 //    note itself would sound — which need not be one of them (an inversion moves it up). Already
 //    snapped to the track's scale and merged where two landed on one pitch. A strum delays some of
 //    them: each consumer starts chord[i] strumOrder[i] × strumStep frames after the note-on.
+//  * legato 1 (LEG): a consumer whose track still sounds this instrument moves that note to this
+//    pitch instead of starting one, over legatoTicks; anything else plays it as a plain note.
 struct NoteOnPayload {
     uint8_t  note;        // note      MIDI number (octave+1)*12+pitch, 0-131 practical
     int8_t   velocity;    // vel       -1 | 0-127 (phrase V column)
@@ -173,6 +176,8 @@ struct NoteOnPayload {
     int8_t   chord[4];    //           semitones, ascending; the first chordCount are used
     uint8_t  strumOrder[4]; // strum   ARC on the chord's row: chord[i] sounds strumOrder[i] × strumStep
     uint32_t strumStep;   //           frames after the note-on; 0 = all at once (printed only then)
+    uint8_t  legato;      // leg       0 | 1; the trace prints legatoTicks, and only when legato
+    uint8_t  legatoTicks; //           the slide's length, tics; 0 = at once
 };
 
 // The note's velocity, 0..1. ⚠️ Every consumer reads it here, or a note and its retriggers differ.
@@ -207,6 +212,13 @@ struct ExtEqMorphPayload {                                         // type0..2 f
     uint8_t q[3];      // 00-FF → 0.1-10.0, log
 };
 
+// Where each note of the track's chord goes, lowest first, in hundredths of a semitone from the note
+// the track plays, slid to over `frames`. A voice with fewer notes takes the first ones.
+struct ExtChordGlidePayload {                                      // cents0..3 frames
+    int16_t  cents[4];
+    uint32_t frames;
+};
+
 // ─── The record ─────────────────────────────────────────────────────────────────────────────────
 
 struct Event {
@@ -228,6 +240,7 @@ struct Event {
         ExtEqSlotPayload    extEqSlot;
         ExtMasterEqPayload  extMasterEq;
         ExtEqMorphPayload   extEqMorph;      // EV_EXT_EQ_MORPH and EV_EXT_MASTER_EQ_MORPH both
+        ExtChordGlidePayload extChordGlide;
     };
 };
 

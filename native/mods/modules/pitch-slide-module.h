@@ -21,5 +21,6 @@ inline void advancePitchSlide(V& voice, int numFrames) {
 // The sampler's: the advance plus its mod source. Before runModMatrix.
 inline void tickPitchSlide(Voice& voice, int numFrames) {
     advancePitchSlide(voice, numFrames);
+    voice.advanceChordGlide(numFrames);
     voice.modSourceValues[MOD_SRC_PITCH_SLIDE] = voice.pitchOffset;
 }

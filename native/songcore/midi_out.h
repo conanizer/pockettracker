@@ -228,7 +228,7 @@ class ExternalConsumer : public IMidiConsumer {
         run_wheel(ev.track, ev.frame);
 
         switch (ev.type) {
-            case EV_NOTE_ON:   note_on(ev, ins);  break;
+            case EV_NOTE_ON:   note_on(ev, ins, prev == instr);  break;
             case EV_NOTE_OFF:  end_note(ev.track, ev.frame); break;   // KIL and ADSR release alike
             case EV_CC:        cc_event(ev, ins); break;
             case EV_PROGRAM: program_event(ev, ins); break;
@@ -298,6 +298,7 @@ class ExternalConsumer : public IMidiConsumer {
         bool    on       = false;
         uint8_t channel  = 0;
         uint8_t note     = 0;            // a chord's lowest
+        uint8_t root     = 0;            // the key the note was struck with, before a chord's offsets
         uint8_t chord[3] = {};           // a chord's other notes, each with its own note-off
         uint8_t chordCount = 0;
         int64_t keyOn[4] = {};           // when `note`, then each of `chord`, goes on (a strum)
@@ -312,10 +313,16 @@ class ExternalConsumer : public IMidiConsumer {
         return instrument_routes_external(project_->instruments[static_cast<size_t>(instrument)]);
     }
 
-    void note_on(const Event& ev, const Instrument& ins) {
+    void note_on(const Event& ev, const Instrument& ins, bool sameInstrument) {
         const uint8_t ch = chan(ins);
-        // The previous note ends here — its only end when midiLen is 0.
-        end_note(ev.track, ev.frame);
+        // LEG on a key of this instrument still held: the new key goes on BEFORE the old one goes off,
+        // which is how a mono synth knows to glide rather than restart. Otherwise the previous note
+        // ends here — its only end when midiLen is 0.
+        const ActiveNote held = active_[ev.track];
+        const bool legato = ev.noteOn.legato && sameInstrument && held.on && held.channel == ch &&
+                            held.offFrame > ev.frame;
+        if (legato) active_[ev.track].on = false;
+        else        end_note(ev.track, ev.frame);
 
         if (project_->midiSendProgramChange) send_program(ev.frame, ch, ins);
         // The instrument's VOL rides the velocity, so instruments sharing a channel keep their balance.
@@ -334,11 +341,19 @@ class ExternalConsumer : public IMidiConsumer {
         }
 
         // Ahead of the note, so a PSL's attack starts on the old pitch.
-        start_wheel(ev, ins);
+        int keys[4];
+        int64_t wait[4];
+        int keyCount = midi_keys(ev.noteOn, keys, wait);
+        // LEG with no CHD on a sounding chord: the same chord on the new note.
+        if (legato && ev.noteOn.chordCount == 0 && held.chordCount > 0)
+            keyCount = moved_keys(held, midi_note(ev.noteOn) - held.root, keys, wait);
+        start_wheel(ev, ins, legato,
+                    legato ? wheel_slide_at(wheel_[ev.track], ev.frame) + held.note - keys[0] : 0.0f);
 
         ActiveNote& a = active_[ev.track];
         a.on = true;
         a.channel = ch;
+        a.root = static_cast<uint8_t>(midi_note(ev.noteOn));
         a.onFrame = ev.frame;
         // ⚠️ The project's tempo, not `on_play`'s fallback, so a LEN gate is the same in play and render.
         const int tempo = tempo_now();
@@ -346,16 +361,18 @@ class ExternalConsumer : public IMidiConsumer {
                          ? ev.frame + ins.midiLen * frames_per_tic(frames_per_step(tempo, sampleRate_))
                          : INT64_MAX;
 
-        // A strummed key whose turn comes after the LEN gate is never sent.
-        int keys[4];
-        int64_t wait[4];
-        const int keyCount = midi_keys(ev.noteOn, keys, wait);
+        // A strummed key whose turn comes after the LEN gate is never sent. Under LEG a key already
+        // held stays down instead of being struck again.
         const int vel  = midi_velocity(ev.noteOn, volCmd ? 1.0f : vol);
         a.chordCount = 0;
+        int64_t firstOn = INT64_MAX;
         for (int k = 0; k < keyCount; ++k) {
             const int64_t on = ev.frame + wait[k];
             if (k > 0 && on >= a.offFrame) continue;
-            send_at(on, MIDI_NOTE_ON | ch, static_cast<uint8_t>(keys[k]), static_cast<uint8_t>(vel));
+            if (!(legato && holds(held, keys[k]))) {
+                send_at(on, MIDI_NOTE_ON | ch, static_cast<uint8_t>(keys[k]), static_cast<uint8_t>(vel));
+                firstOn = std::min(firstOn, on);
+            }
             if (k == 0) {
                 a.note = static_cast<uint8_t>(keys[0]);
                 a.keyOn[0] = on;
@@ -364,7 +381,20 @@ class ExternalConsumer : public IMidiConsumer {
                 a.keyOn[++a.chordCount] = on;
             }
         }
+        // …and only then the old keys the new note does not hold.
+        if (legato) {
+            const int64_t off = firstOn == INT64_MAX ? ev.frame : firstOn;
+            if (!holds(a, held.note)) key_off(ev.track, held, held.note, held.keyOn[0], off);
+            for (int k = 0; k < held.chordCount; ++k)
+                if (!holds(a, held.chord[k])) key_off(ev.track, held, held.chord[k], held.keyOn[k + 1], off);
+        }
         sent_[ch].used = true;
+    }
+
+    static bool holds(const ActiveNote& a, int key) {
+        if (a.note == key) return true;
+        for (int k = 0; k < a.chordCount; ++k) if (a.chord[k] == key) return true;
+        return false;
     }
 
     // End the track's note at `frame` or its LEN gate, whichever is FIRST.
@@ -428,6 +458,21 @@ class ExternalConsumer : public IMidiConsumer {
                 std::swap(wait[j - 1], wait[j]);
                 std::swap(out[j - 1], out[j]);
             }
+        return count;
+    }
+
+    // A held chord's keys `by` semitones away, all at once — clamped, two clamped onto one kept once.
+    static int moved_keys(const ActiveNote& held, int by, int out[4], int64_t wait[4]) {
+        int count = 0;
+        for (int k = 0; k <= held.chordCount && k < 4; ++k) {
+            const int v   = (k == 0 ? held.note : held.chord[k - 1]) + by;
+            const int key = v < 0 ? 0 : (v > 127 ? 127 : v);
+            bool again = false;
+            for (int j = 0; j < count; ++j) again |= out[j] == key;
+            if (again) continue;
+            out[count]    = key;
+            wait[count++] = 0;
+        }
         return count;
     }
 
@@ -572,9 +617,9 @@ class ExternalConsumer : public IMidiConsumer {
         wheel_plan_next(w, frame, sampleRate_);
     }
 
-    void start_wheel(const Event& ev, const Instrument& ins) {
+    void start_wheel(const Event& ev, const Instrument& ins, bool legato = false, float legatoFrom = 0.0f) {
         MidiWheel& w = wheel_[ev.track];
-        wheel_start_note(w, ev.frame, ev.noteOn, tempo_now(), sampleRate_);
+        wheel_start_note(w, ev.frame, ev.noteOn, tempo_now(), sampleRate_, legato, legatoFrom);
         wheel_at(ev.track, ins, ev.frame);
         wheel_changed(w, ev.frame);
     }

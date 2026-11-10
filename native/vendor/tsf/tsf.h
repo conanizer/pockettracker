@@ -234,6 +234,12 @@ TSFDEF int tsf_channel_set_pitchrange(tsf* f, int channel, float pitch_range);
 TSFDEF int tsf_channel_set_tuning(tsf* f, int channel, float tuning);
 TSFDEF int tsf_channel_set_sustain(tsf* f, int channel, int flag_sustain);
 
+/* PocketTracker local addition — SIXTH local change, re-apply on any tsf update.
+   The pitch of the voices playing `key` on `channel`, in semitones on top of the channel's own wheel
+   and tuning, so the keys of one chord can slide apart. Every note-on starts at 0. Allocates nothing:
+   a channel never set up is left alone. */
+TSFDEF void tsf_channel_set_key_shift(tsf* f, int channel, int key, float semitones);
+
 // Start or stop playing notes on a channel (needs channel preset to be set)
 //   channel: channel number
 //   key: note value between 0 and 127 (60 being middle C)
@@ -503,6 +509,7 @@ struct tsf_voice
 	struct tsf_voice_envelope ampenv, modenv;
 	struct tsf_voice_lowpass lowpass;
 	struct tsf_voice_lfo modlfo, viblfo;
+	float keyShift; /* PocketTracker (sixth): tsf_channel_set_key_shift */
 };
 
 struct tsf_channel
@@ -1299,7 +1306,7 @@ static void tsf_voice_calcpitchratio(struct tsf_voice* v, float pitchShift, floa
 {
 	double note = v->playingKey + v->region->transpose + v->region->tune / 100.0;
 	double adjustedPitch = v->region->pitch_keycenter + (note - v->region->pitch_keycenter) * (v->region->pitch_keytrack / 100.0);
-	if (pitchShift) adjustedPitch += pitchShift;
+	adjustedPitch += pitchShift + v->keyShift;
 	v->pitchInputTimecents = adjustedPitch * 100.0;
 	v->pitchOutputFactor = v->region->sample_rate / (tsf_timecents2Secsd(v->region->pitch_keycenter * 100.0) * outSampleRate);
 }
@@ -1714,6 +1721,7 @@ TSFDEF int tsf_note_on(tsf* f, int preset_index, int key, float vel)
 		voice->region = region;
 		voice->playingPreset = preset_index;
 		voice->playingKey = key;
+		voice->keyShift = 0.0f;
 		voice->playIndex = voicePlayIndex;
 		voice->heldSustain = 0;
 		voice->noteGainDB = f->globalGainDB - region->attenuation - tsf_gainToDecibels(1.0f / vel);
@@ -2029,6 +2037,22 @@ TSFDEF int tsf_channel_set_pitchwheel(tsf* f, int channel, int pitch_wheel)
 	c->pitchWheel = (unsigned short)pitch_wheel;
 	tsf_channel_applypitch(f, channel, c);
 	return 1;
+}
+
+TSFDEF void tsf_channel_set_key_shift(tsf* f, int channel, int key, float semitones)
+{
+	struct tsf_voice *v, *vEnd;
+	struct tsf_channel *c;
+	float pitchShift;
+	if (!f->channels || channel < 0 || channel >= f->channels->channelNum) return;
+	c = &f->channels->channels[channel];
+	pitchShift = (c->pitchWheel == 8192 ? c->tuning : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning));
+	for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++)
+		if (v->playingPreset != -1 && v->playingChannel == channel && v->playingKey == key && v->keyShift != semitones)
+		{
+			v->keyShift = semitones;
+			tsf_voice_calcpitchratio(v, pitchShift, f->outSampleRate);
+		}
 }
 
 TSFDEF int tsf_channel_set_pitchrange(tsf* f, int channel, float pitch_range)

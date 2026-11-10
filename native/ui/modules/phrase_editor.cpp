@@ -102,14 +102,20 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
 
-    // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it.
+    // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it, and the one of CHD and
+    // LEG that MIDI OUT cannot play beside the other.
+    const bool external = s.project && step.instrument >= 0 &&
+                          step.instrument < static_cast<int>(s.project->instruments.size()) &&
+                          songcore::instrument_routes_external(
+                              s.project->instruments[static_cast<size_t>(step.instrument)]);
+    const int midiInert = external ? songcore::chord_legato_inert_slot(songcore::as_played(step)) : 0;
     const int nameX[]  = {fx1NameX, fx2NameX, fx3NameX};
     const int valueX[] = {fx1ValueX, fx2ValueX, fx3ValueX};
     for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
         const songcore::FxSlot& f = songcore::fx_slot(step, slot);
         const int  col = fx_type_column(slot, PHRASE_FX_COLUMN);
         const bool dim = (cutOff && !(index == hopRow && f.type == songcore::FX_HOP)) || f.type == 0x00 ||
-                         f.off || !rampCells.active(f.type, index, slot);
+                         f.off || !rampCells.active(f.type, index, slot) || slot == midiInert;
         cells.cell(effect_name(f.type), nameX[slot - 1],  cur(col),     sel(col),     dim, t.textValue);
         cells.cell(hex2(f.value),       valueX[slot - 1], cur(col + 1), sel(col + 1), dim, t.textParam);
     }

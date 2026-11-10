@@ -235,6 +235,7 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
         note.vibratoSpeed     = a.vibratoSpeed;
         note.vibratoDepth     = a.vibratoDepth;
         note.tableStartRow    = a.tableStartRow;
+        note.legatoFrames     = a.legatoFrames;
     };
     note.isSoundfont = d.isSoundfont;
     if (d.isSoundfont) {
@@ -347,6 +348,13 @@ void AudioEngine::scheduleMasterEqSlot(int64_t targetFrame, int slot) {         
 
 void AudioEngine::scheduleVoiceEqBands(int64_t targetFrame, int trackId, const EqBandsHex& bands) {
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, 0.0f, PARAM_UPDATE_EQ_BANDS, 0.0f, bands });
+}
+
+void AudioEngine::scheduleVoiceChordGlide(int64_t targetFrame, int trackId, const float semis[4],
+                                          uint32_t frames) {                                  // CHD + AUS/AUF
+    ScheduledParamUpdate u{ targetFrame, trackId, 0, (float)frames, PARAM_UPDATE_CHORD_GLIDE, 0.0f };
+    for (int i = 0; i < 4; ++i) u.chordSemis[i] = semis[i];
+    paramUpdateQueue.schedule(u);
 }
 
 void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& bands) {
@@ -662,7 +670,7 @@ float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
     // Table pitch, slide, vibrato and mod slots, plus FIN in params.base and the MIDI wheel — added.
     float rateMod = powf(2.0f, (voice.modDestValues[PARAM_PITCH] + voice.params.base[PARAM_PITCH] +
                                 voice.midiWheel) / 12.0f);
-    const float rate = voice.playbackRate * rateMod;
+    const float rate = voice.playbackRate * rateMod * (voice.chordBend == 0.0f ? 1.0f : powf(2.0f, voice.chordBend / 12.0f));
 
     // OSCILLATOR loop mode: one trip round the loop is one cycle of the played note, so every pitch
     // source still applies. The loop's length is timbre here, not pitch — LPO is how it is played.

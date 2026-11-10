@@ -89,6 +89,10 @@ class TraceWriter : public IMidiConsumer {
                         }
                     }
                 }
+                if (n.legato) {
+                    s += " leg=";
+                    s += std::to_string(static_cast<int>(n.legatoTicks));
+                }
                 break;
             }
             case EV_NOTE_OFF:
@@ -138,6 +142,13 @@ class TraceWriter : public IMidiConsumer {
                     }
                 break;
             }
+            case EV_EXT_CHORD_GLIDE:
+                for (int i = 0; i < 4; ++i) {
+                    s += " cents"; s += std::to_string(i);
+                    s += "="; s += std::to_string(static_cast<int>(ev.extChordGlide.cents[i]));
+                }
+                s += " frames="; s += std::to_string(ev.extChordGlide.frames);
+                break;
             default: break;  // schema-complete: no other emitters exist
         }
         s += '\n';

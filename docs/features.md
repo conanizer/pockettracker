@@ -35,6 +35,7 @@ Write these into any phrase step to shape how a note plays:
 - **Retrigger** — stutter the sample with optional volume ramp
 - **Playback direction** — play a sampler note backward or forward; flip it live to "scratch"
 - **Pitch slide** — glide to the next note (portamento)
+- **Legato** — the next note carries on the one still sounding instead of starting over, jumping or gliding to its pitch: the slide of a mono synth, on samples, SoundFonts and external gear alike
 - **Pitch bend** — continuous pitch movement up or down
 - **Vibrato** — wobble pitch at standard or extreme depth
 - **Pitch offset** — transpose a note by a fixed number of semitones (never affects slice index)

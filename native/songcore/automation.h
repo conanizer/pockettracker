@@ -19,8 +19,9 @@ namespace songcore {
 // ─── The registry: which parameters a ramp can move ───────────────────────────────────────────────
 // A ramp is the parameter's own CC, emitted more often. To add one: a CC id, an arm in
 // `EngineConsumer::consume`, a queued apply on the audio thread, and a row here.
-// BYTE endpoints are values; EQ_PRESET endpoints are preset slots, and the bands between them move.
-enum class RampKind { BYTE, EQ_PRESET, VIBRATO };
+// BYTE endpoints are values; EQ_PRESET endpoints are preset slots, and the bands between them move;
+// CHORD endpoints are CHD bytes, and each note of the chord slides to its partner (EV_EXT_CHORD_GLIDE).
+enum class RampKind { BYTE, EQ_PRESET, VIBRATO, CHORD };
 
 struct AutomatableParam {
     int      fxCode;  // the effect the author types, and where AUS reads the ramp's start value
@@ -61,6 +62,8 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_EQN,    0,              false, RampKind::EQ_PRESET },
     // ⚠️ EQM replaces the master EQ and holds; the host restores it on stop().
     { FX_EQM,    0,              true,  RampKind::EQ_PRESET },
+    // The chord's shape, note by note, lowest to lowest. An AUF row's note moves it there too.
+    { FX_CHD,    0,              false, RampKind::CHORD },
 };
 
 inline constexpr int AUTOMATABLE_PARAM_COUNT =
@@ -162,6 +165,7 @@ struct RampSpec {
     int     startByte = 0;
     int     destByte  = 0;
     int     curveByte = AUS_CURVE_LINEAR;
+    int     destNote  = -1;   // CHORD: the AUF row's note (MIDI), or −1: the chord stays on its note
 
     int     span       = 0;   // steps over the whole ramp; never zero for a paired ramp
     // Steps elapsed since the AUS = stepOffset + stepIndex. Negative (−ausStep) in the AUS's own
@@ -173,6 +177,14 @@ struct RampSpec {
     int     originAbs  = -1;
     int     originSlot = 0;
 };
+
+/** A CHORD ramp moves each note of a chord on its own, which one MIDI channel cannot: on a row playing
+ *  an external instrument its AUS opens nothing. */
+inline bool ramp_blocked(const Project* project, const AutomatableParam& p, const PhraseStep& step) {
+    if (p.kind != RampKind::CHORD || project == nullptr) return false;
+    if (step.instrument < 0 || step.instrument >= static_cast<int>(project->instruments.size())) return false;
+    return instrument_routes_external(project->instruments[static_cast<size_t>(step.instrument)]);
+}
 
 /** Does a note-on reset this parameter to the instrument's value? Then every note inside the fade,
  *  ARP/RPT retriggers included, must be handed the fade's value. */
@@ -201,11 +213,17 @@ inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     return false;
 }
 
-// How a phrase's effect answers the pairing.
-inline RampArm ramp_arm(int fxType) {
+// How a phrase's effect, on `step`, answers the pairing.
+inline RampArm ramp_arm(const Project* project, const PhraseStep& step, int fxType) {
     const AutomatableParam* p = automatable_param(fxType);
     if (p == nullptr) return RampArm::NONE;
+    if (ramp_blocked(project, *p, step)) return RampArm::BLOCKED;
     return p->kind == RampKind::EQ_PRESET ? RampArm::EQ_SLOT : RampArm::VALUE;
+}
+
+// The AUF row's note, for a CHORD ramp's destination.
+inline int ramp_dest_note(const PhraseStep& aufStep) {
+    return step_has_note(aufStep) ? note_to_midi(aufStep.note) : -1;
 }
 
 // A step as the walk reads it: as played, before CHA/RND/RNL. `ausHere` false hides its AUS cells —
@@ -239,13 +257,16 @@ inline RampSpec ramp_spec(const RampPair& p) {
 }
 
 // Every ramp `phrase` declares, by `pair_ramps`. An AUS above `startRow` (a HOP entry) is skipped.
-inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
+inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0,
+                                        const Project* project = nullptr) {
     std::vector<RampSpec> out;
+    const auto step_at = [&](int pos) -> const PhraseStep& { return phrase.steps[static_cast<size_t>(pos)]; };
     pair_ramps(static_cast<int>(phrase.steps.size()),
-               [&](int step) { return ramp_step_fx(phrase.steps[static_cast<size_t>(step)], step >= startRow); },
-               ramp_arm,
+               [&](int step) { return ramp_step_fx(step_at(step), step >= startRow); },
+               [&](int pos, int type) { return ramp_arm(project, step_at(pos), type); },
                [&](const RampPair& p) {
                    RampSpec r   = ramp_spec(p);
+                   r.destNote   = ramp_dest_note(step_at(p.aufPos));
                    r.ausStep    = p.ausPos;
                    r.aufStep    = p.aufPos;
                    r.stepOffset = -p.ausPos;   // see RampSpec: elapsed = stepOffset + stepIndex
@@ -279,19 +300,25 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
     const int hereAbs = here * PHRASE_ROWS;
     const int hereEnd = hereAbs + PHRASE_ROWS - 1;
     const auto inHere = [&](int abs) { return abs >= hereAbs && abs <= hereEnd; };
+    // The step at an absolute position; null past a short phrase's end.
+    const auto step_at = [&](int abs) -> const PhraseStep* {
+        const Phrase& phrase = *played[abs / PHRASE_ROWS];
+        const int     step   = abs % PHRASE_ROWS;
+        return step < static_cast<int>(phrase.steps.size()) ? &phrase.steps[static_cast<size_t>(step)]
+                                                            : nullptr;
+    };
 
     pair_ramps(count * PHRASE_ROWS,
                [&](int abs) {
-                   const Phrase& phrase = *played[abs / PHRASE_ROWS];
-                   const int     step   = abs % PHRASE_ROWS;
-                   if (step >= static_cast<int>(phrase.steps.size())) return RampRowFx{};
-                   return ramp_step_fx(phrase.steps[static_cast<size_t>(step)],
-                                       !inHere(abs) || step >= startRow);
+                   const PhraseStep* step = step_at(abs);
+                   if (step == nullptr) return RampRowFx{};
+                   return ramp_step_fx(*step, !inHere(abs) || abs % PHRASE_ROWS >= startRow);
                },
-               ramp_arm,
+               [&](int abs, int type) { return ramp_arm(&project, *step_at(abs), type); },
                [&](const RampPair& p) {
                    if (p.aufPos < hereAbs || p.ausPos > hereEnd) return;   // not over this phrase
                    RampSpec r   = ramp_spec(p);
+                   r.destNote   = ramp_dest_note(*step_at(p.aufPos));
                    r.stepOffset = hereAbs - p.ausPos;
                    r.ausStep    = inHere(p.ausPos) ? p.ausPos - hereAbs : -1;
                    r.aufStep    = inHere(p.aufPos) ? p.aufPos - hereAbs : -1;
@@ -344,7 +371,7 @@ inline RampCells find_ramp_cells(const Project& project, int phraseId) {
             cells.mark(find_ramps_in_chain(project, chain, row));
         }
     }
-    if (!placed) cells.mark(find_ramps(self));
+    if (!placed) cells.mark(find_ramps(self, 0, &project));
     return cells;
 }
 

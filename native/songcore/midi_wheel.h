@@ -93,18 +93,37 @@ inline void wheel_plan_next(MidiWheel& w, int64_t frame, int sampleRate) {
     w.next = next;
 }
 
-// A note starts everything over but MPB, as a voice does, from its PSL, PBN and vibrato.
-inline void wheel_start_note(MidiWheel& w, int64_t frame, const NoteOnPayload& n, int tempo, int sampleRate) {
-    const int mpb = w.mpb;
+// A note starts everything over but MPB, as a voice does, from its PSL, PBN and vibrato. A LEG that
+// took over a held key slides from `legatoFrom` semitones instead of any PSL, or drops straight to the
+// new key.
+inline void wheel_start_note(MidiWheel& w, int64_t frame, const NoteOnPayload& n, int tempo, int sampleRate,
+                             bool legato = false, float legatoFrom = 0.0f) {
+    wheel_settle(w, frame, sampleRate);
+    const MidiWheel was = w;
     w = MidiWheel{};
-    w.mpb  = mpb;
+    w.mpb  = was.mpb;
     w.from = frame;
+    // The note LEG carries on keeps its FIN and its vibrato, unless this row brings one.
+    if (legato) {
+        w.fine  = was.fine;
+        w.phase = was.phase;
+        w.speed = was.speed;
+        w.depth = was.depth;
+    }
 
     const float tic    = frames_per_tic_f(tempo, sampleRate);
     const float pslOff = f32_from_bits(n.pslOffBits), pslDur = f32_from_bits(n.pslDurBits);
     if (std::fabs(pslOff) > 0.001f && pslDur > 0.0f) {
         w.offset = pslOff;
         w.rate   = -pslOff / std::max(1.0f, pslDur * tic);
+    }
+    if (legato) {
+        w.offset = 0.0f;
+        w.rate   = 0.0f;
+        if (n.legatoTicks > 0 && std::fabs(legatoFrom) > 0.001f) {
+            w.offset = legatoFrom;
+            w.rate   = -legatoFrom / std::max(1.0f, n.legatoTicks * tic);
+        }
     }
     // PBN, semitones a step, takes a PSL's slide over from its offset.
     const float pbn = f32_from_bits(n.pbnRateBits);

@@ -877,7 +877,7 @@ bool Sequencer::begin_phrase(int phraseId, int64_t startFrame, int trackId, int 
 
     // The phrase's AUS/AUF spans, in step indices (automation.h); in a chain they may cross phrases.
     w.ramps = chain ? find_ramps_in_chain(project, *chain, chainRow, w.row)
-                    : find_ramps(project.phrases[w.phraseId], w.row);
+                    : find_ramps(project.phrases[w.phraseId], w.row, &project);
     // The last value each ramp emitted, for de-duplication — seeded with the curve one tic BEFORE this
     // phrase, so a crossed phrase continues where the previous one left off.
     w.rampLast.clear();
@@ -1009,6 +1009,11 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
                                      fx_slot(effectiveStep, r.ausSlot).type != FX_AUS);
         if (trackState.aus_eaten(chainId, r.originAbs, r.originSlot)) continue;
 
+        if (r.kind == RampKind::CHORD) {
+            emit_chord_ramp(r, stepIndex, targetFrame, framesPerTic, trackId, trackState, noteFrame);
+            continue;
+        }
+
         const int lane = r.global ? TRACK_GLOBAL : trackId;
 
         // ⚠️ The restore flags are set here too, keyed on the CC the ramp SENDS — a CHA can eat the
@@ -1088,6 +1093,42 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
         }
         if (reassertAt >= 0) reassert_held();
     }
+}
+
+// Each tic sends where every chord note will be at the NEXT tic and glides there over the tic, so the
+// last one before the AUF lands on it and nothing reaches the AUF row's own note. Notes pair lowest to
+// lowest; a chord short of four repeats its top note. All relative to the note the track plays now.
+void Sequencer::emit_chord_ramp(const RampSpec& r, int stepIndex, int64_t targetFrame, int64_t framesPerTic,
+                                int trackId, const TrackState& ts, int64_t noteFrame) {
+    if (stepIndex == r.aufStep || ts.lastNoteMidi < 0 || ts.lastChordRoot < 0) return;
+    NoteArgs a;
+    a.track = trackId; a.instrument = ts.lastInstrument;
+    const Scale* scale = scale_for_note(a);
+    const int key  = track_scale_key(clampi(trackId, 0, 7));
+    const int move = r.destNote >= 0 ? r.destNote - ts.lastNoteMidi : 0;
+    int from[CHORD_MAX_NOTES], to[CHORD_MAX_NOTES];
+    const int nFrom = chord_notes(r.startByte, ts.lastChordRoot, scale, key, from);
+    const int nTo   = chord_notes(r.destByte, ts.lastChordRoot + move, scale, key, to);
+    for (int tic = 0; tic < TICS_PER_STEP; ++tic) {
+        const double t = (static_cast<double>(r.stepOffset + stepIndex) + (tic + 1) / static_cast<double>(TICS_PER_STEP)) /
+                         static_cast<double>(r.span);
+        const float c = static_cast<float>(automation_shape(r.curveByte, t));
+        float semis[CHORD_MAX_NOTES];
+        for (int i = 0; i < CHORD_MAX_NOTES; ++i) {
+            const float f = static_cast<float>(from[std::min(i, nFrom - 1)]);
+            semis[i] = f + (static_cast<float>(to[std::min(i, nTo - 1)] + move) - f) * c;
+        }
+        int64_t frame = targetFrame + tic * framesPerTic;
+        if (frame == noteFrame) ++frame;   // the note's own frame would reach the voice it replaces
+        router_.ext_chord_glide(frame, trackId, semis, framesPerTic);
+    }
+}
+
+int Sequencer::chord_ramp_arrival() const {
+    if (stepRamps_ == nullptr) return -1;
+    for (const RampSpec& r : *stepRamps_)
+        if (r.kind == RampKind::CHORD && r.aufStep == stepIndex_) return r.destByte;
+    return -1;
 }
 
 void Sequencer::emit_eq_morph(int64_t frame, const RampSpec& r, int trackId, const ExtEqMorphPayload& m) {
@@ -1228,6 +1269,13 @@ void Sequencer::resolve_step(StepPlay& s) {
     s.velocityByte = clampi(s.effectiveStep.volume, 0, 127);
     s.velocityGain = (s.velocityByte / 127.0f) * (s.velocityByte / 127.0f);
     s.params = resolve_step_params(s.effectiveStep, s.targetFrame, hex_to_float(instrument.volume));
+    if (instrument_routes_external(instrument)) {
+        const int inert = chord_legato_inert_slot(s.effectiveStep);
+        if (inert > 0) {
+            if (fx_slot(s.effectiveStep, inert).type == FX_CHD) s.params.chordValue.reset();
+            else                                                 s.params.legatoTicks.reset();
+        }
+    }
     s.phraseVol = s.params.volume;
     s.notePan = s.params.panValue.has_value() ? (*s.params.panValue / 255.0f) : hex_to_float(instrument.pan);
 }
@@ -1328,7 +1376,8 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     carry.pan = s.notePan;
     carry.vibSpeed = vibratoSpeed;
     carry.vibDepth = vibratoDepth;
-    carry.chord = params.chordValue.value_or(-1);
+    // A note on the row a CHD ramp arrives at plays the chord it arrives at.
+    carry.chord = params.chordValue.value_or(chord_ramp_arrival());
     // An ARC right of the CHD strums it: its mode is the order, its speed the tics between notes, and
     // speed 0 no strum.
     if (carry.chord >= 0 && params.strumValue.has_value() && (*params.strumValue & 0x0F) > 0) {
@@ -1357,6 +1406,7 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     a.vibSpd = vibratoSpeed; a.vibDep = vibratoDepth;
     a.chord = carry.chord;
     a.strum = carry.strum; a.strumFrames = carry.strumFrames;
+    a.legato = params.legatoTicks.value_or(-1);
     emit_note(a, note, ts);
 
     ts.lastNote = note;
@@ -1674,6 +1724,7 @@ NoteCarry Sequencer::voice_at(const TrackState& ts, int64_t frame, unsigned* fad
     unsigned mask = 0;
     if (stepRamps_ != nullptr) {
         for (const RampSpec& r : *stepRamps_) {
+            if (r.kind == RampKind::CHORD) continue;   // the chord rides its own events
             // `frame + 1`: the value is applied one frame behind the note (reapply_voice).
             const double t = fade_t_at(r, frame + 1);
             if (t < 0.0) continue;
@@ -1740,6 +1791,7 @@ void Sequencer::emit_note(NoteArgs a, const Note& note, TrackState& ts) {
     apply_track_scale(a);
     apply_chord(a);
     apply_strum(a, ts);
+    ts.lastChordRoot = (a.noteOctave + 1) * 12 + a.notePitch + a.pit + a.arp;
     router_.note_on(a);
 }
 

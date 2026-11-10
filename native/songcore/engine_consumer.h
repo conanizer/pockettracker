@@ -172,6 +172,13 @@ class EngineConsumer : public IMidiConsumer {
                 engine_->scheduleMasterEqBands(ev.frame, eq_bands_of(ev));
                 break;
 
+            case EV_EXT_CHORD_GLIDE: {
+                float semis[4];
+                for (int i = 0; i < 4; ++i) semis[i] = ev.extChordGlide.cents[i] / 100.0f;
+                engine_->scheduleVoiceChordGlide(ev.frame, ev.track, semis, ev.extChordGlide.frames);
+                break;
+            }
+
             default: break;   // schema-complete: no other emitters exist
         }
     }

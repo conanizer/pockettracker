@@ -189,7 +189,14 @@ struct Voice : public IAudioVoice {
     static constexpr int CHORD_EXTRA = 3;
     int    chordExtra = 0;                    // 0 = a single note
     int    chordLow   = 0;                    // the lowest note, semitones from the note: already in the rate
-    float  chordRatio[CHORD_EXTRA] = {};      // each one's rate against the voice's own, > 1
+    float  chordRatio[CHORD_EXTRA] = {};      // each one's rate against the voice's own, >= 1
+    // LEG onto another chord: each note's own slide, in semitones off its ratio, running out to 0.
+    // Read through chordRatioNow().
+    float  chordGlide[CHORD_EXTRA]     = {};
+    float  chordGlideRate[CHORD_EXTRA] = {};  // semitones a frame
+    // AUS/AUF over CHD: the lowest note's own bend, semitones on the rate, gliding to `chordBendTo`.
+    // A LEG folds it into the new note.
+    float  chordBend = 0.0f, chordBendTo = 0.0f, chordBendRate = 0.0f;
     double chordPos[CHORD_EXTRA]   = {};
     bool   chordBack[CHORD_EXTRA]  = {};      // ping-pong: on the way down
     bool   chordDone[CHORD_EXTRA]  = {};      // a one-shot's note that ran out
@@ -256,6 +263,14 @@ struct Voice : public IAudioVoice {
     // The fade's twin: a KIL, note-off or steal dispatched at frame f starts fading at f. The
     // engine zeroes it after every block.
     int fadeStartFrame = 0;
+
+    // Still holding its note — not fading, not released: what a LEG note can take over.
+    bool holdsNote() const {
+        if (!isActive || isFadingOut || loopReleasing) return false;
+        for (const VoiceModSlot& m : voiceMods)
+            if (m.dest == 1 && has_release_stage(m) && m.stage == 4) return false;
+        return true;
+    }
 
     // Constant-power pan gains: 0 = left, 0.5 = centre, 1 = right.
     void setPanGains(float pan) {
@@ -430,12 +445,58 @@ struct Voice : public IAudioVoice {
             chordLow = low;
         }
         chordExtra = std::max(0, std::min(count - 1, CHORD_EXTRA));
-        for (int k = 0; k < chordExtra; ++k) chordRatio[k] = powf(2.0f, (float)(semis[k + 1] - low) / 12.0f);
+        for (int k = 0; k < chordExtra; ++k) {
+            chordRatio[k] = powf(2.0f, (float)(semis[k + 1] - low) / 12.0f);
+            chordGlide[k] = chordGlideRate[k] = 0.0f;
+        }
+        chordBend = chordBendTo = chordBendRate = 0.0f;
         // The first to sound starts under the note's own fade-in; a later one ramps in by itself.
         for (int k = 0; k <= chordExtra; ++k) chordWait[k] = wait[k] > 0 ? wait[k] : -DECLICK_SAMPLES;
         chordFollow();
         chordIn  = 1.0f / (float)(chordExtra + 1);
         chordOut = sqrtf((float)(chordExtra + 1));
+    }
+
+    // LEG onto another chord, `semis` from the new note, ascending: note k goes to the new chord's note
+    // k, lowest to lowest, and a note the new chord lacks joins its top one. Each slides from where it
+    // sounds now over `frames`, 0 = at once. The lowest is the voice's own rate, which the caller moves.
+    void legatoChord(const int8_t* semis, int count, float frames) {
+        for (int k = 0; k < chordExtra; ++k)
+            glideChordNote(k, (float)(semis[std::min(k + 1, count - 1)] - semis[0]), frames);
+    }
+
+    // AUS/AUF over CHD: the chord's notes to `semis` from the note, lowest first, over `frames`. A
+    // single note is left alone.
+    void chordGlideTo(const float semis[4], float frames) {
+        if (chordExtra == 0) return;
+        chordBendTo   = semis[0] - (float)chordLow;
+        chordBendRate = frames > 0.0f ? (chordBendTo - chordBend) / frames : 0.0f;
+        if (frames <= 0.0f) chordBend = chordBendTo;
+        for (int k = 0; k < chordExtra; ++k) glideChordNote(k, semis[k + 1] - semis[0], frames);
+    }
+
+    // Chord note k (above the lowest) to `to` semitones above the lowest, from where it sounds now.
+    void glideChordNote(int k, float to, float frames) {
+        const float was = 12.0f * log2f(chordRatioNow(k));
+        chordRatio[k]     = powf(2.0f, to / 12.0f);
+        chordGlide[k]     = frames > 0.0f ? was - to : 0.0f;
+        chordGlideRate[k] = frames > 0.0f ? -chordGlide[k] / frames : 0.0f;
+    }
+
+    float chordRatioNow(int k) const {
+        return chordGlide[k] == 0.0f ? chordRatio[k] : chordRatio[k] * powf(2.0f, chordGlide[k] / 12.0f);
+    }
+
+    void advanceChordGlide(int numFrames) {
+        if (chordBend != chordBendTo) {
+            const float step = chordBendRate * (float)numFrames;
+            chordBend = fabsf(step) >= fabsf(chordBendTo - chordBend) ? chordBendTo : chordBend + step;
+        }
+        for (int k = 0; k < chordExtra; ++k) {
+            if (chordGlide[k] == 0.0f) continue;
+            const float step = chordGlideRate[k] * (float)numFrames;
+            chordGlide[k] = fabsf(step) >= fabsf(chordGlide[k]) ? 0.0f : chordGlide[k] + step;
+        }
     }
 
     // Every chord playhead to where the voice's own is: a new start, an OFFSET, a restart.

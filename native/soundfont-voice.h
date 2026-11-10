@@ -32,6 +32,18 @@ struct SoundfontVoice : public IAudioVoice {
     // The instrument's detune, semitones; set at the trigger, survives slides and resetPitchState.
     float detuneSemitones  = 0.0f;
 
+    // LEG: the key held stays down and the wheel carries the new note, `legatoShift` semitones from
+    // `rootNote` (the key the note was struck with, before a chord's offsets).
+    int   rootNote         = -1;
+    float legatoShift      = 0.0f;
+    // LEG onto another chord: each held key's own pitch on top of the wheel, `keyShift` plus a slide
+    // running out to 0. Empty until a chord is reshaped; a new note empties it.
+    int   keyShiftKey[4]   = {};
+    float keyShift[4]      = {};
+    float keyGlide[4]      = {};
+    float keyGlideRate[4]  = {};   // semitones a frame
+    int   keyShiftCount    = 0;
+
     // PSL/PBN/PVB/PVX, advanced each block and sent as the pitch wheel.
     float pitchOffset      = 0.0f;
     float pitchSlideTarget = 0.0f;
@@ -200,6 +212,8 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Also re-centres TSF's wheel next block — a PBN can have left it at an extreme.
     void resetPitchState() {
+        legatoShift      = 0.0f;
+        keyShiftCount    = 0;
         midiWheel        = 0.0f;
         pitchOffset      = 0.0f;
         pitchSlideTarget = 0.0f;
@@ -222,6 +236,22 @@ struct SoundfontVoice : public IAudioVoice {
         notePitch        = pitch;
         reset_table_lanes(lanes, ticRates, startRows, octave, pitch);
     }
+
+    // Still holding a key of this instrument's — not releasing, not stopping, not about to be cut by
+    // an armed note: what a LEG note can take over.
+    bool holdsNote(int instrument, int slot) const {
+        return isActive && !isReleasingOnly && !hasArmedNote && !stopFade.moving() &&
+               pendingTsfOffAt < 0 && activeNote >= 0 && rootNote >= 0 &&
+               instrId == instrument && sfSlot == slot;
+    }
+
+    // LEG onto another chord, `semis` from the new note, ascending: the held keys, lowest first, go to
+    // the new chord's notes in order, and a key the new chord lacks joins its top one. Each slides from
+    // where it sounds now over `frames`, 0 = at once. The wheel carries the root, as for any LEG.
+    void legatoChord(const int8_t* semis, int count, float frames);
+    // AUS/AUF over CHD: the held keys, lowest first, to `semis` from the note, over `frames`. A single
+    // note is left alone.
+    void chordGlideTo(const float semis[4], float frames);
 
     // Advances slide and vibrato by `numFrames` and writes the wheel; before each render.
     void applyPitchMod(float sampleRate, int numFrames);

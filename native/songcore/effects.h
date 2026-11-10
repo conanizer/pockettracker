@@ -66,6 +66,7 @@ inline constexpr EffectDef EFFECTS[] = {
     {FX_TIM, "TIM", 0xFF},
     {FX_NTH, "NTH", 0xFF},
     {FX_CHD, "CHD", 0xFF},
+    {FX_LEG, "LEG", 0xFF},
     {FX_LPO, "LPO", 0xFF},
     {FX_MPG, "MPG", 0x7F}, {FX_MPB, "MPB", 0xFF},
     {FX_CCA, "CCA", 0xFF}, {FX_CCB, "CCB", 0xFF}, {FX_CCC, "CCC", 0xFF}, {FX_CCD, "CCD", 0xFF},
@@ -187,6 +188,7 @@ struct ResolvedStepParams {
     VoiceCc voiceCc[VOICE_LANES];
     std::optional<int> tsxMultiplier;     // TSX — already decoded to a signed multiplier
     std::optional<int> chordValue;        // CHD — the authored byte (chords.h)
+    std::optional<int> legatoTicks;       // LEG — how long the slide takes, 0 = at once
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
     // SCA / SCG: the authored byte, split where it is applied so the key clamp lives in one place.
@@ -200,6 +202,18 @@ struct ResolvedStepParams {
     std::optional<int> midiBend;                       // MPB (authored byte, not the 14-bit value)
     std::optional<int> ccSlotValue[MIDI_CC_SLOTS];     // CCA-CCD
 };
+
+// On an instrument played over MIDI OUT, CHD and LEG on one row cannot both act — one bend moves every
+// key on the channel — so the leftmost acts. The slot (1-3) of the one that does nothing, or 0.
+inline int chord_legato_inert_slot(const PhraseStep& step) {
+    int chord = 0, legato = 0;
+    for (int slot = 3; slot >= 1; --slot) {
+        if (fx_slot(step, slot).type == FX_CHD) chord = slot;
+        if (fx_slot(step, slot).type == FX_LEG) legato = slot;
+    }
+    if (chord == 0 || legato == 0) return 0;
+    return chord < legato ? legato : chord;
+}
 
 // Fold a step's three FX slots into the bundle. `default_volume` (the instrument volume) seeds
 // `volume`; Vxx overrides it. A KIL echoes `base_frame` into killAtFrame.
@@ -237,6 +251,7 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             // Sign-decoded here, like PIT, so the scheduler gets a number.
             case FX_TSX:    p.tsxMultiplier = (value < 0x80) ? value : value - 256; break;
             case FX_CHD:    p.chordValue = value & 0xFF; arcStrums = true; break;
+            case FX_LEG:    p.legatoTicks = value & 0xFF; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
             case FX_SCA:    p.scaleTrackByte = value; break;

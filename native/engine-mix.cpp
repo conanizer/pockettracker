@@ -49,6 +49,32 @@ static inline void startNotePitchFx(V& v, const ScheduledNote& note) {
     }
 }
 
+// LEG's pitch on a voice that goes on: `from` = semitones off the new note where the old one sounds
+// now, slid home over the note's legatoFrames, or dropped at once. The row's own PBN or vibrato
+// takes over as on any note; without one, a running vibrato carries on.
+template <typename V>
+static inline void legatoPitchFx(V& v, float from, const ScheduledNote& note) {
+    v.pitchOffset      = 0.0f;
+    v.pitchSlideTarget = 0.0f;
+    v.pitchSlideRate   = 0.0f;
+    v.pitchSliding     = false;
+    if (note.legatoFrames > 0.0f && fabsf(from) > 0.001f) {
+        v.pitchOffset    = from;
+        v.pitchSlideRate = -from / note.legatoFrames;
+        v.pitchSliding   = true;
+    }
+    if (note.pbnRate != 0.0f) {
+        v.pitchSlideRate   = note.pbnRate;
+        v.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+        v.pitchSliding     = true;
+    }
+    if (note.vibratoDepth > 0.01f) {
+        v.vibratoSpeed  = note.vibratoSpeed;
+        v.vibratoDepth  = note.vibratoDepth;
+        v.vibratoActive = true;
+    }
+}
+
 // A SoundFont note onto its track's MIDI channel of the shared tsf* handle, at `frame` inside the
 // current block. Audio thread only; tsf_load_memory() never runs here.
 void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int64_t currentFrame,
@@ -61,6 +87,16 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     // ⚠️ The handle is not tested here: the UI thread can null it at any moment. `armNote` reads it
     // under the slot's lock and says whether the note is worth setting up.
     SoundfontVoice& sv = sfVoices[t];
+    // LEG: the key stays down, and the wheel takes the channel to the new note.
+    if (note.legatoFrames >= 0.0f && sv.holdsNote(note.sampleId, note.sfSlot)) {
+        const float shift = (float)(note.midiNote - sv.rootNote);
+        legatoPitchFx(sv, sv.legatoShift + sv.pitchOffset - shift, note);
+        sv.legatoShift = shift;
+        // A CHD on the row reshapes a sounding chord, key by key; without one it moves as a whole.
+        if (note.noteOn.chordCount > 0 && sv.chordKeyCount > 0)
+            sv.legatoChord(note.noteOn.chord, std::min<int>(note.noteOn.chordCount, 4), note.legatoFrames);
+        return;
+    }
     // ⚠️ Read before `armNote`, which sets both: is a note still sounding here, and is this the block's
     // first arm? A second one replaces the first, which never sounded.
     const bool wasSounding = sv.isActive;
@@ -168,8 +204,41 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
 }
 
 // A sampler note into the voice pool, at `frame` inside the current block. Audio thread only.
+// LEG on the sampler: the voice holding this instrument's note on the track takes the new pitch and
+// goes on — playhead, envelopes, table and chain untouched. False when there is none. A slice is
+// another sound, never a legato.
+bool AudioEngine::legatoSamplerNote(const ScheduledNote& note) {
+    if (note.legatoFrames < 0.0f || note.endPointOverride >= 0 || note.baseFrequency <= 0.0f) return false;
+    for (int i = 0; i < MAX_VOICES; i++) {
+        Voice& v = voices[i];
+        if (v.trackId != note.trackId || !v.holdsNote() || v.instrId != note.sampleId ||
+            v.playbackRate <= 0.0f)
+            continue;
+        // The lowest note is in the rate. A CHD on the row reshapes a sounding chord, note by note;
+        // without one the chord moves as a whole.
+        const songcore::NoteOnPayload& on = note.noteOn;
+        const bool reshape = on.chordCount > 0 && v.chordExtra > 0;
+        const int  low     = reshape ? on.chord[0] : v.chordLow;
+        const float rate = note.frequency / note.baseFrequency * powf(2.0f, (float)low / 12.0f);
+        legatoPitchFx(v, v.pitchOffset + v.chordBend + 12.0f * log2f(v.playbackRate / rate), note);
+        v.chordBend = v.chordBendTo = v.chordBendRate = 0.0f;
+        if (reshape) v.legatoChord(on.chord, std::min<int>(on.chordCount, 1 + Voice::CHORD_EXTRA), note.legatoFrames);
+        v.chordLow         = low;
+        v.playbackRate     = rate;
+        v.basePlaybackRate = rate;
+        v.baseFrequency    = note.baseFrequency;
+        v.noteOctave = std::max(0, std::min(note.noteOctave, 9));
+        v.notePitch  = std::max(0, std::min(note.notePitch, 11));
+        v.noteKeytrack = (float)((v.noteOctave + 1) * 12 + v.notePitch - 60) / 12.0f;
+        v.modSourceValues[MOD_SRC_KEYTRACK] = v.noteKeytrack;
+        return true;
+    }
+    return false;
+}
+
 void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame,
                                      float sampleRate) {
+    if (legatoSamplerNote(note)) return;
     // ⚠️ Read before the fade-out below: only a voice still running THIS table hands its rows on — a
     // chain can give the track a different one.
     const TableLane* liveLanes = nullptr;
@@ -641,6 +710,10 @@ void AudioEngine::applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b)
             forEachTrackVoice(upd.trackId, [&](auto& v) { applyEqBandsToModule(v.chain.eq, upd.eqBands); });
             break;
         }
+        case PARAM_UPDATE_CHORD_GLIDE: {          // CHD under AUS/AUF
+            forEachTrackVoice(upd.trackId, [&](auto& v) { v.chordGlideTo(upd.chordSemis, upd.value); });
+            break;
+        }
         case PARAM_UPDATE_MASTER_EQ_BANDS: {      // EQM under AUS/AUF (global)
             applyEqBandsToModule(masterChain.masterEq, upd.eqBands);
             break;
@@ -910,7 +983,7 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         chord[k]             = ph;
         chord[k].position    = voice.chordPos[k];
         chord[k].loopingBack = voice.chordBack[k];
-        chord[k].rate        = modulatedRate * voice.chordRatio[k];
+        chord[k].rate        = modulatedRate * voice.chordRatioNow(k);
         chordDone[k]         = voice.chordDone[k];
     }
     const float chordIn = voice.chordIn, chordOut = voice.chordOut;

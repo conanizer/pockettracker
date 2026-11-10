@@ -1733,6 +1733,7 @@ the next note on its track, after the instrument's LEN, at a `KIL` or an `OFF`, 
 | `PAN`, the instrument's PAN | Controller 10 (pan) |
 | `REV` · `DEL` · `CUT` · `RES` · `LPF` · `HPF` · `BPF` · `DRV` · `CRU` · `LPO` | To another PocketTracker only, in a message other gear ignores: it plays them on that note as on its own, and its next note starts from its instrument again |
 | `PSL` · `PBN` · `PVB` · `PVX` · `FIN` | Pitch bend, moving as the command moves the note, scaled to the instrument's BEND |
+| `LEG` | The new note on before the old note off, so a mono synth glides; a slide as pitch bend |
 | `MPG` · `MPB` · `CCA`–`CCD` | A program change, a pitch bend, and the instrument's four controller slots — see [section 23](#23-effects-reference) |
 
 `VOL` lasts for its own note, as in the app's own sound: the next note sends the volume back to full.
@@ -2031,6 +2032,35 @@ Slides pitch from the previous note to the current note over `XX` ticks. `PSL 00
 
 ---
 
+### LEG `XX` — Legato
+
+The row's note does not start the sound over: the note still sounding on the track moves to its
+pitch and carries on — the sample keeps playing from where it is, and the envelopes, LFOs, table
+and filter keep running. `LEG 00` jumps to the new pitch; any other value glides there over `XX`
+ticks, on PSL's scale.
+
+```
+    00    C-3 00  LEG 00
+    01    --- --  ---
+    02    D#3 00  LEG 00      ← jumps to D#, nothing restarts
+    03    G-2 00  LEG 06      ← glides down to G over 6 ticks
+    04    C-3 00              ← a plain note: starts over
+```
+
+- Only the pitch moves: the row's V column, VOL and PAN do not reach the sounding note. Commands that
+  move a playing note — CUT, RES, FIN, DRV, REV and the like — work beside it as on any row.
+- With nothing sounding — the note ran out, an OFF or KIL ended it, it is in its release — or with
+  another instrument sounding, the row plays as a plain note.
+- A chord moves as a whole. With a CHD on the row, each of its notes slides to the new chord's, lowest
+  to lowest. A slice note always plays plain.
+- On a SoundFont instrument the glide is the pitch wheel, so it reaches four octaves at most.
+- On an EXTERNAL instrument the new note-on goes out before the old note-off, which tells a mono synth
+  to glide or carry on; a slide is sent as pitch bend, scaled to the instrument's BEND. CHD and LEG on one
+  row cannot both act there: the leftmost does, and the other is drawn dimmed.
+- In a phrase only.
+
+---
+
 ### PBN `XX` — Pitch Bend
 
 Continuous pitch bend. Persists until cancelled.
@@ -2292,6 +2322,7 @@ skipping any that are not:
 | `DRV` | the overdrive amount |
 | `FIN` | the fine tune — end to end is a two-semitone glide |
 | `PVB` `PVX` | the vibrato — its speed and its depth each slide on their own |
+| `CHD` | the chord — each note slides to its place in the `AUF`'s chord (not on an EXTERNAL instrument) |
 | `EQN` | this track's EQ — **between two presets** (see below) |
 | `EQM` | the master EQ — **between two presets** (see below) |
 
@@ -3291,6 +3322,7 @@ Open with **A** on an EQ cell.
 | OFF | Offset | `XX` | Sample start position jump |
 | PIT | Pitch Offset | `XX` signed | 00–7F up, 80–FF down |
 | PSL | Pitch Slide | `XX` ticks | Portamento |
+| LEG | Legato | `XX` ticks | The sounding note moves to this pitch without restarting; `00` = at once. Phrase only |
 | PBN | Pitch Bend | `XX` | 00–7F up, 80–FF down — **persists** |
 | PVB | Vibrato | `XY` | X=speed, Y=depth — **persists** |
 | PVX | Extreme Vibrato | `XY` | 4× deeper, 2× faster than PVB |
