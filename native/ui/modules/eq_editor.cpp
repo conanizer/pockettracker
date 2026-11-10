@@ -1,3 +1,4 @@
+#include "ui/value_hint.h"
 #include "ui/modules/eq_editor.h"
 
 #include <algorithm>
@@ -137,20 +138,7 @@ const std::vector<std::string>& eq_band_type_names() {
 
 float EqModule::freq_hz_from_hex(int hex) { return eqFreqHzFromHex(hex); }
 
-std::string EqModule::format_freq_hz(float hz) {
-    const int rounded = static_cast<int>(hz);
-    char      buf[32];
-    if (rounded < 1000) {
-        std::snprintf(buf, sizeof(buf), "%dHz", rounded);
-    } else if (rounded < 10000) {
-        // ⚠️ Divided in float, then widened: double can round across a display boundary, and this
-        // string is what `step_freq_display_aware` stops on.
-        std::snprintf(buf, sizeof(buf), "%.1fkHz", static_cast<double>(hz / 1000.0f));
-    } else {
-        std::snprintf(buf, sizeof(buf), "%dkHz", static_cast<int>(hz / 1000.0f + 0.5f));
-    }
-    return buf;
-}
+std::string EqModule::format_freq_hz(float hz) { return format_hz(hz); }
 
 std::string EqModule::format_gain_db(float db) {
     char buf[32];

@@ -345,6 +345,7 @@ add_library(pt-ui STATIC
         ui/help_topic.cpp
         ui/layout.cpp
         ui/autosave.cpp
+        ui/value_hint.cpp
         ui/midi_ports.cpp
         ui/sample_edit_session.cpp
         ui/std_filesystem.cpp

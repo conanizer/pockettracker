@@ -3,6 +3,7 @@
 #include "songcore/scales.h"
 #include "ui/fx_columns.h"
 #include "ui/helpers.h"
+#include "ui/value_hint.h"
 
 namespace pt::ui {
 
@@ -157,7 +158,7 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         const songcore::FxSlot& f = songcore::fx_slot(step, slot);
         return is_fx_type_column(s.cursorColumn, PHRASE_FX_COLUMN)
                    ? cc::effect_type(f.type, slot, s.effectTypeCount)
-                   : cc::effect_value(f.value, slot, effect_value_max(f.type));
+                   : cc::effect_value(f.value, slot, effect_value_max(f.type)).as(fx_value_unit(f.type));
     }
     return cc::none();
 }

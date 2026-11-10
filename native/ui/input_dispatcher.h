@@ -61,6 +61,7 @@ class InputDispatcher {
     InputDispatcher(AppState& state, songcore::SongcoreHost& host, FileSystem& fs)
         : s_(state), host_(host), fs_(fs) {
         s_.clipboard = &clip_;   // the layout's clipboard readout
+        s_.cellUnderCursor = [this] { return top_overlay(s_) ? cc::none() : cursor_context(); };
         // The project the shell pushed before this existed needs its song pointer clamped.
         clamp_song_pointer(s_);
     }

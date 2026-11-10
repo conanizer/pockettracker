@@ -1,10 +1,11 @@
 #pragma once
 // An EQ band's numbers, shared by the engine and the EQ editor's curve, so the picture is the sound.
 #include <cmath>
+#include "../cell-curves.h"
 #include "../soundpipe/soundpipe.h"
 
 // Authored bytes → Hz, dB, Q. ⚠️ A table morph interpolates the bytes, so this is the one mapping.
-inline float eqFreqHzFromHex(int hex) { return 20.0f * powf(1000.0f, hex / 255.0f); }
+inline float eqFreqHzFromHex(int hex) { return cutoff_hz(hex); }
 inline float eqGainDbFromHex(int hex) { return hex / 10.0f - 12.0f; }   // 0..240 = −12.0..+12.0 dB
 inline float eqQFromHex(int hex)      { return 0.1f * powf(100.0f, hex / 255.0f); }
 

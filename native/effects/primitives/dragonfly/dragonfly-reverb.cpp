@@ -35,14 +35,10 @@ struct Cells {
 
 // ─── The cell → Dragonfly-unit mappings every engine shares ─────────────────────────────────────
 
-/** DCAY → the tail's RT60 in seconds, on the SAME curve the shipping reverb uses, so a DCAY typed on
- *  one algorithm rings for about as long on another. ⚠️ FF is the freeze there and has no time; it
- *  is read as FE here, the longest finite one. */
-double decay_seconds(int decayHex) { return reverb_decay_seconds(std::min(decayHex, 0xFE)); }
-
-/** DAMP → a corner frequency on the shipping reverb's curve, clamped to the 1-16 kHz the plugins'
- *  own damping knobs span. */
-double damp_hz(int dampHex) { return std::clamp(double(reverb_damp_freq(dampHex)), 1000.0, 16000.0); }
+/** DCAY and DAMP on the shipping reverb's curves (reverb-presets.h), so a DCAY typed on one
+ *  algorithm rings for about as long on another. */
+double decay_seconds(int decayHex) { return reverb_df_decay_seconds(decayHex); }
+double damp_hz(int dampHex) { return reverb_df_damp_hz(dampHex); }
 
 /** SIZE → metres, linear over a plugin's own Size range. */
 double size_m(int sizeHex, double lo, double hi) { return lo + (hi - lo) * sizeHex / 255.0; }

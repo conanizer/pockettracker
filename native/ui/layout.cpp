@@ -1,9 +1,9 @@
 #include "ui/layout.h"
+#include "ui/value_hint.h"
 
 #include <algorithm>
 #include <string>
 
-#include "songcore/chords.h"
 #include "songcore/scales.h"
 #include "ui/buttons.h"
 #include "ui/clipboard.h"
@@ -405,75 +405,33 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
 }
 
 // ─── The status line, top-left of the scope strip ────────────────────────────────────────────────
+// The strip's two text rows sit either side of its centre line, 3 px clear of it: a 15 px capital
+// ends 3 px above the line on the first, starts 3 px below it on the second.
+static constexpr int STRIP_MID   = SCREEN_SPACER + OscilloscopeModule::HEIGHT / 2;
+static constexpr int STRIP_ROW_1 = STRIP_MID - 18;
+static constexpr int STRIP_ROW_2 = STRIP_MID + 4;
+
 void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
-    if (draw_chord_hint(c, s)) return;
+    if (draw_value_hint(c, s)) return;
     if (s.statusMessage.empty()) return;
 
     const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
-    c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(text, SIDE_SPACER + 10, STRIP_ROW_1, color, CHAR_SPACING, FONT_SCALE);
 }
 
-// A held on a CHD value: the chord's name and its notes. In a PHRASE, made of this row's note in the
-// track's scale as far as this phrase shows it; in a TABLE, on C-4 moved by the row's transpose, as the
-// table plays it — unsnapped, and named as the note it lands on.
-// False when the cursor is elsewhere.
-bool TrackerLayout::draw_chord_hint(Canvas& c, const AppState& s) const {
-    if (!s.aHeld || s.selection.active) return false;
-    const songcore::Project& p = *s.project;
-    int value = -1, root = 60;
-    const songcore::Scale* scale = nullptr;
-    int key = 0;
-    std::string where;   // the root's name, or why there is none
-    if (s.currentScreen == ScreenType::PHRASE) {
-        const int slot = fx_slot_of_column(s.phraseCursor.column, PHRASE_FX_COLUMN);
-        if (slot == 0 || is_fx_type_column(s.phraseCursor.column, PHRASE_FX_COLUMN)) return false;
-        const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
-        const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.phraseCursor.row)];
-        if (songcore::fx_slot(step, slot).type != songcore::FX_CHD) return false;
-        value = songcore::fx_slot(step, slot).value;
-        if (!songcore::note_is_pitch(step.note)) {
-            where = "NEEDS A NOTE ON THIS ROW";
-        } else {
-            const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.phraseCursor.row, step.instrument);
-            root  = ns.snap(songcore::note_to_midi(step.note));
-            scale = ns.scale;
-            key   = ns.key;
-        }
-    } else if (s.currentScreen == ScreenType::TABLE) {
-        const int slot = fx_slot_of_column(s.tableCursor.column, TABLE_FX_COLUMN);
-        if (slot == 0 || is_fx_type_column(s.tableCursor.column, TABLE_FX_COLUMN)) return false;
-        const songcore::TableRow& r =
-            p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursor.row)];
-        if (songcore::fx_slot(r, slot).type != songcore::FX_CHD) return false;
-        value = songcore::fx_slot(r, slot).value;
-        // The row's transpose moves the note the chord is built on: 00-7F up, 80-FF down.
-        const int tsp = r.transpose < 0x80 ? r.transpose : r.transpose - 256;
-        root = std::max(0, std::min(127, 60 + tsp));
-    } else {
-        return false;
-    }
-
-    std::string head  = std::string(songcore::chord_name(value)) + "  " + songcore::chord_layout_name(value);
-    std::string notes = where;
-    if (where.empty()) {
-        if (s.currentScreen == ScreenType::PHRASE) {
-            const char* name = songcore::NOTE_NAMES[songcore::scale_mod12(root)];
-            head = std::string(name, name[1] == '-' ? 1 : 2) + " " + head;
-        } else {
-            notes = "ON " + songcore::note_name(songcore::note_from_midi(root)) + ":";
-        }
-        int semis[songcore::CHORD_MAX_NOTES];
-        const int n = songcore::chord_notes(value, root, scale, key, semis);
-        for (int i = 0; i < n; ++i) {
-            if (!notes.empty()) notes += ' ';
-            notes += songcore::note_name(songcore::note_from_midi(root + semis[i]));
-        }
-    }
-    const int x = SIDE_SPACER + 10, y = SCREEN_SPACER + 10;
-    c.draw_text(Canvas::clip_text(head, STATUS_MAX_CHARS), x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(Canvas::clip_text(notes, STATUS_MAX_CHARS), x, y + 21, s.theme.textTitle, CHAR_SPACING,
+// A held on a value whose cell names a unit: what it means, in two lines. False when there is none.
+bool TrackerLayout::draw_value_hint(Canvas& c, const AppState& s) const {
+    if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return false;
+    const CursorContext k = s.cellUnderCursor();
+    if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return false;
+    const ValueHint h = value_hint(k.unit, k.currentValue, s);
+    if (h.head.empty()) return false;
+    const int x = SIDE_SPACER + 10;
+    c.draw_text(Canvas::clip_text(h.head, STATUS_MAX_CHARS), x, STRIP_ROW_1, s.theme.vizWave, CHAR_SPACING,
                 FONT_SCALE);
+    c.draw_text(Canvas::clip_text(h.detail, STATUS_MAX_CHARS), x, STRIP_ROW_2, s.theme.textTitle,
+                CHAR_SPACING, FONT_SCALE);
     return true;
 }
 
@@ -484,12 +442,11 @@ void TrackerLayout::draw_selection_clipboard(Canvas& c, const AppState& s) const
     if (sel.empty() && clip.empty()) return;
 
     const int x = SIDE_SPACER + OscilloscopeModule::WIDTH - 150;
-    const int y = SCREEN_SPACER + 10;
-
     if (!sel.empty())
-        c.draw_text(sel, x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(sel, x, STRIP_ROW_1, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
     if (!clip.empty())
-        c.draw_text(clip, x, sel.empty() ? y : y + 21, s.theme.textTitle, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(clip, x, sel.empty() ? STRIP_ROW_1 : STRIP_ROW_2, s.theme.textTitle, CHAR_SPACING,
+                    FONT_SCALE);
 }
 
 // ─── ONE HAND: the locked buttons, boxed; one about to lock, plain ──────────────────────────────

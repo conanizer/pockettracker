@@ -162,7 +162,7 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
 
             case ModType::LFO:
                 p.type        = 3;
-                p.lfoHz       = (slot.lfoFreq + 1) * 20.0f / 256.0f;   // 0x00-0xFF → 0.1 .. 20 Hz
+                p.lfoHz       = lfo_hz(slot.lfoFreq);
                 p.oscShape    = slot.oscShape;
                 p.lfoTrigMode = slot.lfoTrigMode;
                 out.anyActive = true;

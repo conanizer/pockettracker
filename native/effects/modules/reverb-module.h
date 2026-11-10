@@ -10,7 +10,6 @@
 // The pre-delay line per channel: 0.15 s at 48 kHz.
 // ⚠️ A sample count, so at higher rates PRE clamps silently (75 ms at 96 kHz).
 static constexpr size_t REVERB_PREDELAY_MAX_SAMPLES = 7200;
-static constexpr float  kReverbPreDelayMaxSeconds   = 0.15f;
 
 // The reverb send: input EQ, pre-delay, the algorithm, then WIDE — the same around every algorithm.
 // Each cell's mapping is a function in reverb-presets.h, shared with the UI.
@@ -213,7 +212,7 @@ struct ReverbModule {
 
     // The one writer of `preDelaySamples`: the cell and the rate both move it. Clamps silently.
     void updatePreDelaySamples() {
-        const float wanted = (preHex / 255.0f) * kReverbPreDelayMaxSeconds * sampleRate;
+        const float wanted = reverb_pre_delay_seconds(preHex) * sampleRate;
         preDelaySamples    = static_cast<int>(
             fminf(wanted, static_cast<float>(REVERB_PREDELAY_MAX_SAMPLES - 1)));
     }

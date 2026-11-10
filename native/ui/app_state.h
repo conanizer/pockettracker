@@ -30,6 +30,7 @@
 #include "songcore/midi_port.h"  // IMidiOut
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -306,8 +307,13 @@ struct AppState {
     int           lastEditedFxType     = 0;
     int           lastEditedFxValue    = 0;
 
-    // A is down. While it is, a CHD value under the cursor names its chord in the status line's place.
+    // A is down. While it is, a value under the cursor whose context names a unit is spelled out in
+    // the status line's place (value_hint.h).
     bool aHeld = false;
+
+    // The cell under the cursor, as its screen describes it to the edit handlers; none while a layer
+    // is up. Set by the dispatcher, asked at draw time so it is never a frame behind. Empty = no hints.
+    std::function<CursorContext()> cellUnderCursor;
 
     // ONE HAND: a bit per Button — locked, and held alone long enough that letting go will lock it.
     uint16_t buttonsLocked  = 0;

@@ -44,6 +44,24 @@ enum class CursorValueType {
     NONE        // no cursor
 };
 
+// What a value means in the units it is heard in. A cell names it with `.as()` on its context, and
+// while A is held on it the status line spells it out (value_hint.h). Cells with one curve share one.
+enum class ValueUnit {
+    NONE,
+    CUTOFF_HZ,     // FREQ, and CUT / LPF / HPF / BPF
+    LFO_HZ,        // an LFO's FREQ
+    REVERB_PRE,
+    REVERB_DECAY,
+    REVERB_DAMP,
+    DELAY_TIME,    // the delay's free TIME, and TIM
+    DELAY_TONE,
+    TICS,          // 12 to a step: envelope times, LAT, KIL, PSL, LEG
+    TABLE_TICS,    // TIC: tics per table row, with its four modes
+    GROOVE_TICS,   // a groove step, on the groove's own ruler
+    MIDI_LENGTH,   // EXTERNAL LEN: tics, 00 = until the next note
+    CHORD,         // CHD
+};
+
 // Which button combinations do anything here.
 struct CursorCapabilities {
     bool canIncrement     = false;  // A+RIGHT
@@ -75,6 +93,14 @@ struct CursorContext {
     // On the context because stepping must move a whole degree.
     unsigned           scaleMask = 0x0FFFu;
     int                scaleKey  = 0;
+
+    ValueUnit          unit = ValueUnit::NONE;
+
+    CursorContext as(ValueUnit u) const {
+        CursorContext c = *this;
+        c.unit = u;
+        return c;
+    }
 
     bool is_editable() const {
         return valueType != CursorValueType::READ_ONLY && valueType != CursorValueType::NONE;

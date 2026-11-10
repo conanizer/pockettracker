@@ -177,27 +177,27 @@ CursorContext ModulationModule::cursor_context(const ModulationState& s) const {
             if (rows < 4) return cc::read_only();
             if (slot.type == ModType::LFO)
                 return cc::index_cycle(slot.oscShape, static_cast<int>(osc_shapes().size()));
-            return cc::plain_byte(slot.attack, 0x00);
+            return cc::plain_byte(slot.attack, 0x00).as(ValueUnit::TICS);
 
         case 4:
             if (rows < 5) return cc::read_only();
             if (slot.type == ModType::LFO)
                 return cc::index_cycle(slot.lfoTrigMode, static_cast<int>(trig_modes().size()));
             if (is_ahd_shaped(slot.type))
-                return cc::plain_byte(slot.hold, 0x00);
-            return cc::plain_byte(slot.decay, 0x00);
+                return cc::plain_byte(slot.hold, 0x00).as(ValueUnit::TICS);
+            return cc::plain_byte(slot.decay, 0x00).as(ValueUnit::TICS);
 
         case 5:
             if (rows < 6) return cc::read_only();
             if (slot.type == ModType::LFO)
-                return cc::plain_byte(slot.lfoFreq, 0x40);
+                return cc::plain_byte(slot.lfoFreq, 0x40).as(ValueUnit::LFO_HZ);
             if (is_ahd_shaped(slot.type))
-                return cc::plain_byte(slot.decay, 0x00);
+                return cc::plain_byte(slot.decay, 0x00).as(ValueUnit::TICS);
             return cc::plain_byte(slot.sustain, 0x80);
 
         case 6:
             if (rows < 7) return cc::read_only();
-            return cc::plain_byte(slot.release, 0x00);
+            return cc::plain_byte(slot.release, 0x00).as(ValueUnit::TICS);
 
         default:
             return cc::read_only();

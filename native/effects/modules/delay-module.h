@@ -2,6 +2,7 @@
 #include "../primitives/daisysp/delayline.h"
 #include "../primitives/daisysp/dsp.h"
 #include "../primitives/bus-sleep.h"
+#include "../cell-curves.h"
 #include "delay-presets.h"
 #include "eq-module.h"
 #include <cmath>
@@ -33,10 +34,6 @@ static constexpr float kDelayWobbleFraction = 0.025f;
 static constexpr float kDelayWobbleMaxSeconds = 0.007f;
 
 static constexpr float kDelayTwoPi = 6.28318530717958647692f;
-
-// TONE's range, 00 to FF, on an exponential curve.
-static constexpr float kDelayToneLowHz  = 356.4f;
-static constexpr float kDelayToneHighHz = 20000.0f;
 
 // Above FDBK E0 the loop sings: a band-pass (without the high-pass it silts into rumble), gain past
 // unity that the band mostly eats back, and `SoftLimit` holding the note near −2 dBFS.
@@ -124,7 +121,7 @@ struct DelayModule {
     // ⚠️ The TIM command always uses the free scale, even in sync mode: a ramp needs 256 steps, and
     // the subdivisions are a list.
     void setTimeFree(int timeHex) {
-        setDelaySamples((timeHex / 255.0f) * 2.0f * sampleRate);
+        setDelaySamples(delay_time_seconds(timeHex) * sampleRate);
     }
 
     void setTimeSync(int subdivIdx, float bpm) {
@@ -164,7 +161,7 @@ struct DelayModule {
             return;
         }
         const bool  drifting = wobble > 0.0f;
-        const bool  filtered = toneHex < 0xFF;
+        const bool  filtered = delay_tone_filters(toneHex);
         // Scales every singing term, so stepping DF → E0 does not jump.
         const float osc     = oscAmount();
         const bool  singing = osc > 0.0f;
@@ -268,7 +265,7 @@ struct DelayModule {
     }
 
     void updateToneCoeff() {
-        const float cutoffHz = kDelayToneLowHz * powf(kDelayToneHighHz / kDelayToneLowHz, toneHex / 255.0f);
+        const float cutoffHz = delay_tone_hz(toneHex);
         const float coeff    = 1.0f - expf(-kDelayTwoPi * cutoffHz / sampleRate);
         toneCoeff = fminf(1.0f, fmaxf(0.0f, coeff));
     }

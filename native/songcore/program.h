@@ -152,6 +152,15 @@ inline float frames_per_tic_f(int tempo, int sampleRate) {
     return static_cast<float>(sampleRate) / (tempo / 60.0f * 4.0f * TICS_PER_STEP);
 }
 
+// How long `tics` last at `tempo`, in ms, on a step of `tics_per_step` — 12 for every effect and
+// envelope, a groove's own ruler for its steps. For the screens; the engine counts frames.
+inline double tics_ms(int tics, int tempo, int tics_per_step = TICS_PER_STEP) {
+    return tics * 60000.0 / (tempo * 4.0 * tics_per_step);
+}
+
+// An LFO's FREQ: 0.08 Hz at 00 to 20 Hz at FF, in even steps.
+inline float lfo_hz(int freq) { return (freq + 1) * 20.0f / 256.0f; }
+
 // Truncates toward zero, then floors at 0.
 inline int tics_to_frames(int tics, float framesPerTic) {
     const int frames = static_cast<int>(tics * framesPerTic);

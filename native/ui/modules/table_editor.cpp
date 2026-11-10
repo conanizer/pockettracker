@@ -5,6 +5,7 @@
 #include "songcore/table_automation.h"
 #include "ui/fx_columns.h"
 #include "ui/helpers.h"
+#include "ui/value_hint.h"
 
 namespace pt::ui {
 
@@ -125,7 +126,8 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
     // Never empty: A+B puts it back to 00.
     const auto fx_value = [](int value, int type) {
         return cc::hex_byte(value, 0, effect_value_max(type), /*empty_value=*/-1, /*can_delete=*/false,
-                            /*can_insert=*/false, /*can_create=*/false, /*def=*/0);
+                            /*can_insert=*/false, /*can_create=*/false, /*def=*/0)
+            .as(fx_value_unit(type));
     };
     switch (s.cursorColumn) {
         case 0: return cc::read_only();

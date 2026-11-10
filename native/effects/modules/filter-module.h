@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "../cell-curves.h"
 #include "../glide.h"
 #include "../primitives/daisysp/svf.h"
 
@@ -60,7 +61,7 @@ struct FilterModule {
             svfL.Init(sr);
             svfR.Init(sr);
         }
-        float hz  = 20.0f * powf(1000.0f, cutoff / 255.0f);
+        float hz  = cutoff_hz(cutoff);
         hz = fminf(hz, sr * 0.45f);
         float res = resonance / 255.0f;
         float drv = filterDrive / 25.5f;

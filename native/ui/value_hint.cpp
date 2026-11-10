@@ -1,0 +1,195 @@
+#include "ui/value_hint.h"
+
+#include <algorithm>
+#include <cstdio>
+
+#include "effects/cell-curves.h"
+#include "effects/modules/reverb-presets.h"
+#include "songcore/chords.h"
+#include "songcore/program.h"
+#include "songcore/scales.h"
+#include "songcore/timing.h"
+#include "ui/app_state.h"
+
+namespace pt::ui {
+
+std::string format_hz(float hz) {
+    char buf[32];
+    if (hz < 20.0f) {
+        std::snprintf(buf, sizeof(buf), hz < 10.0f ? "%.2fHz" : "%.1fHz", static_cast<double>(hz));
+        return buf;
+    }
+    const int rounded = static_cast<int>(hz);
+    if (rounded < 1000) {
+        std::snprintf(buf, sizeof(buf), "%dHz", rounded);
+    } else if (rounded < 10000) {
+        // ⚠️ Divided in float, then widened: double can round across a display boundary, and this
+        // string is what the EQ's FREQ stepping stops on.
+        std::snprintf(buf, sizeof(buf), "%.1fkHz", static_cast<double>(hz / 1000.0f));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%dkHz", static_cast<int>(hz / 1000.0f + 0.5f));
+    }
+    return buf;
+}
+
+std::string format_ms(double ms) {
+    char buf[32];
+    if (ms <= 0.0)         std::snprintf(buf, sizeof(buf), "0ms");
+    else if (ms < 9.95)    std::snprintf(buf, sizeof(buf), "%.1fms", ms);
+    else if (ms < 999.5)   std::snprintf(buf, sizeof(buf), "%.0fms", ms);
+    else if (ms < 9995.0)  std::snprintf(buf, sizeof(buf), "%.2fs", ms / 1000.0);
+    else                   std::snprintf(buf, sizeof(buf), "%.1fs", ms / 1000.0);
+    return buf;
+}
+
+ValueUnit fx_value_unit(int effect_code) {
+    using namespace songcore;
+    switch (effect_code) {
+        case FX_CUT: case FX_LPF: case FX_HPF: case FX_BPF:    return ValueUnit::CUTOFF_HZ;
+        case FX_TIM:                                           return ValueUnit::DELAY_TIME;
+        case FX_LAT: case FX_KILL: case FX_PSL: case FX_LEG:   return ValueUnit::TICS;
+        case FX_TIC:                                           return ValueUnit::TABLE_TICS;
+        case FX_CHD:                                           return ValueUnit::CHORD;
+        default:                                               return ValueUnit::NONE;
+    }
+}
+
+namespace {
+
+// "16 TICKS AT 120 BPM": what a tic-counted value is measured against.
+std::string tics_at_tempo(int tics, int tempo) {
+    return std::string(std::to_string(tics) + (tics == 1 ? " TICK AT " : " TICKS AT ") +
+                   std::to_string(tempo) + " BPM");
+}
+
+ValueHint tics_hint(int tics, int tempo, int tics_per_step = songcore::TICS_PER_STEP) {
+    return {format_ms(songcore::tics_ms(tics, tempo, tics_per_step)), tics_at_tempo(tics, tempo)};
+}
+
+// The chord's name and its notes. In a PHRASE, made of this row's note in the track's scale as far as
+// this phrase shows it; in a TABLE, on C-4 moved by the row's transpose, as the table plays it —
+// unsnapped, and named as the note it lands on.
+ValueHint chord_hint(int value, const AppState& s) {
+    const songcore::Project& p = *s.project;
+    int root = 60;
+    const songcore::Scale* scale = nullptr;
+    int key = 0;
+    std::string where;   // the root's name, or why there is none
+    if (s.currentScreen == ScreenType::PHRASE) {
+        const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
+        const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.phraseCursor.row)];
+        if (!songcore::note_is_pitch(step.note)) {
+            where = std::string("NEEDS A NOTE ON THIS ROW");
+        } else {
+            const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.phraseCursor.row, step.instrument);
+            root  = ns.snap(songcore::note_to_midi(step.note));
+            scale = ns.scale;
+            key   = ns.key;
+        }
+    } else if (s.currentScreen == ScreenType::TABLE) {
+        const songcore::TableRow& r =
+            p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursor.row)];
+        // The row's transpose moves the note the chord is built on: 00-7F up, 80-FF down.
+        const int tsp = r.transpose < 0x80 ? r.transpose : r.transpose - 256;
+        root = std::max(0, std::min(127, 60 + tsp));
+    } else {
+        return {};
+    }
+
+    // The chord's words in the set case; the root note, put in front below, as it is.
+    std::string head  = std::string(std::string(songcore::chord_name(value)) + "  " +
+                                songcore::chord_layout_name(value));
+    std::string notes = where;
+    if (where.empty()) {
+        if (s.currentScreen == ScreenType::PHRASE) {
+            const char* name = songcore::NOTE_NAMES[songcore::scale_mod12(root)];
+            head = std::string(name, name[1] == '-' ? 1 : 2) + " " + head;
+        } else {
+            notes = std::string("ON ") + songcore::note_name(songcore::note_from_midi(root)) + ":";
+        }
+        int semis[songcore::CHORD_MAX_NOTES];
+        const int n = songcore::chord_notes(value, root, scale, key, semis);
+        for (int i = 0; i < n; ++i) {
+            if (!notes.empty()) notes += ' ';
+            notes += songcore::note_name(songcore::note_from_midi(root + semis[i]));
+        }
+    }
+    return {head, notes};
+}
+
+}  // namespace
+
+ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
+    if (!s.project) return {};
+    const songcore::Project& p     = *s.project;
+    const int                tempo = p.tempo;
+    const bool               old   = p.reverb.algo == kReverbAlgoOld;
+
+    switch (unit) {
+        case ValueUnit::NONE:
+            return {};
+
+        case ValueUnit::CUTOFF_HZ:
+            return {format_hz(cutoff_hz(value)), ""};
+
+        case ValueUnit::LFO_HZ: {
+            const float hz = songcore::lfo_hz(value);
+            return {format_hz(hz), std::string("ONE CYCLE ") + format_ms(1000.0 / hz)};
+        }
+
+        case ValueUnit::REVERB_PRE:
+            return {format_ms(reverb_pre_delay_seconds(value) * 1000.0), ""};
+
+        case ValueUnit::REVERB_DECAY:
+            if (old && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
+            return {format_ms((old ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
+                    std::string("TILL THE TAIL FADES")};
+
+        case ValueUnit::REVERB_DAMP:
+            return {format_hz(old ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
+
+        case ValueUnit::DELAY_TIME: {
+            const double ms = delay_time_seconds(value) * 1000.0;
+            if (value == 0) return {format_ms(ms), ""};
+            char steps[48];
+            std::snprintf(steps, sizeof(steps), "%.1f STEPS AT %d BPM",
+                          ms / songcore::tics_ms(songcore::TICS_PER_STEP, tempo), tempo);
+            return {format_ms(ms), std::string(steps)};
+        }
+
+        case ValueUnit::DELAY_TONE:
+            if (!delay_tone_filters(value)) return {std::string("NO FILTER"), ""};
+            return {format_hz(delay_tone_hz(value)), ""};
+
+        case ValueUnit::TICS:
+            return tics_hint(value, tempo);
+
+        case ValueUnit::TABLE_TICS:
+            // The four modes, as the table player reads them.
+            if (value == 0x00) return {std::string("ONE ROW PER NOTE"), ""};
+            if (value == 0xFC) return {std::string("ROW BY THE NOTE'S OCTAVE"), ""};
+            if (value == 0xFE) return {std::string("ROW BY THE NOTE"), ""};
+            if (value == 0xFF) return {format_ms(1000.0 / 200.0) + std::string(" A ROW"), std::string("200 ROWS A SECOND, ANY TEMPO")};
+            {
+                ValueHint h = tics_hint(value, tempo);
+                h.head += std::string(" A ROW");
+                return h;
+            }
+
+        case ValueUnit::GROOVE_TICS: {
+            if (value == 0) return {std::string("STEP SKIPPED"), ""};
+            const songcore::Groove& g = p.grooves[static_cast<size_t>(s.currentGroove)];
+            return tics_hint(value, tempo, songcore::groove_ticks_per_step(g));
+        }
+
+        case ValueUnit::MIDI_LENGTH:
+            if (value == 0) return {std::string("UNTIL THE NEXT NOTE"), ""};
+            return tics_hint(value, tempo);
+
+        case ValueUnit::CHORD:
+            return chord_hint(value, s);
+    }
+    return {};
+}
+
+}  // namespace pt::ui

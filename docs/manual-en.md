@@ -292,6 +292,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 | A + B | Delete / clear value |
 
 - **Key repeat is active:** hold the combo for ~400 ms and it starts repeating, speeding up to ~30/s. Both can be changed in `config.json` — see [section 27](#27-configuration-file-configjson).
+- While A is held on a frequency or a time, the visualizer strip spells it out: a filter's FREQ and `CUT`/`LPF`/`HPF`/`BPF` in Hz, an LFO's FREQ, envelope times, `LAT`, `KIL`, `PSL`, `LEG`, `TIC`, EXTERNAL LEN and a groove step in ms at the song's tempo, and the reverb's PRE, DCAY and DAMP and the delay's TIME, `TIM` and TONE. On a `CHD` it names the chord.
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
 - Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.

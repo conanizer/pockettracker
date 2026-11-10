@@ -163,7 +163,7 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
     // ⚠️ Armed, an empty cell still reports empty, so A lays down a neutral step (the edit fills
     // the group). Armed, both A axes move the pair one tick; raw ±16 is what OFF is for.
     if (s.quantize != 0) c.largeStep = c.smallStep;
-    return c;
+    return c.as(ValueUnit::GROOVE_TICS);
 }
 
 GrooveInputResult GrooveModule::handle_input(songcore::Groove& groove, const GrooveState& s,

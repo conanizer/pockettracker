@@ -85,7 +85,7 @@ private:
     void draw_right_bar(Canvas& c, const AppState& s) const;
     void draw_button_locks(Canvas& c, const AppState& s) const;
     void draw_status_line(Canvas& c, const AppState& s) const;
-    bool draw_chord_hint(Canvas& c, const AppState& s) const;
+    bool draw_value_hint(Canvas& c, const AppState& s) const;
     void draw_selection_clipboard(Canvas& c, const AppState& s) const;
 
     OscilloscopeModule    oscilloscope_;

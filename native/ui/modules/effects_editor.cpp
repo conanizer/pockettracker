@@ -21,20 +21,22 @@ constexpr int PRESET_SAVE_X = LABEL_X[1];
 constexpr int PRESET_LOAD_X = LABEL_X[1] + VALUE_GAP;
 
 
-// The plain 00..FF cells: the field each edits (one of the two sends') and its A+B value.
+// The plain 00..FF cells: the field each edits (one of the two sends'), its A+B value and what it is
+// measured in.
 struct ByteCell {
     int                          row;
     int songcore::ReverbCells::* reverb;
     int songcore::DelayCells::*  delay;
+    ValueUnit                    unit = ValueUnit::NONE;
 };
 constexpr ByteCell BYTE_CELLS[] = {
-    {EffectModule::ROW_REV_DECAY,  &songcore::ReverbCells::decay, nullptr},
+    {EffectModule::ROW_REV_DECAY,  &songcore::ReverbCells::decay, nullptr, ValueUnit::REVERB_DECAY},
     {EffectModule::ROW_REV_SIZE,   &songcore::ReverbCells::size,  nullptr},
-    {EffectModule::ROW_REV_DAMP,   &songcore::ReverbCells::damp,  nullptr},
-    {EffectModule::ROW_REV_PRE,    &songcore::ReverbCells::pre,   nullptr},
+    {EffectModule::ROW_REV_DAMP,   &songcore::ReverbCells::damp,  nullptr, ValueUnit::REVERB_DAMP},
+    {EffectModule::ROW_REV_PRE,    &songcore::ReverbCells::pre,   nullptr, ValueUnit::REVERB_PRE},
     {EffectModule::ROW_REV_WIDE,   &songcore::ReverbCells::width, nullptr},
     {EffectModule::ROW_REV_MOD,    &songcore::ReverbCells::mod,   nullptr},
-    {EffectModule::ROW_DLY_TONE,   nullptr, &songcore::DelayCells::tone},
+    {EffectModule::ROW_DLY_TONE,   nullptr, &songcore::DelayCells::tone, ValueUnit::DELAY_TONE},
     {EffectModule::ROW_DLY_WOBBLE, nullptr, &songcore::DelayCells::wobble},
     {EffectModule::ROW_DLY_FDBK,   nullptr, &songcore::DelayCells::feedback},
     {EffectModule::ROW_DLY_REV,    nullptr, &songcore::DelayCells::reverbSend},
@@ -273,7 +275,8 @@ void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Proje
 
 CursorContext EffectModule::cursor_context(const EffectState& s) const {
     const songcore::Project& p = s.project;
-    if (const ByteCell* b = byte_cell(s.cursorRow)) return cc::plain_byte(byte_field(p, *b), byte_default(*b));
+    if (const ByteCell* b = byte_cell(s.cursorRow))
+        return cc::plain_byte(byte_field(p, *b), byte_default(*b)).as(b->unit);
 
     switch (s.cursorRow) {
         case ROW_MASTER_TYPE: {
@@ -319,7 +322,7 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
         case ROW_DLY_TIME:
             // 12 subdivisions synced, a full byte free.
             return p.delay.sync ? cc::hex_byte(clamp(p.delay.time, 0, 11), 0, 11)
-                               : cc::plain_byte(p.delay.time, 0x40);
+                               : cc::plain_byte(p.delay.time, 0x40).as(ValueUnit::DELAY_TIME);
         case ROW_DLY_EQ:
             return cc::eq_slot(p.delayInputEq);
 

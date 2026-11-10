@@ -56,31 +56,33 @@ struct FieldCell {
     bool Instrument::*   flag;     // FLAG
     int                  def;
     songcore::MapDestId  knob;
+    ValueUnit            unit;     // what the scope strip's hint reads it as
 };
 
 constexpr FieldCell byte_cell(Cell c, const char* label, int Instrument::* f, int def,
-                              songcore::MapDestId knob = songcore::MapDestId::NONE) {
-    return {c, label, FieldKind::BYTE, f, nullptr, def, knob};
+                              songcore::MapDestId knob = songcore::MapDestId::NONE,
+                              ValueUnit unit = ValueUnit::NONE) {
+    return {c, label, FieldKind::BYTE, f, nullptr, def, knob, unit};
 }
 constexpr FieldCell nibble_cell(Cell c, const char* label, int Instrument::* f,
                                 songcore::MapDestId knob) {
-    return {c, label, FieldKind::NIBBLE, f, nullptr, 0, knob};
+    return {c, label, FieldKind::NIBBLE, f, nullptr, 0, knob, ValueUnit::NONE};
 }
 constexpr FieldCell flag_cell(Cell c, const char* label, bool Instrument::* f) {
-    return {c, label, FieldKind::FLAG, nullptr, f, 0, songcore::MapDestId::NONE};
+    return {c, label, FieldKind::FLAG, nullptr, f, 0, songcore::MapDestId::NONE, ValueUnit::NONE};
 }
 
 using D = songcore::MapDestId;
 constexpr FieldCell FIELD_CELLS[] = {
     byte_cell(Cell::DETUNE,      "DETUNE",   &Instrument::detune,       0x80, D::INS_DETUNE),
-    byte_cell(Cell::TIC,         "TIC",      &Instrument::tableTicRate, 0x06),
+    byte_cell(Cell::TIC,         "TIC",      &Instrument::tableTicRate, 0x06, D::NONE, ValueUnit::TABLE_TICS),
     // On EXTERNAL VOL and PAN are velocity and CC 10, the two that survive the cable.
     byte_cell(Cell::VOL,         "VOL",      &Instrument::volume,       0xFF, D::INS_VOL),
     byte_cell(Cell::PAN,         "PAN",      &Instrument::pan,          0x80, D::INS_PAN),
     flag_cell(Cell::TSP,         "TSP",      &Instrument::transposeEnabled),
     byte_cell(Cell::DRIVE,       "DRIVE",    &Instrument::drive,        0x00, D::INS_DRIVE),
     nibble_cell(Cell::CRUSH,     "CRUSH",    &Instrument::crush,              D::INS_CRUSH),
-    byte_cell(Cell::FREQ,        "FREQ",     &Instrument::filterCut,    0x00, D::INS_CUT),
+    byte_cell(Cell::FREQ,        "FREQ",     &Instrument::filterCut,    0x00, D::INS_CUT, ValueUnit::CUTOFF_HZ),
     nibble_cell(Cell::DOWNSAMPLE, "DWNSMPL", &Instrument::downsample,         D::INS_DWN),
     byte_cell(Cell::RES,         "RES",      &Instrument::filterRes,    0x00, D::INS_RES),
     byte_cell(Cell::REV,         "REV",      &Instrument::reverbSend,   0x00, D::INS_REV),
@@ -93,7 +95,7 @@ constexpr FieldCell FIELD_CELLS[] = {
     byte_cell(Cell::LOOP_END,    "LOOP END", &Instrument::loopEnd,      0xFF),
     flag_cell(Cell::REVERSE,     "REVERSE",  &Instrument::reverse),
     // LEN 00 is gate-to-next, a mode, not empty: A+B resets to it.
-    byte_cell(Cell::MIDI_LENGTH, "LEN",      &Instrument::midiLen,      0x00),
+    byte_cell(Cell::MIDI_LENGTH, "LEN",      &Instrument::midiLen,      0x00, D::NONE, ValueUnit::MIDI_LENGTH),
 };
 
 const FieldCell* field_cell(Cell cell) {
@@ -312,7 +314,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
 
     if (const FieldCell* f = field_cell(cell)) {
         switch (f->kind) {
-            case FieldKind::BYTE:   return cc::plain_byte(ins.*f->number, f->def);
+            case FieldKind::BYTE:   return cc::plain_byte(ins.*f->number, f->def).as(f->unit);
             case FieldKind::NIBBLE: return cc::hex_nibble(ins.*f->number, f->def);
             case FieldKind::FLAG:   return cc::toggle_binary(ins.*f->flag);
         }

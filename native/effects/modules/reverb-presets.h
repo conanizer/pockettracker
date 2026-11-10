@@ -92,6 +92,15 @@ inline float reverb_decay_feedback(int decayHex, int sizeHex = 0x60) {
 // DAMP → the tail's low-pass corner, 1.2 kHz to 20 kHz; below ~1 kHz it changes only the level.
 inline float reverb_damp_freq(int dampHex) { return 1200.0f * powf(16.667f, dampHex / 255.0f); }
 
+// The same two cells as the Dragonfly algorithms read them. FF is OLD's freeze and has no time there,
+// so it reads as FE; DAMP is held to the 1-16 kHz the plugins' own damping knobs span.
+inline double reverb_df_decay_seconds(int decayHex) { return reverb_decay_seconds(decayHex < 0xFE ? decayHex : 0xFE); }
+inline double reverb_df_damp_hz(int dampHex) { return fmin(fmax(double(reverb_damp_freq(dampHex)), 1000.0), 16000.0); }
+
+// PRE → the gap before the tail, 0 to 150 ms.
+inline constexpr float kReverbPreDelayMaxSeconds = 0.15f;
+inline float reverb_pre_delay_seconds(int preHex) { return (preHex / 255.0f) * kReverbPreDelayMaxSeconds; }
+
 // Wet gain that undoes DCAY's effect on level (the output scales with the feedback), so DCAY sets
 // the length and the REV fader the loudness. The exponent is a fit; `g` is capped because FF zeroes it.
 inline float reverb_decay_gain(int decayHex, int sizeHex = 0x60) {
