@@ -128,7 +128,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     // the sampler trigger does the reverse. Only after armNote said yes.
     for (int v = 0; v < MAX_VOICES; v++) {
         if (voices[v].trackId == t && voices[v].isActive && !voices[v].isFadingOut) {
-            voices[v].startFadeOut();
+            voices[v].stealFadeOut();
         }
     }
     sv.isReleasingOnly = false;
@@ -254,7 +254,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
     // Mono per track: whatever is playing here fades from the new note's own frame.
     for (int v = 0; haveSample && v < MAX_VOICES; v++) {
         if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-            voices[v].startFadeOut(DECLICK_SAMPLES, frame);
+            voices[v].stealFadeOut(frame);
         }
     }
 

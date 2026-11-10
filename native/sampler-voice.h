@@ -264,6 +264,9 @@ struct Voice : public IAudioVoice {
     // engine zeroes it after every block.
     int fadeStartFrame = 0;
 
+    // A looping sample: nothing ends it but its envelopes, an OFF or a KIL.
+    bool sustains() const { return loopMode != 0; }
+
     // Still holding its note — not fading, not released: what a LEG note can take over.
     bool holdsNote() const {
         if (!isActive || isFadingOut || loopReleasing) return false;
@@ -573,6 +576,13 @@ struct Voice : public IAudioVoice {
         isFadingOut = true;
     }
 
+    // Ends this voice because a new note started on its track (one note per track). A looping sample
+    // fades over 256 samples, anything else over 64.
+    // ⚠️ 64 is too short for a sound that is still at full level: it clicks when the new note starts quietly.
+    void stealFadeOut(int atFrame = 0) {
+        startFadeOut(sustains() ? KILL_FADE_SAMPLES : DECLICK_SAMPLES, atFrame);
+    }
+
     // ── IAudioVoice implementation ──────────────────────────────────────────
 
     bool active()      const override { return isActive; }
@@ -611,7 +621,7 @@ struct Voice : public IAudioVoice {
     // A live key was let go of. ⚠️ An OFF in every arm but one: with no release envelope a looping
     // voice still gets the kill fade (nothing else would end it), but a one-shot plays out.
     void keyRelease(int atFrame = 0) {
-        if (!releaseVolMods() && loopMode != 0) startFadeOut(KILL_FADE_SAMPLES, atFrame);
+        if (!releaseVolMods() && sustains()) startFadeOut(KILL_FADE_SAMPLES, atFrame);
     }
 
     void setVolume(float v) override { volume = v; params.setBase(PARAM_VOL, v); }
