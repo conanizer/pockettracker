@@ -246,7 +246,8 @@ INST.POOL still walk their pools.
 
 **Screens supported:** PHRASE, CHAIN, SONG, TABLE
 
-**Selection increment:** A+DPAD applies to all selected rows in active column.
+**Selection increment:** A+DPAD applies to the whole selection on SONG, and to the cursor's column on
+every selected row elsewhere. Empty cells stay empty unless every one of them is.
 
 **Fill (PHRASE):** L + a direction fills rows from the selection's top row — or, with no selection,
 from the cell under the cursor down to the end of the phrase.
