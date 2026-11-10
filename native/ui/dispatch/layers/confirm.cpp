@@ -1,5 +1,5 @@
-// The confirm dialog ("A=YES  B=NO"): A does the thing it asked about, B doesn't. COLLECT_EXISTS
-// moves between its answers with LEFT/RIGHT, and A takes the one under the cursor.
+// The confirm dialog ("A=YES  B=NO"): A does the thing it asked about, B doesn't. A question with
+// answers to pick moves between them with LEFT/RIGHT, and A takes the one under the cursor.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -15,13 +15,12 @@ GestureResult InputDispatcher::confirm_layer(Gesture g) {
         case Gesture::A: confirm_accept(); break;
         case Gesture::B: confirm_cancel(); break;
         case Gesture::DPAD_LEFT:
-        case Gesture::DPAD_RIGHT:
-            if (s_.confirm.kind == ConfirmDialogState::Kind::COLLECT_EXISTS) {
-                const int step = (g == Gesture::DPAD_LEFT) ? -1 : 1;
-                s_.confirm.arg = std::clamp(s_.confirm.arg + step, ConfirmDialogState::COLLECT_REPLACE,
-                                            ConfirmDialogState::COLLECT_CANCEL);
-            }
+        case Gesture::DPAD_RIGHT: {
+            const int n = static_cast<int>(confirm_choices(s_.confirm.kind).size());
+            if (n > 0)
+                s_.confirm.arg = std::clamp(s_.confirm.arg + (g == Gesture::DPAD_LEFT ? -1 : 1), 0, n - 1);
             break;
+        }
         // Silencing a note is not an edit: an audition the dialog opened over must not be left ringing.
         case Gesture::STOP_PREVIEW: return GestureResult::PASS;
         default: break;
@@ -31,8 +30,9 @@ GestureResult InputDispatcher::confirm_layer(Gesture g) {
 
 void InputDispatcher::confirm_accept() {
     const ConfirmDialogState::Kind kind = s_.confirm.kind;
-    // ⚠️ Read `arg` before `close()` resets it — the CHANGE_TYPE arm needs the direction.
-    const int argv = s_.confirm.arg;
+    // ⚠️ Read `arg` and `step` before `close()` resets them.
+    const int argv  = s_.confirm.arg;
+    const int stepv = s_.confirm.step;
     s_.confirm.close();   // FIRST — every arm below can re-open a dialog, and none should be stacked
 
     switch (kind) {
@@ -58,8 +58,8 @@ void InputDispatcher::confirm_accept() {
             break;
 
         case ConfirmDialogState::Kind::CHANGE_TYPE:
-            // The direction comes back out of the dialog, so A+LEFT still steps backwards after a yes.
-            toggle_instrument_type(argv);
+            if (argv != ConfirmDialogState::TYPE_CANCEL)
+                toggle_instrument_type(stepv, /*keepSettings=*/argv == ConfirmDialogState::TYPE_KEEP);
             break;
 
         case ConfirmDialogState::Kind::EXIT:

@@ -185,21 +185,35 @@ bool InputDispatcher::on_instrument_type_cell() const {
            InstrumentCell::TYPE;
 }
 
-/** A loaded slot goes through the confirm (a switch frees the source). ⚠️ Do not add a path around it. */
+/** Anything but an untouched slot goes through the dialog. ⚠️ Do not add a path around it. */
 void InputDispatcher::request_instrument_type_toggle(int delta) {
-    const Instrument& ins =
-        host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
-
-    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
-        s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE, delta);
+    if (instrument_is_untouched()) {
+        toggle_instrument_type(delta, /*keepSettings=*/false);   // nothing to lose
         return;
     }
-    toggle_instrument_type(delta);   // an empty slot has nothing to lose — switch it outright
+    s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE);
+    s_.confirm.step = delta;
+}
+
+/** No source, and nothing set but what an empty slot of this type has. The kept place does not count. */
+bool InputDispatcher::instrument_is_untouched() const {
+    const Instrument& ins = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
+    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) return false;
+
+    const auto settings = [&ins](Instrument x) {
+        songcore::keep_instrument_place(x, ins);
+        songcore::InstrumentPreset p;
+        p.instrument = std::move(x);
+        return songcore::serialize_instrument_preset(p);
+    };
+    Instrument blank;
+    blank.instrumentType = ins.instrumentType;
+    return settings(ins) == settings(blank);
 }
 
 /** Step TYPE, wrapping through this build's types. ⚠️ EXTERNAL is last, so a build hiding MIDI stops
  *  one short. */
-void InputDispatcher::toggle_instrument_type(int delta) {
+void InputDispatcher::toggle_instrument_type(int delta, bool keepSettings) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
@@ -214,7 +228,7 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     // The name it adopted from the source it is about to lose.
     const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
 
-    host_.set_instrument_type(s_.currentInstrument, next);
+    host_.set_instrument_type(s_.currentInstrument, next, keepSettings);
 
     // ⚠️ A type change drops the source, so a name ADOPTED from it must go too — otherwise the next
     // load reads it as a typed name and keeps it forever. A name the user typed survives.

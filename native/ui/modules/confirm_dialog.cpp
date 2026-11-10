@@ -32,7 +32,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::CLEAN_SEQ:   return "CLEAN SEQ?";
         case ConfirmDialogState::Kind::CLEAN_INST:  return "CLEAN INST?";
         case ConfirmDialogState::Kind::NEW_PROJECT: return "NEW PROJECT?";
-        case ConfirmDialogState::Kind::CHANGE_TYPE: return "CHANGE TYPE?";
+        case ConfirmDialogState::Kind::CHANGE_TYPE: return "KEEP SETTINGS?";
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
         case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";
         case ConfirmDialogState::Kind::COLLECT_EXISTS: return "ALREADY IN SONGS";
@@ -56,11 +56,17 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
 }
 
+std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind) {
+    if (kind == ConfirmDialogState::Kind::COLLECT_EXISTS) return {"REPLACE", "NEW COPY", "CANCEL"};
+    if (kind == ConfirmDialogState::Kind::CHANGE_TYPE)    return {"DISCARD", "KEEP", "CANCEL"};
+    return {};
+}
+
 namespace {
 
 // The question, and its answers as cursor cells in place of "A=YES  B=NO". As wide as its text needs.
 void draw_choice_box(Canvas& c, const std::string& question,
-                     std::initializer_list<const char*> answers, int chosen, const Theme& t) {
+                     const std::vector<const char*>& answers, int chosen, const Theme& t) {
     constexpr int GAP = 24;   // between answers
     constexpr int PAD = 24;   // either side of the widest line
 
@@ -92,10 +98,9 @@ void draw_choice_box(Canvas& c, const std::string& question,
 void draw_confirm_dialog(Canvas& c, const ConfirmDialogState& s, const Theme& t) {
     if (!s.is_open()) return;
     draw_modal_backdrop(c);
-    if (s.kind == ConfirmDialogState::Kind::COLLECT_EXISTS)
-        draw_choice_box(c, confirm_dialog_title(s.kind), {"REPLACE", "NEW COPY", "CANCEL"}, s.arg, t);
-    else
-        draw_confirm_box(c, confirm_dialog_title(s.kind), t);
+    const std::vector<const char*> answers = confirm_choices(s.kind);
+    if (answers.empty()) draw_confirm_box(c, confirm_dialog_title(s.kind), t);
+    else                 draw_choice_box(c, confirm_dialog_title(s.kind), answers, s.arg, t);
 }
 
 }  // namespace pt::ui

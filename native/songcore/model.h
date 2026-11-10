@@ -420,6 +420,20 @@ struct Instrument {
     explicit Instrument(int id_) : id(id_), name(default_instrument_name(id_)) {}
 };
 
+// What a type change that starts the sound afresh keeps: the name and the slot's place in the mix and
+// the song — level, pan, sends, EQ, table.
+inline void keep_instrument_place(Instrument& to, const Instrument& from) {
+    to.id           = from.id;
+    to.name         = from.name;
+    to.volume       = from.volume;
+    to.pan          = from.pan;
+    to.reverbSend   = from.reverbSend;
+    to.delaySend    = from.delaySend;
+    to.eqSlot       = from.eqSlot;
+    to.tableId      = from.tableId;
+    to.tableTicRate = from.tableTicRate;
+}
+
 // A note that picks a slice (C-4 = slice 0) rather than a pitch. `sliceOverride` = the step's SLI or -1.
 // ⚠️ Whatever moves notes musically must leave such a note alone, or a kit plays a different drum.
 inline bool note_selects_slice(const Instrument& ins, int sliceOverride) {

@@ -266,8 +266,8 @@ bool SongcoreHost::spectrum_for_source(int source, int instrId, int numBins, flo
     return true;
 }
 
-void SongcoreHost::set_instrument_type(int id, InstrumentType type) {
-    songcore::set_instrument_type(engine_, project_, id, type, routing_);
+void SongcoreHost::set_instrument_type(int id, InstrumentType type, bool keepSettings) {
+    songcore::set_instrument_type(engine_, project_, id, type, keepSettings, routing_);
     push_instrument(id);   // a no-op without an engine
 }
 

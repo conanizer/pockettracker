@@ -783,10 +783,11 @@ class InputDispatcher {
     // A on the pool's NAME column of an empty slot: browse for a source. Deferred the same way.
     bool pool_load_into_empty_slot(bool peek);
 
-    // A+DPAD on TYPE: switch at once on an empty slot, else ask first (the source is dropped). `delta`
-    // rides through the dialog in `ConfirmDialogState::arg`.
+    // A+DPAD on TYPE: an untouched slot switches at once and afresh; any other asks DISCARD / KEEP /
+    // CANCEL. `delta` rides through the dialog in `ConfirmDialogState::step`.
     void request_instrument_type_toggle(int delta);
-    void toggle_instrument_type(int delta);
+    void toggle_instrument_type(int delta, bool keepSettings);
+    bool instrument_is_untouched() const;
 
     bool on_instrument_type_cell() const;
 

@@ -241,7 +241,7 @@ class SongcoreHost {
     // ── the instrument operations (engine_setup.h) ──
     // ⚠️ Not guarded on `engine_`: they edit the document; the engine calls are guarded inside.
 
-    void set_instrument_type(int id, InstrumentType type);
+    void set_instrument_type(int id, InstrumentType type, bool keepSettings);
 
     void clear_instrument(int id);
 

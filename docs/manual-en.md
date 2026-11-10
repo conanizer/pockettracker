@@ -659,7 +659,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 
 | Parameter | Range | Description |
 |---|---|---|
-| TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and an EXTERNAL instrument has neither button. |
+| TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and an EXTERNAL instrument has neither button. Changing the type of an instrument with a sound file or settings of its own asks first: **DISCARD** starts the new type afresh, **KEEP** takes the settings along, **CANCEL** leaves it. Both keep the level, pan, sends, EQ and table. |
 | NAME | — | Instrument name. Press A to edit it on the keyboard overlay. |
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |

@@ -457,13 +457,21 @@ int collect_instrument_soundfont(Engine& engine, const Project& project, Routing
     return moved ? id : -1;
 }
 
-// Change an instrument's TYPE, freeing the source the old type owned.
+// Change an instrument's TYPE, freeing the source the old type owned. Without `keepSettings` the
+// sound starts afresh; `keep_instrument_place` says what stays.
 // ⚠️ `engine` may be null (headless tests): guard the engine calls, never the document.
 template <typename Engine>
 void set_instrument_type(Engine* engine, Project& project, int id, InstrumentType newType,
-                         Routing& routing) {
+                         bool keepSettings, Routing& routing) {
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return;
     Instrument& ins = project.instruments[id];
+    if (!keepSettings) {
+        Instrument fresh(id);
+        keep_instrument_place(fresh, ins);
+        fresh.sampleFilePath = ins.sampleFilePath;   // freed below, with the engine's copy
+        fresh.soundfontPath  = ins.soundfontPath;
+        ins = std::move(fresh);
+    }
     ins.instrumentType = newType;
 
     // ⚠️ Two independent tests, not an if/else: EXTERNAL owns neither source and must free both.
