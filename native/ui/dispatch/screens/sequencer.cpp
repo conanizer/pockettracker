@@ -580,11 +580,12 @@ void InputDispatcher::song_clone_chain() {
         if (ref != -1 && std::find(srcPhraseIds.begin(), srcPhraseIds.end(), ref) == srcPhraseIds.end())
             srcPhraseIds.push_back(ref);
 
+    // Each copy lands on the first free slot after its own original, wrapping like the chain.
     std::set<int>      reserved;
     std::map<int, int> phraseMap;
     bool               enoughPhrases = true;
     for (const int pid : srcPhraseIds) {
-        const int slot = first_free_phrase(p, 0, reserved);
+        const int slot = first_free_phrase(p, pid + 1, reserved);
         if (slot < 0) { enoughPhrases = false; break; }
         reserved.insert(slot);
         phraseMap[pid] = slot;
