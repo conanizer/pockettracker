@@ -37,8 +37,22 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, const GuideLines& lines, con
     for (int i = 0; i < 3; ++i) {
         const GuideLines::Line& line = lines.line[i];
         if (line.text.empty()) continue;
-        c.draw_text(line.text, x + TEXT_X, y + TEXT_TOP + i * ROW_HEIGHT, line.ink, CHAR_SPACING,
-                    FONT_SCALE);
+        const int textY = y + TEXT_TOP + i * ROW_HEIGHT;
+        if (line.keyInk == 0) {
+            c.draw_text(line.text, x + TEXT_X, textY, line.ink, CHAR_SPACING, FONT_SCALE);
+            continue;
+        }
+        // Word by word, so the buttons stand out from what they do.
+        const std::string& s = line.text;
+        int col = 0;
+        for (size_t i = 0; i < s.size();) {
+            if (s[i] == ' ') { ++i; ++col; continue; }
+            size_t end = i;
+            while (end < s.size() && s[end] != ' ') ++end;
+            col += draw_control_word(c, s.data() + i, static_cast<int>(end - i), x + TEXT_X + col * CHAR_W,
+                                     textY, line.ink, line.keyInk);
+            i = end;
+        }
     }
 }
 

@@ -164,7 +164,8 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 
 **Main editor** — the active screen (PHRASE, CHAIN, SONG, etc.).
 
-**Navigation map** — a miniature 5×5 grid in the top-right showing your position in the screen layout.
+**Navigation map** — a miniature 5×5 grid in the bottom-right showing your position in the screen layout.
+While R is held, the current screen's letter wears the cursor.
 
 **Status line** — brief messages (e.g., `SAVED`, `RESAMPLED TO INST 0C`) that auto-dismiss after a few seconds.
 

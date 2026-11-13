@@ -169,8 +169,8 @@ GuideLines guide_lines(const AppState& s) {
     g.line[0] = s.statusMessage.empty()
                     ? GuideLines::Line{title, t.textTitle}
                     : GuideLines::Line{s.statusMessage, s.statusSuccess ? t.vizWave : Argb{0xFFFF0000}};
-    g.line[1] = {keys[0], t.vizWave};
-    g.line[2] = {keys[1], t.vizWave};
+    g.line[1] = {keys[0], t.textValue, t.vizWave};
+    g.line[2] = {keys[1], t.textValue, t.vizWave};
     for (GuideLines::Line& line : g.line) line.text = Canvas::clip_text(line.text, HELP_MAX_CHARS);
     return g;
 }

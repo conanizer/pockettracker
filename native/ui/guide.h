@@ -17,6 +17,7 @@ struct GuideLines {
     struct Line {
         std::string text;   // at most HELP_MAX_CHARS glyphs
         Argb        ink = 0;
+        Argb        keyInk = 0;   // non-zero: a controls line, its buttons drawn in this
     };
     Line line[3];
 };

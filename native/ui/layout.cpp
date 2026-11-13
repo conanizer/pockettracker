@@ -502,6 +502,7 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     ns.currentScreen      = s.currentScreen;
     ns.sourceColumn       = s.previousColumn;
     ns.instrumentFromPool = s.instrumentFromPool;
+    ns.rHeld              = s.rHeld;
     ns.theme              = t;
     navigationMap_.draw(c, RIGHT_BAR_X, DESIGN_H - NavigationMapModule::HEIGHT - SCREEN_SPACER, ns);
 }

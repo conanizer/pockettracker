@@ -1,5 +1,7 @@
 #include "ui/modules/help_overlay.h"
 
+#include "ui/modules/help_panel.h"
+
 #include <string>
 
 namespace pt::ui {
@@ -49,9 +51,10 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
                 FONT_SCALE);
 
     help_overlay_flow(e, [&](int row, int col, const char* word, int bytes, bool isKey) {
-        c.draw_text(std::string(word, static_cast<size_t>(bytes)), row_x(row) + col * CHAR_W,
-                    boxY + row_dy(row) + TEXT_PADDING, isKey ? t.textEmpty : t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        const int wx = row_x(row) + col * CHAR_W;
+        const int wy = boxY + row_dy(row) + TEXT_PADDING;
+        if (isKey) draw_control_word(c, word, bytes, wx, wy, t.textValue, t.vizWave);
+        else c.draw_text(std::string(word, static_cast<size_t>(bytes)), wx, wy, t.textValue, CHAR_SPACING, FONT_SCALE);
     });
 
     constexpr const char* HINT = "ANY BUTTON CLOSES";

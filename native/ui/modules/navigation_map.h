@@ -14,6 +14,7 @@ struct NavigationMapState {
     // The column a shared screen was entered from.
     int  sourceColumn       = 2;
     bool instrumentFromPool = false;  // on INSTRUMENT, entered via the pool's R+RIGHT
+    bool rHeld              = false;  // R moves between these screens: the current one wears the cursor
     Theme theme = theme_classic();
 };
 
