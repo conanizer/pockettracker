@@ -84,7 +84,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     draw_cursor_cell(c, keyName, valueX, keyY, keyCursor, t.textValue, t);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
-    const int columnHeaderY = keyY + ROW_HEIGHT + 14;
+    const int columnHeaderY = keyY + 2 * ROW_HEIGHT;   // a blank row between, on the grid
     c.draw_text("EN", valueX, columnHeaderY, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
 
     // ── The twelve degrees ───────────────────────────────────────────────────────────────────────

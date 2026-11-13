@@ -63,7 +63,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
                 FONT_SCALE);
 
     // The column headers carry the cursor mark for its column.
-    const int headerY = y + TEXT_PADDING + ROW_HEIGHT + 14;
+    const int headerY = y + ROW_HEIGHT + 14;
     const int cursorCol = s.cursorColumn;
     const auto header = [&](const char* text, int column, MapCol lo, MapCol hi) {
         c.draw_text(text, colX(column), headerY + TEXT_PADDING,

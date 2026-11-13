@@ -11,11 +11,11 @@ using songcore::ModType;
 
 namespace {
 
-// The two slots of a pair, side by side.
-constexpr int NAME_X1 = 10;   // left slot: labels
-constexpr int VAL_X1  = 80;   // left slot: values
-constexpr int NAME_X2 = 320;  // right slot
-constexpr int VAL_X2  = 390;
+// The two slots of a pair, side by side. A value stands one blank slot past a 4-letter label.
+constexpr int NAME_X1 = 10;                     // left slot: labels
+constexpr int VAL_X1  = NAME_X1 + 5 * CHAR_W;   // left slot: values
+constexpr int NAME_X2 = 260;                    // right slot; its widest value must clear the right bar
+constexpr int VAL_X2  = NAME_X2 + 5 * CHAR_W;
 
 
 // "???" if the stored index is out of range.
@@ -97,8 +97,9 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
     c.draw_text("MOD " + hex2(ins.id), x + NAME_X1, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
                 FONT_SCALE);
 
-    // The second pair starts where the first ended: its depth depends on the types.
-    int pairTopY = y + TEXT_PADDING + ROW_HEIGHT + 6;
+    // The second pair starts where the first ended: its depth depends on the types. ⚠️ Two ADSR
+    // pairs fill the screen to its last pixel row.
+    int pairTopY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
 
     for (int pair = 0; pair < 2; ++pair) {
         const ModSlot& left  = ins.modSlots[static_cast<size_t>(pair * 2)];

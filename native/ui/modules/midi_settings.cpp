@@ -96,7 +96,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
 
     c.draw_text("MIDI", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
+    const int firstRowY = y + ROW_HEIGHT + 14;
     const auto rowY = [&](MidiRow row) { return firstRowY + midi_row_offset_y(row, ROW_HEIGHT); };
 
     const auto on_row = [&](MidiRow row) { return s.cursorRow == static_cast<int>(row); };

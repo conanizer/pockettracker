@@ -17,7 +17,8 @@ constexpr int FIRST_METER_X  = 10;
 constexpr int TRACK_METER_TOP = 24;
 constexpr int TRACK_METER_H   = 155;
 
-constexpr int MASTER_METER_H  = 200;   // taller than a track's; same top
+// Taller than a track's; same top. Sized so the master rows under it fall on the side panel's rows.
+constexpr int MASTER_METER_H  = 196;
 
 // The padding between a meter's outline and the text beside it; every bordering row is placed by
 // the two helpers below.
@@ -53,10 +54,10 @@ constexpr int BAR_SEP = METER_BORDER;
 constexpr int MASTER_X = FIRST_METER_X + 8 * METER_SPACING;   // 434
 
 // The master strip's four value rows, under its taller meter.
-constexpr int MROW0_Y = text_y_under(TRACK_METER_TOP, MASTER_METER_H);  // 231
-constexpr int MROW1_Y = MROW0_Y + ROW_HEIGHT;                           // 252
-constexpr int MROW2_Y = MROW1_Y + ROW_HEIGHT;                           // 273
-constexpr int MROW3_Y = MROW2_Y + ROW_HEIGHT;                           // 294
+constexpr int MROW0_Y = text_y_under(TRACK_METER_TOP, MASTER_METER_H);  // 227
+constexpr int MROW1_Y = MROW0_Y + ROW_HEIGHT;                           // 248
+constexpr int MROW2_Y = MROW1_Y + ROW_HEIGHT;                           // 269
+constexpr int MROW3_Y = MROW2_Y + ROW_HEIGHT;                           // 290
 
 constexpr int MSTR_LABEL_X = MASTER_X - 65;   // 369
 constexpr int MSTR_VALUE_X = MASTER_X + 5;    // 439

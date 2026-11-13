@@ -154,7 +154,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                     y + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
     }
 
-    const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
+    const int firstRowY = y + ROW_HEIGHT + 14;
 
     // ── Scroll: only debug builds overflow; derived from the cursor row each frame ───────────────
     const int viewportH = HEIGHT - (firstRowY - y);
@@ -234,12 +234,12 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::VISUALIZER, "TOP PANEL", names[static_cast<size_t>(index)]);
     }
 
-    // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped two glyphs short so a
+    // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped a glyph short so a
     // long name cannot push the ">" out.
     {
         constexpr int VALUE_COLS = (WIDTH - 10 - VAL1_X) / CHAR_W;
         param_row(SettingsRow::THEME, "THEME",
-                  Canvas::clip_text(s.themeName, VALUE_COLS - 2) + " >");
+                  Canvas::clip_text(s.themeName, VALUE_COLS - 1) + ">");
     }
 
     // TEMPLATE: a button row, two options, no value.

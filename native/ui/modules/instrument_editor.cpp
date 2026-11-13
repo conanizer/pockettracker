@@ -186,11 +186,11 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     const int nameX  = x + 10;
     const int valueX = x + 150;
 
-    int rowY = y + TEXT_PADDING;
+    c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
+                FONT_SCALE);
 
-    c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    rowY += ROW_HEIGHT + 14;
-
+    // Row tops, level with the side panel's.
+    int rowY = y + ROW_HEIGHT + 14;
     const int rows = instrument_row_count(type);
     for (int row = 0; row < rows; ++row, rowY += ROW_HEIGHT) {
         const InstrumentRow r     = instrument_row(type, row);
@@ -281,7 +281,7 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
         draw_cursor_cell(c, "LOAD", x + BTN_COL2, textY, c2, t.textValue, t);
     }
     if (instrument_cell_at(type, this_row, 3) == Cell::SOURCE_EDIT) {
-        draw_cursor_cell(c, "EDIT >", x + BTN_COL3, textY, c3, t.textValue, t);
+        draw_cursor_cell(c, "EDIT>", x + BTN_COL3, textY, c3, t.textValue, t);
     }
 }
 
