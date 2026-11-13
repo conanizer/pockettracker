@@ -19,12 +19,12 @@ struct ReverbPreset {
 // ALGO, the cells' `algo`. ⚠️ The number is what a project stores: append, never insert;
 // 0 is the original reverb, which an older project loads as. Each algorithm reads the same cells its
 // own way (dragonfly-reverb.cpp).
-inline constexpr int kReverbAlgoOld   = 0;   // ReverbSc — every cell
-inline constexpr int kReverbAlgoHall  = 1;   // Dragonfly Hall — every cell
-inline constexpr int kReverbAlgoRoom  = 2;   // Dragonfly Room — every cell
-inline constexpr int kReverbAlgoPlate = 3;   // Dragonfly Plate, "Nested" — SIZE and MOD read nothing
-inline constexpr int kReverbAlgoFoil  = 4;   // Dragonfly Plate, "Simple" — SIZE and MOD read nothing
-inline constexpr int kReverbAlgoCount = 5;
+inline constexpr int kReverbAlgoDefault = 0;   // ReverbSc — every cell
+inline constexpr int kReverbAlgoHall    = 1;   // Dragonfly Hall — every cell
+inline constexpr int kReverbAlgoRoom    = 2;   // Dragonfly Room — every cell
+inline constexpr int kReverbAlgoPlate   = 3;   // Dragonfly Plate, "Nested" — SIZE and MOD read nothing
+inline constexpr int kReverbAlgoFoil    = 4;   // Dragonfly Plate, "Simple" — SIZE and MOD read nothing
+inline constexpr int kReverbAlgoCount   = 5;
 
 // False for the two plates: no room to size, nothing that moves.
 inline constexpr bool reverb_algo_reads_size_and_mod(int algo) {
@@ -32,13 +32,13 @@ inline constexpr bool reverb_algo_reads_size_and_mod(int algo) {
 }
 
 inline const char* reverb_algo_name(int algo) {
-    static constexpr const char* kNames[kReverbAlgoCount] = {"OLD", "HALL", "ROOM", "PLATE", "FOIL"};
+    static constexpr const char* kNames[kReverbAlgoCount] = {"DEFAULT", "HALL", "ROOM", "PLATE", "FOIL"};
     return (algo >= 0 && algo < kReverbAlgoCount) ? kNames[algo] : kNames[0];
 }
 
 inline constexpr ReverbPreset kReverbPresets[] = {
     //               algo               size  decay damp  pre   width mod
-    {"DEFAULT",     {kReverbAlgoOld,    0x80, 0x80, 0x80, 0x20, 0xFF, 0x20}},
+    {"DEFAULT",     {kReverbAlgoDefault,    0x80, 0x80, 0x80, 0x20, 0xFF, 0x20}},
     {"ROOM",        {kReverbAlgoHall,   0x20, 0x10, 0x40, 0x20, 0x80, 0x00}},
     {"ROOM_GLUE",   {kReverbAlgoRoom,   0x20, 0x10, 0x30, 0x10, 0xA0, 0x30}},
     {"HALL_BRIGHT", {kReverbAlgoHall,   0xA0, 0x80, 0x80, 0x80, 0xFF, 0x20}},
@@ -92,7 +92,7 @@ inline float reverb_decay_feedback(int decayHex, int sizeHex = 0x60) {
 // DAMP → the tail's low-pass corner, 1.2 kHz to 20 kHz; below ~1 kHz it changes only the level.
 inline float reverb_damp_freq(int dampHex) { return 1200.0f * powf(16.667f, dampHex / 255.0f); }
 
-// The same two cells as the Dragonfly algorithms read them. FF is OLD's freeze and has no time there,
+// The same two cells as the Dragonfly algorithms read them. FF is DEFAULT's freeze and has no time there,
 // so it reads as FE; DAMP is held to the 1-16 kHz the plugins' own damping knobs span.
 inline double reverb_df_decay_seconds(int decayHex) { return reverb_decay_seconds(decayHex < 0xFE ? decayHex : 0xFE); }
 inline double reverb_df_damp_hz(int dampHex) { return fmin(fmax(double(reverb_damp_freq(dampHex)), 1000.0), 16000.0); }

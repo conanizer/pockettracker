@@ -123,7 +123,7 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
     if (!s.project) return {};
     const songcore::Project& p     = *s.project;
     const int                tempo = p.tempo;
-    const bool               old   = p.reverb.algo == kReverbAlgoOld;
+    const bool               dflt  = p.reverb.algo == kReverbAlgoDefault;
 
     switch (unit) {
         case ValueUnit::NONE:
@@ -141,12 +141,12 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
             return {format_ms(reverb_pre_delay_seconds(value) * 1000.0), ""};
 
         case ValueUnit::REVERB_DECAY:
-            if (old && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
-            return {format_ms((old ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
+            if (dflt && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
+            return {format_ms((dflt ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
                     std::string("TILL THE TAIL FADES")};
 
         case ValueUnit::REVERB_DAMP:
-            return {format_hz(old ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
+            return {format_hz(dflt ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
 
         case ValueUnit::DELAY_TIME: {
             const double ms = delay_time_seconds(value) * 1000.0;
