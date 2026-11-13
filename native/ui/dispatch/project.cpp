@@ -173,6 +173,9 @@ void InputDispatcher::resample_selection(const std::string& customBaseName) {
     if (r.ok) {
         const int instId = create_resampled_instrument(host_, outPath);
         if (instId >= 0) {
+            // Named after its file, as a browsed sample is: a pool of INSTxx is hard to find again.
+            host_.edit_project().instruments[static_cast<size_t>(instId)].name =
+                adopted_name(path_stem(outPath));
             char msg[40];
             // ASCII arrow: the 5×5 font has no →.
             std::snprintf(msg, sizeof(msg), "RESAMPLED -> INST %02X", instId);
