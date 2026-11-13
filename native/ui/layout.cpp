@@ -1,4 +1,6 @@
 #include "ui/layout.h"
+
+#include "ui/guide.h"
 #include "ui/value_hint.h"
 
 #include <algorithm>
@@ -44,8 +46,8 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
 
         if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
 
-        // Over the scope strip, unless help has it.
-        if (!s.helpOpen) {
+        // Over the visualizer. The guide carries both in its own lines.
+        if (!guide_up(s)) {
             draw_status_line(c, s);
             draw_selection_clipboard(c, s);
         }
@@ -54,26 +56,21 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
 }
 
 // ─── The file browser and sample editor: full screen, no furniture ───────────────────────────────
-// The sample editor's help goes in the waveform's place.
 void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     if (s.currentScreen == ScreenType::FILE_BROWSER) {
         fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
     } else {
         sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
-        // The TSTRETCH box dims the frame, so help is drawn after it.
         if (s.project) draw_stretch_editor(c, s.sampleEditor, s.project->tempo, t);
-        if (s.helpOpen)
-            helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
-                            SampleEditorModule::WAVEFORM_H);
     }
 }
 
-// ─── The oscilloscope strip, or the help panel in its place ──────────────────────────────────────
+// ─── The top panel: a visualizer, or the guide ───────────────────────────────────────────────────
 void TrackerLayout::draw_scope_strip(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
-    if (s.helpOpen) {
-        helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+    if (guide_up(s)) {
+        helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(s), t);
         return;
     }
 
@@ -374,8 +371,8 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
             case Overlay::FX_HELPER:  draw_fx_helper(c, s.fxHelper, t); break;
             case Overlay::SEND:
                 draw_send_editor(c, s.sendEditor, *s.project, t);
-                // Its cells have help; the panel goes over the strip the backdrop just dimmed.
-                if (s.helpOpen) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+                // Its cells have a guide of their own: again, over the strip the backdrop just dimmed.
+                if (guide_up(s)) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(s), t);
                 break;
             case Overlay::QWERTY:        qwerty_.draw(c, s.qwerty, t); break;
             case Overlay::RENDER_DIALOG:
@@ -401,7 +398,7 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
     // The SPECTRUM bars, likewise only while drawn.
     const VisualizerType vt = s.theme.visualizerType;
     if (vt != VisualizerType::SPECTRUM && vt != VisualizerType::SPECTRUM_PEAKS) return false;
-    return !full_screen_module(s) && !s.helpOpen && !oscilloscope_.bars_at_rest();
+    return !full_screen_module(s) && !oscilloscope_.bars_at_rest();
 }
 
 // ─── The status line, top-left of the scope strip ────────────────────────────────────────────────
@@ -422,10 +419,7 @@ void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
 
 // A held on a value whose cell names a unit: what it means, in two lines. False when there is none.
 bool TrackerLayout::draw_value_hint(Canvas& c, const AppState& s) const {
-    if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return false;
-    const CursorContext k = s.cellUnderCursor();
-    if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return false;
-    const ValueHint h = value_hint(k.unit, k.currentValue, s);
+    const ValueHint h = held_value_hint(s);
     if (h.head.empty()) return false;
     const int x = SIDE_SPACER + 10;
     c.draw_text(Canvas::clip_text(h.head, STATUS_MAX_CHARS), x, STRIP_ROW_1, s.theme.vizWave, CHAR_SPACING,

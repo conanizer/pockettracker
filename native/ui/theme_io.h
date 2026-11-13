@@ -24,6 +24,7 @@ inline const char* visualizer_serial_name(VisualizerType v) {
         case VisualizerType::OCTA_FULL:      return "OCTA_FULL";
         case VisualizerType::SPECTRUM:       return "SPECTRUM";
         case VisualizerType::SPECTRUM_PEAKS: return "SPECTRUM_PEAKS";
+        case VisualizerType::GUIDE:          return "GUIDE";
     }
     return "SCOPE";
 }
@@ -35,6 +36,7 @@ inline VisualizerType visualizer_from_serial_name(const std::string& s) {
     if (s == "OCTA_FULL")      return VisualizerType::OCTA_FULL;
     if (s == "SPECTRUM")       return VisualizerType::SPECTRUM;
     if (s == "SPECTRUM_PEAKS") return VisualizerType::SPECTRUM_PEAKS;
+    if (s == "GUIDE")          return VisualizerType::GUIDE;
     return VisualizerType::SCOPE;   // incl. "SCOPE", and any value another build might write
 }
 

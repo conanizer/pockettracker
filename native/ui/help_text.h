@@ -1,11 +1,13 @@
 #pragma once
 
-// Help on SELECT: the text of every topic (`help_topic.h`). No drawing.
+// The text of every help topic (`help_topic.h`): the full page SELECT opens, and the guide in the top
+// panel. No drawing.
 //
 // Every line is at most HELP_MAX_CHARS and uses only the marks the help guide allows: a
 // `static_assert` below checks both.
 
 #include <cstddef>
+#include <initializer_list>
 
 #include "ui/help_topic.h"
 
@@ -21,15 +23,18 @@ inline constexpr int HELP_TITLE_MAX_CHARS = 26;
 inline constexpr int HELP_BODY_LINES = 8;   // the full overlay's room for body…
 inline constexpr int HELP_KEY_LINES = 9;    // …and for controls, one gesture per line
 
-// Three summary lines, then an optional body and controls. The compact panel shows the summary; the
-// full overlay the title, the body (or `line2`/`line3` without one), then the controls.
-// The body replaces `line2`/`line3` there, so a gesture is not shown twice. A null line is a blank row.
+// `line1` names the cell. The full overlay shows it, then the body (or `line2`/`line3` where there is
+// none), then every control. The guide shows `line1` and two controls: `guide` where it is written,
+// else the first two of `keys` — so the two that matter most go first. On an empty cell it shows
+// `guideEmpty` where that is written: how to fill it. A null line is a blank row.
 struct HelpEntry {
     const char* line1 = "";
     const char* line2 = "";
     const char* line3 = "";
     const char* body[HELP_BODY_LINES] = {};
     const char* keys[HELP_KEY_LINES]  = {};
+    const char* guide[2]              = {};
+    const char* guideEmpty[2]         = {};
 };
 
 // Indexed by HelpTopic, one entry per member, in the enum order. The assert below counts them; only
@@ -291,7 +296,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "R+→ opens this chain",
       "L+B, then A clones the chain",
       "START plays from this row",
-      "R+B mutes, R+A solos the track"}},
+      "R+B mutes, R+A solos the track"},
+     {"A+←/→ changes by 1, A+↑/↓ by 16", "A+B clears it, R+→ opens it"},
+     {"A puts the last chain used", "Tap A twice for a new chain"}},
 
     // ── CHAIN ────────────────────────────────────────────────────────────────────────────────────
     /* CHAIN_PHRASE */
@@ -304,7 +311,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B clears the row",
       "R+→ opens this phrase",
       "L+B, then A clones the phrase",
-      "START plays this chain"}},
+      "START plays this chain"},
+     {"A+←/→ changes by 1, A+↑/↓ by 16", "A+B clears it, R+→ opens it"},
+     {"A puts the last phrase used", "Tap A twice for a new phrase"}},
     /* CHAIN_TRANSPOSE */
     {"TSP: transpose the phrase", "Moves every note up or down.", "00 leaves the pitch alone.",
      {"Counted in semitones. The phrase",
@@ -333,7 +342,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "of the note that is sounding",
       "Hold A to hear it (NOTE PREV)",
       "R+→ opens its instrument",
-      "L+D-PAD fills the rows below"}},
+      "L+D-PAD fills the rows below"},
+     {"A+←/→ one note, A+↑/↓ an octave", "A+B clears the note"},
+     {"A puts the last note used", "A+B puts OFF, which ends a note"}},
     /* PHRASE_VOLUME */
     {"VOL: how loud this step is", "How hard the note is played,", "from 00 silent to 7F full.",
      {"From 00 silent to 7F full. The",
@@ -367,7 +378,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B clears the command",
       "R+B switches it off and on",
       "L+R switches them all back on",
-      "L+D-PAD fills the rows below"}},
+      "L+D-PAD fills the rows below"},
+     {"A+↑/↓ opens the command list", "A+←/→ steps, A+B clears it"},
+     {"A puts the last command used", "A+↑/↓ opens the command list"}},
     /* PHRASE_FX_VALUE */
     {"FX VALUE: what it is set to", "What it does depends on the", "command to its left.",
      {"What the number does depends on",
@@ -412,7 +425,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A on --- repeats the last one",
       "A+B clears the command",
       "R+B switches it off and on",
-      "L+R switches them all back on"}},
+      "L+R switches them all back on"},
+     {"A+↑/↓ opens the command list", "A+←/→ steps, A+B clears it"},
+     {"A puts the last command used", "A+↑/↓ opens the command list"}},
     /* TABLE_FX_VALUE */
     {"FX VALUE: what it is set to", "What it does depends on the", "command to its left.",
      {"What the number does depends on",
@@ -835,7 +850,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A on -- adds an even step",
       "A+←/→ changes by 1, A+↑/↓ by 16",
       "A+B ends the list on this row",
-      "START plays the phrase"}},
+      "START plays the phrase"},
+     {"A+←/→ changes by 1, A+↑/↓ by 16", "A+B ends the list on this row"},
+     {"A adds an even step", ""}},
 
     // ── SCALE ────────────────────────────────────────────────────────────────────────────────────
     /* SCALE_NAME */
@@ -1197,13 +1214,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "holding it."},
      {"A+D-PAD turns it on or off"}},
     /* SET_VISUALIZER */
-    {"VISUALIZER: the top strip", "A wave, a wave per track, or", "a spectrum.",
-     {"SCOPE shows the sound as a wave,",
-      "FLAT shows nothing. OCTA and",
-      "OCTA.F show a small wave for",
-      "each track. SPECT and SPCT.P",
-      "show the spectrum."},
-     {"A+D-PAD picks the mode"}},
+    {"TOP PANEL: the strip at the top", "The sound as a picture, nothing,", "or hints about the cell.",
+     {"OCTA draws a small wave for each",
+      "track that plays, OCTA.F for all",
+      "eight, and SPCT.P the spectrum.",
+      "",
+      "EMPTY shows nothing.",
+      "",
+      "GUIDE names the cell you are on",
+      "and tells what the buttons do."},
+     {"A+D-PAD picks what it shows"}},
     /* SET_THEME */
     {"THEME: the colours", "A opens the theme editor,", "where every colour is a row.",
      {"The theme editor shows every",
@@ -1445,6 +1465,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "stay when you close the editor."},
      {"↑/↓ picks a row, ←/→ R, G or B",
       "A+←/→ changes by 1, A+↑/↓ by 16",
+      "L+A on a colour row keeps it",
+      "R+A on a colour row re-rolls it",
       "START plays, B closes"}},
     /* THEME_NAME */
     {"THEME: the built-in palettes", "A+D-PAD steps through them and", "sets every colour below.",
@@ -1541,7 +1563,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ changes by 1",
       "A+↑/↓ changes by 16"}},
     /* THEME_VIZ_BG */
-    {"VIZ BG: behind the top strip", "Also the background of this", "help panel.",
+    {"VIZ BG: behind the top panel", "The background of the top", "panel, the guide included.",
      {},
      {"←/→ picks R, G or B",
       "A+←/→ changes by 1",
@@ -1553,7 +1575,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ changes by 1",
       "A+↑/↓ changes by 16"}},
     /* THEME_VIZ_WAVE */
-    {"VIZ WAVE: the waveform", "The wave in the top strip,", "and the text of this help.",
+    {"VIZ WAVE: the waveform", "The wave in the top panel, and", "the text of the guide.",
      {},
      {"←/→ picks R, G or B",
       "A+←/→ changes by 1",
@@ -1941,14 +1963,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "are metal plates with no room,",
       "so they ignore SIZE and MOD."},
      {"A+D-PAD picks a reverb"}},
-    /* SET_HELP */
-    {"HELP: what SELECT shows", "SHORT uses the top strip, FULL", "a big page. OFF shows nothing.",
-     {"SHORT puts three lines in the",
-      "strip at the top. FULL opens a",
-      "page like this one, and any",
-      "button closes it. OFF shows",
-      "nothing."},
-     {"A+D-PAD picks OFF, SHORT, FULL"}},
+    /* SET_HELP */ {},
     /* GROOVE_NAME */
     {"NAME: which groove this is", "A+D-PAD steps through the", "built-in grooves.",
      {"Steps through the built-in",
@@ -2145,6 +2160,44 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+D-PAD picks one"}},
 };
 
+// ─── The guide's own lines (ui/guide.h) ──────────────────────────────────────────────────────────
+
+// A pair of control lines; the second may be empty.
+using GuidePair = const char* [2];
+
+// While R is held: the first line on a screen R+D-PAD can leave (the second lists where to)…
+inline constexpr const char* GUIDE_R_TITLE = "R+D-PAD: go to another screen";
+// …and both control lines where it cannot (SETTINGS, MIDI) and R does nothing else.
+inline constexpr GuidePair GUIDE_R_NOWHERE = {"R+D-PAD moves between screens,",
+                                              "but not from here: B goes back"};
+
+// While L is held, per screen. `clipboard`: the first line then tells what the clipboard holds.
+struct GuideScreenLines {
+    HelpTopic screen;
+    bool      clipboard;
+    GuidePair line;
+};
+inline constexpr GuideScreenLines GUIDE_L[] = {
+    {HelpTopic::SCREEN_SONG,   true,  {"L+B selects cells, L+A pastes", "L+B, then A clones the chain"}},
+    {HelpTopic::SCREEN_CHAIN,  true,  {"L+B selects cells, L+A pastes", "L+B, then A clones the phrase"}},
+    {HelpTopic::SCREEN_PHRASE, true,  {"L+B selects cells, L+A pastes", "L+D-PAD fills, L+B then A clones"}},
+    {HelpTopic::SCREEN_TABLE,  true,  {"L+B selects cells, L+A pastes", ""}},
+    {HelpTopic::SCREEN_THEME,  false, {"L+A on a colour row keeps it", "when ROLL makes new colours"}},
+};
+// …and on every other screen: where L does work.
+inline constexpr GuidePair GUIDE_L_ELSEWHERE = {"L copies and pastes on SONG,", "CHAIN, PHRASE and TABLE"};
+
+// While a selection is up, whatever is held.
+inline constexpr GuidePair GUIDE_SELECTION = {"D-PAD grows it, L+B widens it",
+                                              "B copies, L+A cuts, L+R leaves"};
+
+// SONG in LIVE mode, where START is not the transport: the first line, then the controls with
+// nothing held, with L held, and R's own line.
+inline constexpr const char* GUIDE_LIVE_TITLE = "LIVE: start chains by hand";
+inline constexpr GuidePair GUIDE_LIVE   = {"START queues this chain, L+START", "the row. R+START stops the track"};
+inline constexpr GuidePair GUIDE_LIVE_L = {"L+START queues the whole row", "L+B selects cells, L+A pastes"};
+inline constexpr const char* GUIDE_LIVE_R = "R+B mute, R+A solo, R+START stop";
+
 // ─── Line length and font, as compile errors — at runtime they fail silently ─────────────────────
 
 namespace detail {
@@ -2184,8 +2237,16 @@ constexpr bool help_table_ok() {
             if (!help_line_ok(b)) return false;
         for (const char* k : e.keys)
             if (!help_line_ok(k)) return false;
+        for (const char* g : e.guide)
+            if (!help_line_ok(g)) return false;
+        for (const char* g : e.guideEmpty)
+            if (!help_line_ok(g)) return false;
     }
-    return true;
+    for (const GuideScreenLines& l : GUIDE_L)
+        if (!help_line_ok(l.line[0]) || !help_line_ok(l.line[1])) return false;
+    for (const char* const* pair : {GUIDE_R_NOWHERE, GUIDE_L_ELSEWHERE, GUIDE_SELECTION, GUIDE_LIVE, GUIDE_LIVE_L})
+        if (!help_line_ok(pair[0]) || !help_line_ok(pair[1])) return false;
+    return help_line_ok(GUIDE_R_TITLE) && help_line_ok(GUIDE_LIVE_TITLE) && help_line_ok(GUIDE_LIVE_R);
 }
 
 }  // namespace detail

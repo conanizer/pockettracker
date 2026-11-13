@@ -77,9 +77,9 @@ This creates a consistent, learnable pattern where:
 ### Basic Actions
 - **A button** - Insert value on empty cell
 - **B button** - Cancel / back / copy a selection
-- **SELECT** - Shows help for the cell under the cursor: the visualizer strip at the top of the screen
-  becomes three lines describing it, and any other button puts it away. In the file browser it is the
-  modifier for the rename / delete / new-folder chords instead, and it cancels the keyboard overlay.
+- **SELECT** - Shows help for the cell under the cursor: a page over the screen, which any button
+  closes. In the file browser it is also the modifier for the rename / delete / new-folder chords, and
+  it cancels the keyboard overlay.
   ⚠️ SELECT does **not** delete — clearing a value is always **A + B**.
 - **START** - Play/Stop sequencer
 

@@ -37,7 +37,6 @@ constexpr Cell choice(int V::* n, const char* const (&names)[N]) {
 }
 
 constexpr const char* ABXY_NAMES[] = {"AUTO", "XBOX", "NINTENDO"};   // AbxyLayout
-constexpr const char* HELP_NAMES[] = {"OFF", "SHORT", "FULL"};       // HelpMode
 
 // The rows that are only value cells; a second cell sits behind its own little label. The rest of
 // the rows are code below.
@@ -59,7 +58,6 @@ constexpr TableRow ROWS[] = {
     {SettingsRow::NAV,       "NAV",       flag(&V::navSongRelative, "SONG", "POOL"), nullptr, NO_CELL},
     {SettingsRow::FOLDER,    "FOLDER",    flag(&V::rememberFolder, "REMEMBER", "REFRESH"), nullptr, NO_CELL},
     {SettingsRow::NOTE_PREV, "NOTE PREV", flag(&V::notePreviewEnabled), nullptr, NO_CELL},
-    {SettingsRow::HELP,      "HELP",      choice(&V::helpMode, HELP_NAMES), nullptr, NO_CELL},
     {SettingsRow::RESUME,    "RESUME",    flag(&V::autosaveResumeAuto, "AUTO", "ASK"), nullptr, NO_CELL},
     {SettingsRow::TRACE,     "TRACE",     flag(&V::traceEnabled), nullptr, NO_CELL},
 };
@@ -110,10 +108,30 @@ void cell_apply(const Cell& c, V& v, int value) {
 
 const std::vector<std::string>& SettingsModule::visualizer_names() {
     static const std::vector<std::string> names = {
-        "SCOPE", "FLAT", "OCTA", "OCTA.F", "SPECT", "SPCT.P",
+        "SCOPE", "EMPTY", "OCTA", "OCTA.F", "SPECT", "SPCT.P", "GUIDE",
     };
     return names;
 }
+
+const std::vector<VisualizerType>& SettingsModule::top_panel_cycle() {
+    static const std::vector<VisualizerType> cycle = {
+        VisualizerType::OCTA, VisualizerType::OCTA_FULL, VisualizerType::SPECTRUM_PEAKS,
+        VisualizerType::FLAT, VisualizerType::GUIDE,
+    };
+    return cycle;
+}
+
+namespace {
+
+// Where `v` sits in the row's cycle; -1 for one the row no longer offers.
+int top_panel_index(VisualizerType v) {
+    const std::vector<VisualizerType>& cycle = SettingsModule::top_panel_cycle();
+    for (size_t i = 0; i < cycle.size(); ++i)
+        if (cycle[i] == v) return static_cast<int>(i);
+    return -1;
+}
+
+}  // namespace
 
 // ─── Draw ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -213,7 +231,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         const std::vector<std::string>& names = visualizer_names();
         const int index = clamp(static_cast<int>(t.visualizerType), 0,
                                 static_cast<int>(names.size()) - 1);
-        param_row(SettingsRow::VISUALIZER, "VISUALIZER", names[static_cast<size_t>(index)]);
+        param_row(SettingsRow::VISUALIZER, "TOP PANEL", names[static_cast<size_t>(index)]);
     }
 
     // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped two glyphs short so a
@@ -274,9 +292,13 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             if (!v.oneHanded) return cc::read_only();
             return cc::enum_cycle(one_hand_hold_index(v.oneHandHoldMs), ONE_HAND_HOLD_COUNT);
 
-        case SettingsRow::VISUALIZER:
-            return cc::enum_cycle(static_cast<int>(s.theme.visualizerType),
-                                  static_cast<int>(visualizer_names().size()));
+        case SettingsRow::VISUALIZER: {
+            // A type the row no longer offers stands one past the end: a step either way wraps onto
+            // the cycle, forward to its first and back to its last.
+            const int count = static_cast<int>(top_panel_cycle().size());
+            const int index = top_panel_index(s.theme.visualizerType);
+            return index < 0 ? cc::enum_cycle(count, count + 1) : cc::enum_cycle(index, count);
+        }
 
         // A opens the theme editor, or triggers SAVE or CLEAR.
         case SettingsRow::THEME:
@@ -328,10 +350,12 @@ void SettingsModule::handle_input(SettingsValues& v, Theme& theme, const Platfor
                 v.oneHandHoldMs = ONE_HAND_HOLD_STEPS[index_in(value, ONE_HAND_HOLD_COUNT)];
             break;
 
-        case SettingsRow::VISUALIZER:
-            theme.visualizerType = static_cast<VisualizerType>(
-                index_in(value, static_cast<int>(visualizer_names().size())));
+        case SettingsRow::VISUALIZER: {
+            const std::vector<VisualizerType>& cycle = top_panel_cycle();
+            theme.visualizerType =
+                cycle[static_cast<size_t>(index_in(value, static_cast<int>(cycle.size())))];
             break;
+        }
 
         // A-only rows (THEME, TEMPLATE) are the dispatcher's.
         default: break;

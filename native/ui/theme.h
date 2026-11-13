@@ -13,7 +13,11 @@ namespace pt::ui {
 
 using Argb = uint32_t;  // 0xAARRGGBB
 
-enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS };
+// What the top panel shows (SETTINGS > TOP PANEL): a visualizer, nothing, or the guide — a line about
+// the cell under the cursor and two about its buttons (ui/guide.h).
+// ⚠️ The number is what settings.json stores: append, never reorder.
+enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS, GUIDE };
+inline constexpr int VISUALIZER_TYPE_COUNT = 7;
 
 struct Theme {
     std::string name = "CLASSIC";

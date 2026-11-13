@@ -253,6 +253,7 @@ void InputDispatcher::run_mapped_cc_dirty() {
 // ─── MIDI learn — hold R, turn a knob ────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_r_held(bool down) {
+    s_.rHeld       = down;
     rAloneSinceMs_ = down ? now_ms_ : -1;
     if (!down) host_.set_midi_learn_armed(false);   // at once; arming waits for `set_now`
 }

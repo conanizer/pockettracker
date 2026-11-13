@@ -30,20 +30,14 @@ void draw_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
 
 }  // namespace
 
-void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme& t,
-                           int box_height) const {
-    c.fill_rect(x, y, WIDTH, box_height, t.vizBackground);
+void HelpPanelModule::draw(Canvas& c, int x, int y, const GuideLines& lines, const Theme& t) const {
+    c.fill_rect(x, y, WIDTH, HEIGHT, t.vizBackground);
+    draw_mascot(c, x + MASCOT_MARGIN, y + MASCOT_MARGIN, mascot_ink(t, t.vizBackground));
 
-    // A taller box gets the surplus as air; clamped so a shorter one cannot push the mascot off.
-    const int top = y + (box_height > HEIGHT ? (box_height - HEIGHT) / 2 : 0);
-
-    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, mascot_ink(t, t.vizBackground));
-
-    const HelpEntry& e     = help_entry(topic);
-    const char*      lines[3] = {e.line1, e.line2, e.line3};
     for (int i = 0; i < 3; ++i) {
-        if (lines[i][0] == '\0') continue;
-        c.draw_text(lines[i], x + TEXT_X, top + TEXT_TOP + i * ROW_HEIGHT, t.vizWave, CHAR_SPACING,
+        const GuideLines::Line& line = lines.line[i];
+        if (line.text.empty()) continue;
+        c.draw_text(line.text, x + TEXT_X, y + TEXT_TOP + i * ROW_HEIGHT, line.ink, CHAR_SPACING,
                     FONT_SCALE);
     }
 }

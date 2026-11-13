@@ -20,7 +20,7 @@ enum class SettingsRow {
     KB_INSERT  = 5,    // BEFORE / AFTER — where a typed character lands
     CURSOR     = 6,    // REMEMBER / REFRESH
     NOTE_PREV  = 7,    // ON / OFF
-    VISUALIZER = 8,
+    VISUALIZER = 8,    // TOP PANEL: what the strip above the editor shows
     THEME      = 9,    // opens the theme editor
     TEMPLATE   = 10,   // SAVE / CLEAR
     RESUME     = 11,   // ASK / AUTO — what to do with a crash autosave
@@ -29,7 +29,7 @@ enum class SettingsRow {
     NAV        = 14,   // POOL / SONG — what B+D-pad walks
     ABXY       = 15,   // AUTO / XBOX / NINTENDO — which face button is A; only with a pad
     METRONOME  = 16,   // ON / OFF, + VOL
-    HELP       = 17,   // OFF / SHORT / FULL
+    HELP       = 17,   // retired: SELECT always opens the full help. The number stays taken
     AUDIO_OUT  = 18,   // the output device (Windows)
     ONE_HAND   = 19,   // ON / OFF, + MS (the hold time) — a modifier held alone and let go stays down (sticky_buttons.h)
 };
@@ -81,6 +81,7 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         case SettingsRow::AUDIO_OUT: return caps.audioOutputs;
         case SettingsRow::RESUME:    return caps.autosave;
         case SettingsRow::TRACE:     return caps.debug;
+        case SettingsRow::HELP:      return false;   // retired, on every platform
 
         // ⚠️ Never gate NAV: under NAV = SONG a phrase not in the song is reachable only by changing it.
         default: return true;

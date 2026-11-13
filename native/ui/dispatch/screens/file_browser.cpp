@@ -45,7 +45,7 @@ GestureResult InputDispatcher::file_browser_screen(Gesture g) {
         // An audition rings until stopped; scrolling must not stack them.
         case Gesture::STOP_PREVIEW: host_.stop_preview(); break;
 
-        // Help is the shared path's, which knows the panel has no room here.
+        // Help is the shared path's.
         case Gesture::SELECT: return GestureResult::PASS;
 
         // ⚠️ Not navigation: the browser is not a grid cell. Down a directory is A on a folder.

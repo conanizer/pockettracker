@@ -1,8 +1,8 @@
 #pragma once
 
 // The confirm dialog: a question and "A=YES  B=NO" on a dimmed screen. No cursor — the buttons are
-// the answer — except COLLECT_EXISTS's three, picked with LEFT/RIGHT. ⚠️ One state, not a flag per
-// question: every handler tests `is_open()`.
+// the answer — except where it offers answers to pick with LEFT/RIGHT (`confirm_choices`). ⚠️ One
+// state, not a flag per question: every handler tests `is_open()`.
 
 #include <string>
 #include <vector>
@@ -26,6 +26,9 @@ struct ConfirmDialogState {
         RECOVER,
 
         COLLECT_EXISTS,   // PROJECT → COLLECT, when Songs/<name> is already there
+
+        // Once per install, at boot: should the top panel show the guide? B is NO.
+        TOP_PANEL,
     };
 
     // COLLECT_EXISTS's answers, left to right; `arg` is the one under the cursor.
@@ -37,6 +40,10 @@ struct ConfirmDialogState {
     static constexpr int TYPE_DISCARD = 0;   // the sound starts afresh
     static constexpr int TYPE_KEEP    = 1;
     static constexpr int TYPE_CANCEL  = 2;
+
+    // TOP_PANEL's answers. YES sets SETTINGS > TOP PANEL to GUIDE; NO leaves it as it is.
+    static constexpr int TOP_PANEL_YES = 0;
+    static constexpr int TOP_PANEL_NO  = 1;
 
     Kind kind = Kind::NONE;
 

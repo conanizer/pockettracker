@@ -192,4 +192,11 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
     return {};
 }
 
+ValueHint held_value_hint(const AppState& s) {
+    if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return {};
+    const CursorContext k = s.cellUnderCursor();
+    if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return {};
+    return value_hint(k.unit, k.currentValue, s);
+}
+
 }  // namespace pt::ui

@@ -1,7 +1,7 @@
 #pragma once
 
-// Paints a frame: the oscilloscope strip, the current screen's module, and the right bar.
-//     y =  6.. 75   oscilloscope        (620 × 70, at x = 10)
+// Paints a frame: the top panel, the current screen's module, and the right bar.
+//     y =  6.. 75   the top panel       (620 × 70, at x = 10: a visualizer, or the guide)
 //     y = 82..473   the editor module   (510 × 392, at x = 10)
 //     x = 515..     the right bar       (115 wide: BPM, note monitor, navigation map)
 // Editors are clipped at x = 509, or their row backgrounds would run into the right bar.
@@ -57,11 +57,10 @@ static_assert(POOL_RAM_VALUE_X + InstrumentPoolModule::RAM_MAX_CHARS * CHAR_W - 
 static_assert(SIDE_SPACER + InstrumentPoolModule::RAM_LABEL_X + 3 * CHAR_W <= POOL_RAM_VALUE_X,
               "INST.POOL's RAM label overlaps its value");
 
-// The sample editor's waveform hosts the help panel; neither knows the other.
-static_assert(SampleEditorModule::WAVEFORM_W == HelpPanelModule::WIDTH,
-              "the waveform panel is no longer the width the help panel draws");
-static_assert(SampleEditorModule::WAVEFORM_H >= HelpPanelModule::HEIGHT,
-              "the waveform panel is too short to hold the help panel");
+// The guide stands exactly where the visualizer does.
+static_assert(HelpPanelModule::WIDTH == OscilloscopeModule::WIDTH &&
+                  HelpPanelModule::HEIGHT == OscilloscopeModule::HEIGHT,
+              "the guide's panel is not the size of the visualizer it replaces");
 
 class TrackerLayout {
 public:
@@ -78,7 +77,7 @@ private:
     void draw_frame(Canvas& c, const AppState& state);
 
     void draw_full_screen(Canvas& c, const AppState& s);   // the browser or the sample editor
-    void draw_scope_strip(Canvas& c, const AppState& s);
+    void draw_scope_strip(Canvas& c, const AppState& s);   // the top panel
     void draw_editor(Canvas& c, const AppState& s);        // or the EQ / theme editor in its place
     void draw_overlays(Canvas& c, const AppState& s);
     void draw_placeholder(Canvas& c, int x, int y, ScreenType screen, const Theme& t) const;
@@ -89,7 +88,7 @@ private:
     void draw_selection_clipboard(Canvas& c, const AppState& s) const;
 
     OscilloscopeModule    oscilloscope_;
-    HelpPanelModule       helpPanel_;    // instead of the oscilloscope while help is up
+    HelpPanelModule       helpPanel_;    // instead of the oscilloscope when TOP PANEL is GUIDE
     HelpOverlayModule     helpOverlay_;
     PhraseEditorModule    phraseEditor_;
     ChainEditorModule     chainEditor_;

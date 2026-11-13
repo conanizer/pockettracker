@@ -19,6 +19,10 @@ struct ValueHint {
 
 ValueHint value_hint(ValueUnit unit, int value, const AppState& s);
 
+// The hint for the cell under the cursor while A is held on it; empty with A up, in a selection, on an
+// empty cell and on one that names no unit.
+ValueHint held_value_hint(const AppState& s);
+
 // The unit an FX command's value is in; NONE for the rest.
 ValueUnit fx_value_unit(int effect_code);
 

@@ -311,6 +311,12 @@ struct AppState {
     // the status line's place (value_hint.h).
     bool aHeld = false;
 
+    // B, L and R are down, as the mapper sees them (a ONE HAND lock counts): the guide then tells what
+    // that button does here (ui/guide.h).
+    bool bHeld = false;
+    bool lHeld = false;
+    bool rHeld = false;
+
     // The cell under the cursor, as its screen describes it to the edit handlers; none while a layer
     // is up. Set by the dispatcher, asked at draw time so it is never a frame behind. Empty = no hints.
     std::function<CursorContext()> cellUnderCursor;
@@ -323,12 +329,7 @@ struct AppState {
     std::string statusMessage{};
     bool        statusSuccess = true;
 
-    // The compact help panel (HELP = SHORT): covers only the strip and swallows no button, so the text
-    // follows the cursor.
-    bool helpOpen = false;
-
-    // The full help overlay (HELP = FULL): a layer, dims the frame, consumes its closing press. Never
-    // both flags at once.
+    // The full help overlay, raised by SELECT: a layer, dims the frame, consumes its closing press.
     bool helpFull = false;
 
     // EXPORT renders synchronously with the audio paused; the frame is repainted from the progress.

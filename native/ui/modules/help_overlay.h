@@ -4,7 +4,7 @@
 // text flowing from beside the figure into the full width under it, and ANY BUTTON CLOSES at the foot.
 // The box is as tall as its topic (derived from `help_overlay_flow`, never shorter than the mascot).
 // ⚠️ It covers cells, so the press that closes it is consumed (button_mapper.h) — or it would edit a
-// cell the user could not see. The compact panel is the opposite case.
+// cell the user could not see.
 //
 // The text is re-wrapped, not drawn line for line (26 columns beside the mascot, 35 under it):
 //   • line1 is the title up to its colon; what follows the colon is a paragraph of its own;

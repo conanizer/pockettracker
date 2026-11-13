@@ -47,8 +47,10 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
     // A press with R held is a combo (R+DPAD switches screens): that hold never learns.
     else if (e.action == ButtonAction::PRESSED && m.r) d.on_r_combo_press();
-    // A's state for what is drawn while it is held. Above every early return too.
+    // A's, B's and L's state for what is drawn while they are held. Above every early return too.
     if (e.button == Button::A) d.on_a_held(e.action == ButtonAction::PRESSED);
+    if (e.button == Button::B) d.on_b_held(e.action == ButtonAction::PRESSED);
+    if (e.button == Button::L_SHIFT) d.on_l_held(e.action == ButtonAction::PRESSED);
 
     // ── Release ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
@@ -98,11 +100,8 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
         return {};
     }
 
-    // Any press but SELECT puts the compact panel away and falls through — it swallows nothing.
-    if (e.button != Button::SELECT) {
-        ms.selectPressedAlone = false;   // SELECT is a modifier here, not a tap
-        d.on_help_dismiss();
-    }
+    // Any press but its own makes SELECT a modifier, not the tap that asks for help.
+    if (e.button != Button::SELECT) ms.selectPressedAlone = false;
 
     // Any plain press silences an audition; START and A-combos (edits stay audible) do not.
     if (e.button != Button::START && !m.a) d.on_stop_preview();
