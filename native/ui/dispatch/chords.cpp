@@ -464,8 +464,13 @@ void InputDispatcher::on_select_r() { route(Gesture::SELECT_R); }
 
 void InputDispatcher::on_l_b_a() {
     if (route(Gesture::L_B_A)) return;
-    // Below the sites: on every screen the chord ends the selection, after any clone.
+    // Where nothing clones, the chord still ends the selection.
     s_.selection.exit();
+}
+
+// L held, B, then A with B let go: the same clone where the screen has one, else the L+A it always was.
+void InputDispatcher::on_l_b_then_a() {
+    if (!route(Gesture::L_B_A)) on_l_a();
 }
 
 }  // namespace pt::ui

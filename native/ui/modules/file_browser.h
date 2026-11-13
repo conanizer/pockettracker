@@ -99,9 +99,6 @@ struct FileBrowserState {
     std::vector<std::string> fileClipboard;
     bool                     fileClipboardIsCut = false;
 
-    // The last L+B tap, for "tap again to select all".
-    long long lastSelectTapMs = 0;
-
     const BrowserItem* item_at(int index) const {
         if (index < 0 || index >= static_cast<int>(items.size())) return nullptr;
         return &items[static_cast<size_t>(index)];

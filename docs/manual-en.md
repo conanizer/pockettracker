@@ -350,13 +350,15 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 
 | Input | Action |
 |---|---|
-| L + B | Enter selection mode (tap again to cycle: CELL → ROW → SCREEN) |
+| L + B | Enter selection mode. Each **L + B** after that widens it: CELL → ROW → SCREEN, then CELL again |
 | B (in selection) | Copy selection, exit selection mode |
 | L + A (in selection) | Cut (copy + clear), exit selection mode |
 | L + A (outside selection) | Paste clipboard at cursor |
 | A + B (in selection) | Delete selection (no clipboard), exit selection mode |
-| L + B + A | Deep-clone the chain or phrase under the cursor into the next free slot |
+| L + B, then A | Deep-clone the chain or phrase under the cursor into the next free slot. Hold **L**, press **B**, then **A** — B may be let go before the A, L may not |
 | L + R | Leave selection mode (nothing copied) |
+
+> On SONG, CHAIN and PHRASE, an **A** pressed while **L** is still held from the **L + B** clones. To cut a selection you have only just made, let go of **L** and press **L + A**.
 
 **Selection increment:** In selection mode, **A + D-pad** steps the selected values — LEFT/RIGHT by one,
 UP/DOWN by the large step. On SONG that is the whole selection; on CHAIN, PHRASE and TABLE, the cursor's
@@ -2665,8 +2667,7 @@ modifiers.
 
 **Moving and copying several files** works like the tracker's own copy/paste:
 
-1. **L + B** starts a selection at the cursor. Tap **L + B** again inside half a second to select
-   everything in the folder.
+1. **L + B** starts a selection at the cursor. **L + B** again selects everything in the folder.
 2. **D-pad UP/DOWN** stretches the selection.
 3. **B** copies the selected files, or **L + A** cuts them. Either way the selection ends and the
    status line reports how many files are on the clipboard.
@@ -3113,13 +3114,13 @@ exports and sample-editor saves keep their own folders.
 
 | Input | Action |
 |---|---|
-| L + B | Enter selection mode (tap again: CELL → ROW → SCREEN) |
+| L + B | Enter selection mode (again: CELL → ROW → SCREEN) |
 | B *(in selection)* | Copy, exit selection |
 | L + A *(in selection)* | Cut (copy + clear), exit selection |
 | L + A *(outside selection)* | Paste at cursor |
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
 | A + D-pad *(in selection)* | Step the selected values (SONG: all; elsewhere the cursor's column); empty cells stay empty |
-| L + B + A | Deep-clone the chain / phrase under the cursor |
+| L + B, then A | Deep-clone the chain / phrase under the cursor (L held throughout) |
 | L + D-pad | Fill rows from one cell (PHRASE) |
 | L + R *(in selection)* | Leave selection mode; the copy buffer survives |
 | L + R *(outside selection)* | Clear the copy buffer |
@@ -3153,7 +3154,7 @@ exports and sample-editor saves keep their own folders.
 | SELECT + A | Rename |
 | SELECT + B | Delete, or delete the selection (asks first) |
 | SELECT + R | New folder |
-| L + B | Start a file selection (tap again: select all) |
+| L + B | Start a file selection (again: select all) |
 | B *(in selection)* | Copy the selected files |
 | L + A *(in selection)* | Cut them |
 | L + A *(outside selection)* | Paste them here |

@@ -1,7 +1,7 @@
 #pragma once
 
 // A selection: L+B taps grow it CELL → ROW → SCREEN, the D-pad drags its edge. Column 0 (the gutter)
-// is never covered. The clock is a parameter.
+// is never covered.
 
 #include <algorithm>
 #include <string>
@@ -34,9 +34,6 @@ struct SelectionBounds {
     }
 };
 
-// Two L+B taps closer than this widen the scope; further apart, the second leaves.
-inline constexpr long long MULTI_TAP_WINDOW = 500;
-
 // `active` gates every read.
 struct Selection {
     SelectionScope scope  = SelectionScope::NONE;
@@ -44,24 +41,15 @@ struct Selection {
     CursorPosition start{};
     CursorPosition end{};
 
-    // L+B: select the cell, widen within the window (CELL → ROW → SCREEN → CELL), leave after it.
-    // `lastTapMs` is stamped on every path, so a slow double-tap re-opens on CELL.
-    void handle_select_b(long long now_ms, int cursorRow, int cursorColumn, int maxColumn, int maxRow) {
-        if (scope == SelectionScope::NONE) {
-            scope = SelectionScope::CELL;
-            init_for_scope(cursorRow, cursorColumn, maxColumn, maxRow);
-        } else if (now_ms - lastTapMs < MULTI_TAP_WINDOW) {
-            switch (scope) {
-                case SelectionScope::CELL:   scope = SelectionScope::ROW;    break;
-                case SelectionScope::ROW:    scope = SelectionScope::SCREEN; break;
-                case SelectionScope::SCREEN: scope = SelectionScope::CELL;   break;
-                default:                     scope = SelectionScope::CELL;   break;
-            }
-            init_for_scope(cursorRow, cursorColumn, maxColumn, maxRow);
-        } else {
-            exit();
+    // L+B: select the cell; every L+B after that widens it, CELL → ROW → SCREEN and round to CELL.
+    // It never leaves the selection — B, L+A, A+B and L+R do.
+    void handle_select_b(int cursorRow, int cursorColumn, int maxColumn, int maxRow) {
+        switch (scope) {
+            case SelectionScope::CELL: scope = SelectionScope::ROW;    break;
+            case SelectionScope::ROW:  scope = SelectionScope::SCREEN; break;
+            default:                   scope = SelectionScope::CELL;   break;   // from none, and round
         }
-        lastTapMs = now_ms;
+        init_for_scope(cursorRow, cursorColumn, maxColumn, maxRow);
     }
 
     // Drag the active edge, clamped; the anchor never moves.
@@ -104,8 +92,6 @@ struct Selection {
     }
 
   private:
-    long long lastTapMs = 0;
-
     void init_for_scope(int cursorRow, int cursorColumn, int maxColumn, int maxRow) {
         switch (scope) {
             case SelectionScope::CELL:

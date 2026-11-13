@@ -88,7 +88,7 @@ inline constexpr uint16_t button_bit(Button b) { return static_cast<uint16_t>(1u
 enum class ChordEnd : uint8_t {
     KEEP,      // repeated (any with the D-pad, MUTE/SOLO, audition), or no chord at all
     ASK_L_R,   // L+R: let go once it has nothing left to clear
-    WIDEN,     // L+B: L waits out the widen window
+    WIDEN,     // L+B: L stays down a moment for the B that widens or the A that clones
     LET_GO,    // done in one go: delete, cut, paste, clone, LIVE's queue and stop, the browser's chords
 };
 struct Chord {

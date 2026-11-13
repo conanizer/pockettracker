@@ -116,7 +116,8 @@ GestureResult InputDispatcher::song_screen(Gesture g) {
 
         case Gesture::L_B_A:
             song_clone_chain();
-            return GestureResult::PASS;   // the body ends the selection
+            s_.selection.exit();
+            return GestureResult::TAKEN;
 
         // LIVE mode's three launches. Outside LIVE, START is the transport and the two chords do nothing.
         case Gesture::START:
@@ -165,7 +166,8 @@ GestureResult InputDispatcher::chain_screen(Gesture g) {
 
         case Gesture::L_B_A:
             chain_clone_phrase();
-            return GestureResult::PASS;   // the body ends the selection
+            s_.selection.exit();
+            return GestureResult::TAKEN;
 
         default:
             return grid_clipboard(g, &InputDispatcher::chain_clip, s_.currentChain);
@@ -214,7 +216,8 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
 
         case Gesture::L_B_A:
             phrase_clone();
-            return GestureResult::PASS;   // the body ends the selection
+            s_.selection.exit();
+            return GestureResult::TAKEN;
 
         case Gesture::L_UP:
         case Gesture::L_DOWN:
@@ -276,7 +279,7 @@ GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteT
     const CursorPosition& at = s_.*gc.cursor;
     switch (g) {
         case Gesture::L_B:
-            s_.selection.handle_select_b(now_ms_, at.row, at.column, gc.maxColumn, gc.maxRow);
+            s_.selection.handle_select_b(at.row, at.column, gc.maxColumn, gc.maxRow);
             return GestureResult::TAKEN;
 
         // Inside a selection: B copies, A+B deletes, L+A cuts — and each ends it. Outside one, B does

@@ -462,25 +462,23 @@ void InputDispatcher::browser_load(const BrowserItem& item) {
 // ─── The multi-select and the file clipboard ─────────────────────────────────────────────────────
 
 void InputDispatcher::browser_select() {
-    // ⚠️ A plain anchor..cursor range (a second tap within 500 ms selects all) — not the grids' widener.
+    // ⚠️ A plain anchor..cursor range — not the grids' widener. L+B again takes every file; once more
+    // starts a fresh range at the cursor.
     FileBrowserState& b = s_.fileBrowser;
     if (b.mode != BrowserMode::NORMAL) return;
+
+    const int first = b.first_selectable();   // past the ".." row
+    const int last  = std::max(static_cast<int>(b.items.size()) - 1, first);
 
     if (!b.selectionMode) {
         b.selectionMode   = true;
         b.selectionAnchor = b.cursor;
-        b.lastSelectTapMs = now_ms_;
-    } else if (now_ms_ - b.lastSelectTapMs <= 500) {
-        // Tap again inside the window: select everything, skipping the ".." row.
-        const int first = b.first_selectable();
-        const int last  = std::max(static_cast<int>(b.items.size()) - 1, first);
+    } else if (b.selectionAnchor != first || b.cursor != last) {
         b.selectionAnchor = first;
         b.cursor          = last;
         b.scroll          = std::max(0, last - BROWSER_VISIBLE_ROWS + 1);
-        b.lastSelectTapMs = 0;   // …so a third tap re-anchors rather than re-selecting all
     } else {
-        b.selectionAnchor = b.cursor;   // the window lapsed — start a fresh range here
-        b.lastSelectTapMs = now_ms_;
+        b.selectionAnchor = b.cursor;
     }
 }
 

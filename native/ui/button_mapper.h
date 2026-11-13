@@ -27,10 +27,13 @@ struct MapperState {
     // SELECT went down alone; any other press clears it, so help fires on release only for a bare tap
     // (on the file browser SELECT is a modifier).
     bool selectPressedAlone = false;
+
+    // L+B was pressed in this hold of L, and nothing but B since: the next A clones.
+    bool lThenB = false;
 };
 
-// ⚠️ The order of the checks is the specification: most specific first, each arm returns. L+B+A before
-// L+A, A+B before A, R+A / R+B before A and B.
+// ⚠️ The order of the checks is the specification: most specific first, each arm returns. The clone
+// (L, B, then A) before L+A, A+B before A, R+A / R+B before A and B.
 // ⚠️ Modifiers come from the event, never a poll: a frame's events arrive at once, and a poll would
 // see the frame's end (B-then-A in one frame would delete on the B press).
 template <class Dispatcher>
@@ -49,6 +52,7 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
 
     // ── Release ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
+        if (e.button == Button::L_SHIFT) ms.lThenB = false;
         // The mute/solo chord ends on a release and consumes it (an armed A must not reach
         // `on_a_released()`). On the A/B release, `m.r` is "is R still down?".
         if (ms.rComboArmed) {
@@ -103,6 +107,10 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
     // Any plain press silences an audition; START and A-combos (edits stay audible) do not.
     if (e.button != Button::START && !m.a) d.on_stop_preview();
 
+    // L, B, then A is one gesture: any press but another B ends it, the A it was waiting for included.
+    const bool lThenB = ms.lThenB;
+    if (e.button != Button::B) ms.lThenB = false;
+
     // ── A + … ────────────────────────────────────────────────────────────────────────────────────
     if (m.a && !m.l && !m.r) {
         switch (e.button) {
@@ -152,17 +160,18 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
         }
     }
 
-    // ── L+B+A: clone — before L+A, which would paste ─────────────────────────────────────────────
-    if (m.l && m.b && !m.r && e.button == Button::A) {
-        d.on_l_b_a();
-        return one_go(L | B);
+    // ── L, B, then A: clone — before L+A, which would cut ────────────────────────────────────────
+    // B may still be down (the three-button chord) or let go, as long as L never was.
+    if (m.l && !m.r && e.button == Button::A) {
+        if (m.b)    { d.on_l_b_a();      return one_go(L | B); }
+        if (lThenB) { d.on_l_b_then_a(); return one_go(L); }
     }
 
     // ── L + … : selection and the clipboard ──────────────────────────────────────────────────────
     if (m.l && !m.r) {
         switch (e.button) {
             case Button::A:     d.on_l_a(); return one_go(L);   // cut (in a selection) / paste (outside one)
-            case Button::B:     d.on_l_b(); return {ChordEnd::WIDEN, L};   // enter selection, then widen it
+            case Button::B:     d.on_l_b(); ms.lThenB = true; return {ChordEnd::WIDEN, L};   // enter selection, then widen it
             case Button::START: d.on_l_start(); return one_go(L);   // LIVE's row queue; never play/stop
             default: break;
         }

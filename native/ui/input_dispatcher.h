@@ -162,7 +162,7 @@ class InputDispatcher {
     void on_r_combo_revert();
 
     // ── L: selection and the clipboard ───────────────────────────────────────────────────────────
-    // L+B: enter selection, then widen it CELL → ROW → SCREEN on each tap inside 500 ms.
+    // L+B: enter selection, then widen it CELL → ROW → SCREEN on each press.
     void on_l_b();
     // L+A: cut inside a selection, paste outside one.
     void on_l_a();
@@ -173,6 +173,9 @@ class InputDispatcher {
     bool l_r_has_more();
     // L+B+A: deep-clone the chain/phrase under the cursor into free slots.
     void on_l_b_a();
+    // The same played one button at a time: L held, B, then A with B already let go. Where the screen
+    // has no clone it is L+A.
+    void on_l_b_then_a();
     // L + a direction: fill rows from the selection's top row (or the cursor's cell on PHRASE).
     // RIGHT walks the spacings, LEFT the even spreads, UP rolls random values, DOWN scatters.
     void on_l_up();
