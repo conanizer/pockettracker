@@ -125,12 +125,14 @@ WAV exports are saved to:
 <home>/Renders/
 ```
 
-Resampled instruments and CHOP exports are saved to:
+Resampled instruments are saved to:
 
 ```
 <home>/Samples/Resampled/
-<home>/Samples/Chops/{name}/
 ```
+
+The SAMPLE EDITOR's SAVE and CHOP write beside the file the sample came from (into `Samples/` for a
+sample with no file).
 
 On Linux, Windows, PortMaster handhelds and the Miyoo Mini there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same ten sub-folders live in it.
 
@@ -968,7 +970,7 @@ neighbours — its number follows its position — and deleting one renumbers th
 > Anything that changes the sample's **length** — CROP, CUT, DUPL, PASTE, DEL, UNDO, a resizing SYNC —
 > clears every slice boundary, including the ones the file arrived with.
 
-**CHOP** — exports each slice as a separate WAV file to `Samples/Chops/{name}/`.
+**CHOP** — exports each slice as a separate WAV file to a `{name}/` folder beside the sample's file.
 
 > [!TIP]
 > After using CHOP, you need to manually load the individual slice files onto new instrument slots. There is no automatic batch-load — but using numbered filenames (which CHOP generates) makes the process fast.
@@ -2767,7 +2769,7 @@ Output: `<home>/Samples/Resampled/Resample_0001.wav`, …
 
 When slice markers are set in the SAMPLE EDITOR, use CHOP to export each slice as a separate WAV:
 
-Output: `<home>/Samples/Chops/{instrument_name}/`
+Output: a `{instrument_name}/` folder beside the sample's file (in `<home>/Samples/` for a sample with no file).
 
 > [!NOTE]
 > CHOP exports do not automatically load into instrument slots. After chopping, open the INSTRUMENT screen and use the file browser to load the individual slice files onto new instruments.

@@ -1753,11 +1753,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A open file browser",
       "A there: load, B: back"}},
     /* SE_SAVE */
-    {"SAVE AS A NEW FILE", "Into the Samples folder. It", "never replaces an old file.",
-     {"A WAV in the Samples folder,",
-      "named after NAME. If that name",
-      "is taken, it offers another - it",
-      "never replaces a file."},
+    {"SAVE AS A NEW FILE", "Beside the file the sample", "came from. Never replaces one.",
+     {"A WAV in the folder the sample",
+      "came from - the Samples folder",
+      "if it has no file. Named after",
+      "NAME. If that name is taken, it",
+      "offers another - it never",
+      "replaces a file."},
      {"A save, asks for a new name"}},
     /* SE_OVERWRITE */
     {"OVERWRITE FILE", "Writes over the WAV this", "sample came from.",
@@ -1770,10 +1772,11 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "instrument plays that one."},
      {"A overwrite, no undo"}},
     /* SE_CHOP */
-    {"CHOP INTO FILES", "Writes them into a Chops", "folder named after the sample.",
+    {"CHOP INTO FILES", "Writes them into a folder", "named after the sample.",
      {"Saves each slice as its own WAV,",
       "in a folder named after this",
-      "sample inside Samples/Chops."},
+      "sample, made beside the file it",
+      "came from."},
      {"A chop"}},
     /* SET_METRONOME */
     {"METRONOME", "One click every four steps,", "while playing. Never exported.",

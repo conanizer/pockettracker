@@ -155,9 +155,9 @@ void InputDispatcher::sample_editor_confirm() {
                     break;
                 }
 
-                case 1: {   // SAVE — to <name>.wav, or ask for a name if that one is taken
+                case 1: {   // SAVE — to <name>.wav beside the source, or ask for a name if that one is taken
                     const std::string base = se.sampleName.empty() ? "SAMPLE" : se.sampleName;
-                    const std::string dir  = fs_.samples_directory();
+                    const std::string dir  = sampleSession_.home_folder();
                     if (!sampleSession_.bake_pending_pitch()) break;
 
                     // Taken: suggest the next free name — SAVE is not OVERWRITE.
