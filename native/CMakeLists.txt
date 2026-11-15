@@ -60,6 +60,32 @@ else()
     target_compile_options(faad2 PRIVATE -w)
 endif()
 
+# ─── Vendored Braids (the MACRO instrument's oscillators) ───────────────────────────────────────
+# Mutable Instruments Braids' macro-oscillator and the four stmlib files it uses. Integer DSP with
+# tables: no hardware code. See vendor/braids/PT-VENDORING.md, which also lists the two local changes.
+add_library(braids STATIC
+        vendor/braids/braids/macro_oscillator.cc
+        vendor/braids/braids/analog_oscillator.cc
+        vendor/braids/braids/digital_oscillator.cc
+        vendor/braids/braids/resources.cc
+        vendor/braids/stmlib/utils/random.cc
+)
+target_include_directories(braids PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/braids)
+# TEST is stmlib's own switch for a build off the module: without it stmlib.h places functions in a
+# linker section only the firmware has.
+target_compile_definitions(braids PRIVATE TEST)
+# Vendored: warnings off, and its own target, so no -ffast-math.
+if(MSVC)
+    # ⚠️ dsp.h uses __attribute__; pt-msvc.h defines it away, included first by /FI.
+    target_compile_options(braids PRIVATE /w "/FI${CMAKE_CURRENT_SOURCE_DIR}/vendor/braids/pt-msvc.h")
+else()
+    # ⚠️ -fwrapv: the code multiplies and shifts 32-bit signed values past their range and relies on
+    # them wrapping, as they do on the module. Without the flag that is undefined, and an optimizer may
+    # assume it never happens.
+    # -O2 in Debug, as for the engine: these run on the audio thread.
+    target_compile_options(braids PRIVATE -w -fwrapv $<IF:$<CONFIG:Debug>,-O2,-O3>)
+endif()
+
 # ─── Vendored SDL2, as the APK's shared library ────────────────────────────────────────────────
 # F-Droid builds offline and from source, so Android carries SDL in-tree; the desktop shells take the
 # system's, and this copy where there is none (shell/CMakeLists.txt). ⚠️ Two versions on purpose: the
