@@ -269,6 +269,7 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     switch (type) {
         case InstrumentType::SOUNDFONT: typeText = "soundfont"; break;
         case InstrumentType::EXTERNAL:  typeText = "external";  break;
+        case InstrumentType::MACRO:     typeText = "macro";     break;
         case InstrumentType::SAMPLER:   break;
     }
 

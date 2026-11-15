@@ -102,12 +102,30 @@ inline constexpr InstrumentRow EXTERNAL[] = {
     {K::SPACER},                                         // 13
     {K::SINGLE, C::MIDI_BEND},                           // 14
 };
+
+// No source to load: the sound is the model. The chain, the sends and the EQ as on a sampler.
+inline constexpr InstrumentRow MACRO[] = {
+    {K::NAME, C::TYPE},                                  //  0
+    {K::SINGLE, C::NAME},                                //  1
+    {K::TRIPLE, C::ROOT, C::DETUNE, C::TIC},             //  2
+    {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
+    {K::SPACER},                                         //  4
+    {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
+    {K::SPACER},                                         //  6
+    {K::DUAL, C::DRIVE, C::FILTER},                      //  7
+    {K::DUAL, C::CRUSH, C::FREQ},                        //  8
+    {K::DUAL, C::DOWNSAMPLE, C::RES},                    //  9
+    {K::SPACER},                                         // 10
+    {K::DUAL, C::REV, C::DEL},                           // 11
+    {K::SINGLE, C::EQ},                                  // 12
+};
 }  // namespace instrument_rows
 
 inline int instrument_row_count(songcore::InstrumentType type) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return static_cast<int>(std::size(instrument_rows::SOUNDFONT));
         case songcore::InstrumentType::EXTERNAL:  return static_cast<int>(std::size(instrument_rows::EXTERNAL));
+        case songcore::InstrumentType::MACRO:     return static_cast<int>(std::size(instrument_rows::MACRO));
         case songcore::InstrumentType::SAMPLER:   break;
     }
     return static_cast<int>(std::size(instrument_rows::SAMPLER));
@@ -120,6 +138,7 @@ inline InstrumentRow instrument_row(songcore::InstrumentType type, int row) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return instrument_rows::SOUNDFONT[r];
         case songcore::InstrumentType::EXTERNAL:  return instrument_rows::EXTERNAL[r];
+        case songcore::InstrumentType::MACRO:     return instrument_rows::MACRO[r];
         case songcore::InstrumentType::SAMPLER:   break;
     }
     return instrument_rows::SAMPLER[r];

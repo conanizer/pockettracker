@@ -60,9 +60,10 @@ enum class ModDest {
     NONE, VOLUME, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES,
     SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH
 };
-// SAMPLER and SOUNDFONT play in the engine; EXTERNAL leaves as MIDI (midi_out.h).
-// ⚠️ EXTERNAL STAYS LAST: a build without MIDI hides it by cycling over one type fewer.
-enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL };
+// SAMPLER and SOUNDFONT play in the engine; EXTERNAL leaves as MIDI (midi_out.h); MACRO is the vendored
+// macro-oscillator (vendor/braids), one of MACRO_MODEL_NAMES.
+// ⚠️ Append only. A build without MIDI hides EXTERNAL: `step_instrument_type` passes over it.
+enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL, MACRO };
 
 // Each enum's names, in enum order: index 0 also answers for an out-of-range value.
 inline constexpr const char* MOD_TYPE_NAMES[] = {"NONE", "AHD", "ADSR", "LFO", "DRUM", "TRIG",
@@ -70,7 +71,16 @@ inline constexpr const char* MOD_TYPE_NAMES[] = {"NONE", "AHD", "ADSR", "LFO", "
 inline constexpr const char* MOD_DEST_NAMES[] = {"NONE", "VOLUME", "PAN", "PITCH", "FINE_PITCH",
                                                  "FILTER_CUTOFF", "FILTER_RES", "SAMPLE_START",
                                                  "MOD_AMT", "MOD_RATE", "MOD_BOTH"};
-inline constexpr const char* INSTRUMENT_TYPE_NAMES[] = {"SAMPLER", "SOUNDFONT", "EXTERNAL"};
+inline constexpr const char* INSTRUMENT_TYPE_NAMES[] = {"SAMPLER", "SOUNDFONT", "EXTERNAL", "MACRO"};
+
+// A MACRO instrument's models. A file stores the name; the index is the oscillator's own shape number
+// (braids/settings.h, MacroOscillatorShape), so the order is upstream's.
+// ⚠️ A name is never changed or reused: a saved instrument finds its model by it.
+inline constexpr const char* MACRO_MODEL_NAMES[] = {
+    "CSAW", "MRPH", "SWSQ", "FOLD", "BUZZ", "SUBQ", "SUBS", "SYNQ", "SYNS", "SAW3", "SQR3", "TRI3",
+    "SIN3", "RING", "SWRM", "COMB", "TOY*", "ZLPF", "ZPKF", "ZBPF", "ZHPF", "VOSM", "VOWL", "VFOF",
+    "HARM", "FM",   "FBFM", "WTFM", "PLUK", "BOWD", "BLOW", "FLUT", "BELL", "DRUM", "KICK", "CYMB",
+    "SNAR", "WTBL", "WMAP", "WLIN", "WTX4", "NOIS", "TWNQ", "CLKN", "CLOU", "PRTC", "QPSK"};
 
 // ⚠️ Display names, not the serialised ones above — swapping them widens the UI or breaks the file.
 // DRUM plays as AHD and TRIG as ADSR; TRK has no engine implementation yet; SCL's `amount` IS the
@@ -103,8 +113,15 @@ inline bool instrument_type_from_name(const std::string& s, InstrumentType& out)
     return enum_from_name(s, INSTRUMENT_TYPE_NAMES, out);
 }
 
-// What the TYPE and DEST cells cycle over.
+// An index into MACRO_MODEL_NAMES and back. An unknown name leaves `out` alone, as the enums do.
+inline const char* macro_model_name(int model) { return enum_name(model, MACRO_MODEL_NAMES); }
+inline bool macro_model_from_name(const std::string& s, int& out) {
+    return enum_from_name(s, MACRO_MODEL_NAMES, out);
+}
+
+// What the TYPE and DEST cells cycle over, and how many models a MACRO instrument has.
 inline constexpr int INSTRUMENT_TYPE_COUNT = static_cast<int>(std::size(INSTRUMENT_TYPE_NAMES));
+inline constexpr int MACRO_MODEL_COUNT     = static_cast<int>(std::size(MACRO_MODEL_NAMES));
 inline constexpr int MOD_DEST_COUNT        = static_cast<int>(std::size(MOD_DEST_NAMES));
 static_assert(std::size(MOD_TYPE_DISPLAY_NAMES) == std::size(MOD_TYPE_NAMES) &&
               std::size(MOD_DEST_DISPLAY_NAMES) == std::size(MOD_DEST_NAMES), "a name per entry");
@@ -416,6 +433,12 @@ struct Instrument {
     int midiBendRange = MIDI_BEND_RANGE_DEFAULT;
     std::vector<MidiCcSlot> midiCC = std::vector<MidiCcSlot>(MIDI_CC_SLOTS);
 
+    // ── MACRO only ──
+    int macroModel  = 0;      // an index into MACRO_MODEL_NAMES
+    // 00-FF each; what the two shape depends on the model.
+    int macroTimbre = 0x80;
+    int macroColor  = 0x80;
+
     Instrument() = default;
     explicit Instrument(int id_) : id(id_), name(default_instrument_name(id_)) {}
 };
@@ -432,6 +455,18 @@ inline void keep_instrument_place(Instrument& to, const Instrument& from) {
     to.eqSlot       = from.eqSlot;
     to.tableId      = from.tableId;
     to.tableTicRate = from.tableTicRate;
+}
+
+// The type `delta` steps on from `from`, wrapping. `external` false passes over EXTERNAL (a build
+// without MIDI), also when stepping away from a slot that already is one.
+inline InstrumentType step_instrument_type(InstrumentType from, int delta, bool external) {
+    const int step = delta < 0 ? -1 : +1;
+    int       next = static_cast<int>(from);
+    if (next < 0 || next >= INSTRUMENT_TYPE_COUNT) next = 0;
+    do {
+        next = (next + step + INSTRUMENT_TYPE_COUNT) % INSTRUMENT_TYPE_COUNT;
+    } while (!external && static_cast<InstrumentType>(next) == InstrumentType::EXTERNAL);
+    return static_cast<InstrumentType>(next);
 }
 
 // A note that picks a slice (C-4 = slice 0) rather than a pitch. `sliceOverride` = the step's SLI or -1.
