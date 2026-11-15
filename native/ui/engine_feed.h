@@ -156,10 +156,10 @@ private:
 
     // The MIXER's meters, only on MIXER (the read takes a mutex the audio callback takes).
     // ⚠️ Every 60 ms is a contract: the module's peak hold counts polls via `peaksVersion`.
-    // Stopped, this decays the peaks by hand — one step per 60 ms slot passed, so a fall interrupted by
-    // leaving the screen is finished on return.
+    // Off the screen nothing ages, so a return catches up by the 60 ms slots that passed — two clocks:
+    // ⚠️ the markers age by ALL the time away, playing or not (nothing else moves them); the levels
+    // decay only for the time stopped (playback keeps them current itself).
     void poll_peaks(AudioEngine& engine, AppState& state, long long now_ms) {
-        // On every screen: playback elsewhere wrote the peaks itself and must not replay as decay.
         if (state.isPlaying) peaksLiveMs_ = now_ms;
 
         if (state.currentScreen != ScreenType::MIXER) return;
@@ -167,21 +167,22 @@ private:
         const bool first = (peaksPolledMs_ == 0);
         if (!first && now_ms - peaksPolledMs_ < PEAK_POLL_MS) return;
 
-        // How long the meters have stood still.
-        const long long stale = now_ms - std::max(peaksPolledMs_, peaksLiveMs_);
-        peaksPolledMs_        = now_ms;
-
-        long long steps = (first || stale < PEAK_POLL_MS) ? 1 : stale / PEAK_POLL_MS;
-        if (steps > PEAK_CATCHUP_SLOTS) steps = PEAK_CATCHUP_SLOTS;
+        const auto slots = [&](long long since) {
+            const long long n = (first || now_ms - since < PEAK_POLL_MS) ? 1 : (now_ms - since) / PEAK_POLL_MS;
+            return std::min(n, PEAK_CATCHUP_SLOTS);
+        };
+        const long long held    = slots(peaksPolledMs_);
+        const long long stopped = slots(std::max(peaksPolledMs_, peaksLiveMs_));
+        peaksPolledMs_          = now_ms;
 
         if (!state.isPlaying) {
-            for (long long i = 0; i < steps; ++i) engine.decayPeaks();
+            for (long long i = 0; i < stopped; ++i) engine.decayPeaks();
             engine.decayWaveform();
         }
         engine.getTrackPeaks(state.trackPeaks);
         engine.getMasterPeaks(state.masterPeaks);
         engine.getSendPeaks(state.sendPeaks);
-        state.peaksVersion += static_cast<unsigned>(steps);
+        state.peaksVersion += static_cast<unsigned>(held);
     }
 
     // The PRESET row's count, index and name. Memoised — finding the index walks the preset list.
