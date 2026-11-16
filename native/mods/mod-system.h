@@ -24,12 +24,15 @@ enum ParamId {
     PARAM_SAMPLE_START = 8,  // Sample start point: 0–255 normalized
     PARAM_SAMPLE_END   = 9,  // Sample end point: 0–255 normalized
     PARAM_LOOP_START   = 10, // Loop start point: 0–255 normalized
-    PARAM_COUNT        = 11
+    PARAM_MACRO_TIMBRE = 11, // A MACRO voice's TIMBRE: 0–255
+    PARAM_MACRO_COLOR  = 12, // …and its COLOR: 0–255
+    PARAM_COUNT        = 13
 };
 
 struct ParamBus {
-    // In ParamId order: full volume, centred, cutoff 128, the whole sample.
-    float base[PARAM_COUNT] = {1.0f, 0.5f, 0.0f, 128.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255.0f, 0.0f};
+    // In ParamId order: full volume, centred, cutoff 128, the whole sample, TIMBRE and COLOR midway.
+    float base[PARAM_COUNT] = {1.0f, 0.5f, 0.0f, 128.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255.0f, 0.0f,
+                               128.0f, 128.0f};
     float mod[PARAM_COUNT]  = {};   // cleared every block, written by the modulation sources
 
     void resetMods()                      { memset(mod, 0, sizeof(mod)); }

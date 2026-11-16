@@ -135,7 +135,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
         const songcore::Program& p = programs[instrumentId].program;
         if (p.type == songcore::PROGRAM_EXTERNAL) return -1;   // until the cable is a program too
-        if (link > 0 && !p.hasSample && !p.hasSoundfont) return -1;
+        if (link > 0 && songcore::program_is_empty(p)) return -1;
 
         // A table reached twice on one hit: stop and sound here.
         for (int i = 0; i < visitedCount; ++i) if (visited[i] == tableId) return instrumentId;
@@ -240,7 +240,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
     if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
     const songcore::Program& last = programs[instrumentId].program;
     if (last.type == songcore::PROGRAM_EXTERNAL) return -1;
-    if (!last.hasSample && !last.hasSoundfont) return -1;
+    if (songcore::program_is_empty(last)) return -1;
     return instrumentId;
 }
 

@@ -248,8 +248,11 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             liveLanes = voices[v].lanes;
     }
 
-    // A note with no sample behind it must not touch the track (a preview of an empty slot).
-    const bool haveSample = note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId];
+    // A note with no sample behind it must not touch the track (a preview of an empty slot). A MACRO
+    // note needs none: its oscillators are the sound.
+    const bool inRange    = note.sampleId >= 0 && note.sampleId < 256;
+    const bool isMacro    = inRange && note.macroModel >= 0;
+    const bool haveSample = inRange && (isMacro || samples[note.sampleId]);
 
     // Mono per track: whatever is playing here fades from the new note's own frame.
     for (int v = 0; haveSample && v < MAX_VOICES; v++) {
@@ -317,13 +320,17 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             // The generation BEFORE the buffers: the UI bumps it after storing them, so a
             // mismatch here can only make the mix end the voice, never read a stale pointer.
             const uint32_t gen = sampleGen[note.sampleId].load();
-            voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
+            // ⚠️ Null for a MACRO note, even where the slot still holds a sample from when it was a sampler.
+            voices[v].trigger(isMacro ? nullptr : samples[note.sampleId].load(),
+                              isMacro ? nullptr : samplesRight[note.sampleId].load(),
+                              isMacro ? 0 : sampleLengths[note.sampleId].load(),
                               note.trackId, rate, note.baseFrequency,
                               note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                               sampleRate, note.startPointOverride, note.endPointOverride,
                               note.sliceStartFrame, note.sliceEndFrame,
                               note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
             voices[v].setChord(chordSemis, chordCount, strumWait);
+            if (isMacro) startMacroVoice(v, note);
             voices[v].instrId = note.sampleId;
             voices[v].sampleGen = gen;
             voices[v].faderHeld = false;
@@ -347,6 +354,22 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
     } else {
         LOGT("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
     }
+}
+
+// A MACRO note on voice `v`, after its trigger(): the oscillators start afresh on the note's model,
+// and nothing of a sample's playback stays on.
+void AudioEngine::startMacroVoice(int v, const ScheduledNote& note) {
+    Voice& voice = voices[v];
+    voice.macro    = true;
+    // The instrument may still carry a loop or REVERSE from when it was a sampler.
+    voice.loopMode = LOOP_MODE_OFF;
+    voice.reverse  = false;
+    if (note.sampleId < songcore::PROGRAM_SLOTS) {
+        const songcore::Program& p = programs[note.sampleId].program;
+        voice.params.setBase(PARAM_MACRO_TIMBRE, (float)p.macroTimbre);
+        voice.params.setBase(PARAM_MACRO_COLOR,  (float)p.macroColor);
+    }
+    macroBank->start(v, note.macroModel);
 }
 
 // Frames [from, to) of a rendered stereo buffer through a track fader and a chain: the fader ramps
@@ -771,9 +794,16 @@ void AudioEngine::applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b)
             const int id = upd.instrId;
             if (id < 0 || id >= 256) break;
             const InstrumentParams& ip = instrumentParams[id];
-            for (int v = 0; v < MAX_VOICES; v++)
-                if (voices[v].isActive && !voices[v].isFadingOut && voices[v].instrId == id)
-                    voiceReloadInstrument(voices[v], ip, sampleRate);
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (!voices[v].isActive || voices[v].isFadingOut || voices[v].instrId != id) continue;
+                voiceReloadInstrument(voices[v], ip, sampleRate);
+                // TIMBRE and COLOR ride on the program. The MODEL waits for the next note.
+                if (voices[v].macro && id < songcore::PROGRAM_SLOTS) {
+                    const songcore::Program& p = programs[id].program;
+                    voices[v].params.setBase(PARAM_MACRO_TIMBRE, (float)p.macroTimbre);
+                    voices[v].params.setBase(PARAM_MACRO_COLOR,  (float)p.macroColor);
+                }
+            }
             for (int t = 0; t < SF_VOICE_COUNT; t++)
                 if (sfVoices[t].isActive && sfVoices[t].instrId == id)
                     voiceReloadInstrument(sfVoices[t], ip, sampleRate);
@@ -886,8 +916,8 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
         voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, voice.chain.filter.drive, sampleRate);
     }
 
-    // A looping voice ends when its volume envelopes have: AHD/DRUM at stage 4, ADSR/TRIG at 5.
-    if (voice.loopMode != 0) {
+    // A sustaining voice ends when its volume envelopes have: AHD/DRUM at stage 4, ADSR/TRIG at 5.
+    if (voice.sustains()) {
         bool hasVolMod = false, allDone = true;
         for (int m = 0; m < 4; m++) {
             const VoiceModSlot& mod = voice.voiceMods[m];
@@ -917,6 +947,31 @@ static int setSamplerShaping(Voice& voice) {
     return ds;
 }
 
+// A MACRO voice's drive and crush for this piece. Its downsample is the crush module's, as on a
+// SoundFont voice: there is no sample address to quantize.
+static void setMacroShaping(Voice& voice) {
+    voice.chain.drive.setDrive(paramWithMod(voice, PARAM_DRIVE, 255));
+    voice.chain.crush.setParams(paramWithMod(voice, PARAM_CRUSH, 15), paramWithMod(voice, PARAM_DOWNSAMPLE, 15));
+}
+
+// A MACRO voice's notes for frames [from, to) of the block: note k into `macroBuf[k]`, from its start.
+// The pitch is the voice's rate, where 1 is C-4, so every pitch source a sample obeys moves it too.
+// `wait` is the strum (null = none): a note still waiting stays silent and unstruck until its turn.
+void AudioEngine::renderMacroNotes(Voice& voice, float rate, int from, int to, const int* wait,
+                                   int notes, float sampleRate) {
+    const int   v      = (int)(&voice - voices);
+    const int   frames = to - from;
+    const float timbre = voice.params.base[PARAM_MACRO_TIMBRE] + voice.modDestValues[PARAM_MACRO_TIMBRE];
+    const float color  = voice.params.base[PARAM_MACRO_COLOR]  + voice.modDestValues[PARAM_MACRO_COLOR];
+    const float lowest = 60.0f + 12.0f * log2f(fmaxf(rate, 1.0e-6f));
+    for (int k = 0; k < notes; ++k) {
+        const int   skip = wait ? std::max(0, std::min(frames, wait[k])) : 0;
+        const float note = k == 0 ? lowest : lowest + 12.0f * log2f(voice.chordRatioNow(k - 1));
+        std::fill(macroBuf[k], macroBuf[k] + skip, 0.0f);
+        macroBank->render(v, k, macroBuf[k] + skip, frames - skip, note, timbre, color, sampleRate);
+    }
+}
+
 // A mod routed to VOL, across one piece: an LFO scales the level, an envelope adds to it.
 struct VolMod { float from, step, amount; bool scales; };
 
@@ -933,25 +988,38 @@ static int collectVolMods(const Voice& voice, VolMod (&out)[4]) {
 
 // One piece of one sampler voice — frames [from, to) of the block — into the output and sends.
 void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to) {
-    if (voice.chordExtra > 0) mixSamplerPieceAs<true>(voice, b, from, to);
-    else                      mixSamplerPieceAs<false>(voice, b, from, to);
+    const bool chord = voice.chordExtra > 0;
+    if (voice.macro) {
+        if (chord) mixSamplerPieceAs<true, true>(voice, b, from, to);
+        else       mixSamplerPieceAs<false, true>(voice, b, from, to);
+    } else {
+        if (chord) mixSamplerPieceAs<true, false>(voice, b, from, to);
+        else       mixSamplerPieceAs<false, false>(voice, b, from, to);
+    }
 }
 
-template <bool Chord>
+// `Macro`: the samples come from the voice's oscillators (`renderMacroNotes`), mono, and nothing below
+// that reads or moves a sample's playhead is compiled in.
+template <bool Chord, bool Macro>
 void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to) {
     float* const output    = b.output;
     const int numFrames    = b.numFrames;
     const int channelCount = b.channelCount;
 
-    if (!voice.sampleData) return;
-    // The slot's buffers changed since this voice was triggered: its pointer may be freed.
-    if (voice.sampleGen != sampleGen[voice.instrId].load(std::memory_order_relaxed)) {
-        voice.stop();
-        return;
-    }
+    [[maybe_unused]] int effDownsample = 0;
+    if constexpr (Macro) {
+        setMacroShaping(voice);
+    } else {
+        if (!voice.sampleData) return;
+        // The slot's buffers changed since this voice was triggered: its pointer may be freed.
+        if (voice.sampleGen != sampleGen[voice.instrId].load(std::memory_order_relaxed)) {
+            voice.stop();
+            return;
+        }
 
-    const int effDownsample = setSamplerShaping(voice);
-    voice.followWindow();
+        effDownsample = setSamplerShaping(voice);
+        voice.followWindow();
+    }
 
     // ⚠️ After the loop bounds: oscillator mode derives its rate from the loop's length.
     float modulatedRate = getModulatedPlaybackRate(voice);
@@ -969,6 +1037,7 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
     // the voice, so a field read inside it is reloaded on every sample. What it advances is written
     // back below it — leave it by `break`, never `return`.
     Playhead   ph           = playheadOf(voice, modulatedRate);
+    if constexpr (Macro) ph.oneShot = false;   // no last frames to fade into
     const bool stereo       = ph.right != nullptr;
     const int  lastReadable = voice.sampleLength - 1;   // the read needs idx + 1
 
@@ -987,6 +1056,14 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         chordDone[k]         = voice.chordDone[k];
     }
     const float chordIn = voice.chordIn, chordOut = voice.chordOut;
+
+    // The oscillators' samples for the piece, and the DC blocker they pass: a one-pole high-pass at
+    // 10 Hz, standing in for the capacitor on the module's output.
+    [[maybe_unused]] float macroDcIn = voice.macroDcIn, macroDcOut = voice.macroDcOut;
+    [[maybe_unused]] const float macroDcKeep = 1.0f - 2.0f * (float)M_PI * 10.0f / b.sampleRate;
+    if constexpr (Macro)
+        renderMacroNotes(voice, modulatedRate, startFrame, to, Chord ? chordWait : nullptr,
+                         1 + chordExtra, b.sampleRate);
 
     // ⚠️ Two ramps, two clocks: the voice's own params ramp across this PIECE (`t`), the mixer's
     // fader and mute gate across the whole BLOCK (`tBlock`) — or a cut piece would step them.
@@ -1047,18 +1124,22 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
     float* const spectrum  = instrSpectrumTempL;
 
     for (int i = startFrame; i < to; i++) {
-        const int idx = (int)ph.position;
-        // In double, then narrowed: (float)idx is inexact past 2^24 frames.
-        const float frac = (float)(ph.position - (double)idx);
+        [[maybe_unused]] int   idx  = 0;
+        [[maybe_unused]] float frac = 0.0f;
+        if constexpr (!Macro) {
+            idx = (int)ph.position;
+            // In double, then narrowed: (float)idx is inexact past 2^24 frames.
+            frac = (float)(ph.position - (double)idx);
 
-        if (idx < 0) {   // safety hard-stop
-            isActive = false;
-            break;
-        }
-        if (idx >= lastReadable) {   // fade rather than stop, so a resonant filter decays
-            ph.position = (double)(lastReadable - 1);
-            ranOut = true;
-            break;
+            if (idx < 0) {   // safety hard-stop
+                isActive = false;
+                break;
+            }
+            if (idx >= lastReadable) {   // fade rather than stop, so a resonant filter decays
+                ph.position = (double)(lastReadable - 1);
+                ranOut = true;
+                break;
+            }
         }
 
         const float t      = (float)(i - from + 1) / (float)pieceFrames;   // both reach 1 on the last frame
@@ -1082,23 +1163,35 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         const float trackVol  = (faderFrom + faderStep * tBlock) * gate;
         const float antiClick = antiClickGain(fadeIn, ph);
 
-        float procL = Playhead::read(ph.left, idx, frac, effDownsample);
-        float procR = stereo ? Playhead::read(ph.right, idx, frac, effDownsample) : procL;
-        const bool dsBlend = dsFade.moving();
-        float      dsOld   = 0.0f;
-        if (dsBlend) {   // the downsample changed mid-note: the old read fades out
-            dsOld = dsFade.next();
-            procL = Playhead::read(ph.left, idx, frac, dsPrev) * dsOld + procL * (1.0f - dsOld);
-            if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * dsOld + procR * (1.0f - dsOld);
+        float procL, procR;
+        [[maybe_unused]] bool  dsBlend = false;
+        [[maybe_unused]] float dsOld   = 0.0f;
+        if constexpr (Macro) {
+            procL = procR = macroBuf[0][i - startFrame];
+        } else {
+            procL = Playhead::read(ph.left, idx, frac, effDownsample);
+            procR = stereo ? Playhead::read(ph.right, idx, frac, effDownsample) : procL;
+            dsBlend = dsFade.moving();
+            if (dsBlend) {   // the downsample changed mid-note: the old read fades out
+                dsOld = dsFade.next();
+                procL = Playhead::read(ph.left, idx, frac, dsPrev) * dsOld + procL * (1.0f - dsOld);
+                if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * dsOld + procR * (1.0f - dsOld);
+            }
         }
         // A strum holds the voice's own playhead where it starts until its turn.
-        bool ownWaits = false;
+        [[maybe_unused]] bool ownWaits = false;
         if constexpr (Chord) {
             ownWaits = chordWait[0] > 0;
             const float own = strumGain(chordWait[0]);
             procL *= own;
             procR *= own;
             for (int k = 0; k < chordExtra; ++k) {
+                if constexpr (Macro) {   // its own oscillator: nothing to read or run out of
+                    const bool  waits = chordWait[k + 1] > 0;
+                    const float strum = strumGain(chordWait[k + 1]);
+                    if (!waits) procL += macroBuf[k + 1][i - startFrame] * strum;
+                    continue;
+                }
                 if (chordDone[k]) continue;
                 const bool waits  = chordWait[k + 1] > 0;
                 const float strum = strumGain(chordWait[k + 1]);
@@ -1127,6 +1220,11 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
             }
             procL *= chordIn;
             procR *= chordIn;
+        }
+        if constexpr (Macro) {   // ahead of the chain and the level, so neither is fed an offset
+            macroDcOut = procL - macroDcIn + macroDcKeep * macroDcOut;
+            macroDcIn  = procL;
+            procL      = macroDcOut;
         }
         chainRan = true;
         if (!chainIdle) {
@@ -1205,10 +1303,12 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         }
 
         if (!isActive) break;
-        if (ownWaits) continue;
-        if (!ph.advance()) {
-            ranOut = true;
-            break;
+        if constexpr (!Macro) {
+            if (ownWaits) continue;
+            if (!ph.advance()) {
+                ranOut = true;
+                break;
+            }
         }
     }
 
@@ -1220,6 +1320,10 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         voice.chordPos[k]  = chord[k].position;
         voice.chordBack[k] = chord[k].loopingBack;
         voice.chordDone[k] = chordDone[k];
+    }
+    if constexpr (Macro) {
+        voice.macroDcIn  = macroDcIn;
+        voice.macroDcOut = macroDcOut;
     }
     voice.volGlide         = volGlide;
     voice.volRouteLast     = volRouteLast;

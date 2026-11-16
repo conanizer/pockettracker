@@ -167,6 +167,8 @@ set(ENGINE_CORE_SOURCES
         engine-soundfont.cpp
         engine-tables.cpp
         engine-mix.cpp
+        # The MACRO instrument's oscillators: the one file that includes the vendored Braids headers.
+        macro-source.cpp
         transient-detector.cpp
         # dr_mp3 and dr_flac are implemented inside audio-decoders.cpp. stb_vorbis and minimp4 are C files
         # of their own; minimp4 defines ERROR/MALLOC/FREE, kept out of every other file. FAAD2 is above.
@@ -301,7 +303,7 @@ target_include_directories(pockettracker PUBLIC
 )
 
 # libm for tsf on Unix-likes; Windows has no m.lib, and asking for one fails the link.
-target_link_libraries(pockettracker opusfile faad2)
+target_link_libraries(pockettracker opusfile faad2 braids)
 if(NOT WIN32)
     target_link_libraries(pockettracker m)
 endif()

@@ -263,6 +263,7 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
         note.endPointOverride   = a.endPointOverride;
         note.sliceStartFrame    = a.sliceStartFrame;
         note.sliceEndFrame      = a.sliceEndFrame;
+        note.macroModel         = songcore::program_is_macro(p) ? p.macroModel : -1;
     }
     return true;
 }
@@ -703,6 +704,7 @@ void AudioEngine::resetFrameCounter() {
 void AudioEngine::resetEffectState() {
     const float sr = (float)getSampleRate();
     reverbSend.reset(sr);   // also reseeds the reverb's LCG
+    MacroBank::reseed();    // and the MACRO models' noise, so a render repeats
     delaySend.reset(sr);
     masterChain.reset(sr);
     // Not replayed here: a render must depend on the project alone.
