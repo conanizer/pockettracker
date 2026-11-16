@@ -151,7 +151,7 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
             return cc::note(isEmpty ? 0 : songcore::note_to_midi(step.note), isEmpty, mask, key);
         }
         case 2: return cc::volume(step.volume);
-        case 3: return cc::instrument(step.instrument);
+        case 3: return cc::instrument(step.instrument).as(ValueUnit::INSTRUMENT);
         default: break;
     }
     if (const int slot = fx_slot_of_column(s.cursorColumn, PHRASE_FX_COLUMN)) {

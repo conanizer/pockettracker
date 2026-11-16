@@ -42,6 +42,15 @@ std::string format_ms(double ms) {
     return buf;
 }
 
+std::string instrument_label(const songcore::Instrument& ins) {
+    using songcore::InstrumentType;
+    if ((ins.instrumentType == InstrumentType::SAMPLER && !ins.sampleFilePath) ||
+        (ins.instrumentType == InstrumentType::SOUNDFONT && !ins.soundfontPath))
+        return "EMPTY";
+    if (songcore::instrument_has_default_name(ins)) return songcore::instrument_type_name(ins.instrumentType);
+    return ins.name;
+}
+
 ValueUnit fx_value_unit(int effect_code) {
     using namespace songcore;
     switch (effect_code) {
@@ -117,6 +126,16 @@ ValueHint chord_hint(int value, const AppState& s) {
     return {head, notes};
 }
 
+ValueHint instrument_hint(int value, const AppState& s) {
+    const auto& list = s.project->instruments;
+    if (value < 0 || value >= static_cast<int>(list.size())) return {};
+    const songcore::Instrument& ins  = list[static_cast<size_t>(value)];
+    const std::string           type = songcore::instrument_type_name(ins.instrumentType);
+    const std::string           name = instrument_label(ins);
+    if (name != type) return {name, type};
+    return {type + " " + songcore::hex2(value), ""};
+}
+
 }  // namespace
 
 ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
@@ -188,6 +207,9 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
 
         case ValueUnit::CHORD:
             return chord_hint(value, s);
+
+        case ValueUnit::INSTRUMENT:
+            return instrument_hint(value, s);
     }
     return {};
 }

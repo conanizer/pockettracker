@@ -60,6 +60,7 @@ enum class ValueUnit {
     GROOVE_TICS,   // a groove step, on the groove's own ruler
     MIDI_LENGTH,   // EXTERNAL LEN: tics, 00 = until the next note
     CHORD,         // CHD
+    INSTRUMENT,    // a phrase step's instrument: its name, or EMPTY
 };
 
 // Which button combinations do anything here.
