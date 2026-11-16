@@ -31,6 +31,22 @@ void draw_large_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
     }
 }
 
+// One prose word at (x, y), its stars dropped: the stretches inside a highlight in `markInk`.
+// `marked` is whether the word starts inside one.
+void draw_prose_word(Canvas& c, const char* word, int bytes, int x, int y, bool marked, Argb ink,
+                     Argb markInk) {
+    int from = 0;
+    for (int i = 0; i <= bytes; ++i) {
+        if (i < bytes && word[i] != detail::HELP_MARK) continue;
+        if (i > from)
+            c.draw_text(std::string(word + from, static_cast<size_t>(i - from)),
+                        x + detail::help_columns(word, 0, from) * CHAR_W, y, marked ? markInk : ink,
+                        CHAR_SPACING, FONT_SCALE);
+        marked = !marked;
+        from   = i + 1;
+    }
+}
+
 }  // namespace
 
 void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
@@ -50,11 +66,11 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
     c.draw_text(title, row_x(0), boxY + row_dy(0) + TEXT_PADDING, t.textTitle, CHAR_SPACING,
                 FONT_SCALE);
 
-    help_overlay_flow(e, [&](int row, int col, const char* word, int bytes, bool isKey) {
+    help_overlay_flow(e, [&](int row, int col, const char* word, int bytes, bool isKey, bool marked) {
         const int wx = row_x(row) + col * CHAR_W;
         const int wy = boxY + row_dy(row) + TEXT_PADDING;
         if (isKey) draw_control_word(c, word, bytes, wx, wy, t.textValue, t.vizWave);
-        else c.draw_text(std::string(word, static_cast<size_t>(bytes)), wx, wy, t.textValue, CHAR_SPACING, FONT_SCALE);
+        else draw_prose_word(c, word, bytes, wx, wy, marked, t.textValue, t.vizWave);
     });
 
     constexpr const char* HINT = "ANY BUTTON CLOSES";

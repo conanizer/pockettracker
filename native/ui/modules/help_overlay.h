@@ -78,7 +78,8 @@ static_assert(HELP_TITLE_MAX_CHARS == BESIDE_COLS,
 
 }  // namespace help_overlay_geometry
 
-// Walks `e`'s text as laid out, calling `emit(row, col, word, bytes, is_key)` per word; returns the
+// Walks `e`'s text as laid out, calling `emit(row, col, word, bytes, is_key, marked)` per word, where
+// `marked` is whether the word starts inside a `*` highlight (the word keeps its stars); returns the
 // rows used (title counted), or a huge number if a word fits no row. Columns are code points.
 template <class Emit>
 constexpr int help_overlay_flow(const HelpEntry& e, Emit&& emit) {
@@ -92,19 +93,21 @@ constexpr int help_overlay_flow(const HelpEntry& e, Emit&& emit) {
     // Words of `s`, continuing the current row. Returns false on a word no row can hold.
     const auto flow = [&](const char* s) {
         if (s == nullptr) return true;
-        int i = 0;
+        bool marked = false;
+        int  i      = 0;
         while (s[i] != '\0') {
             if (s[i] == ' ') { ++i; continue; }
-            const int start = i;
-            int cols = 0;
+            const int  start      = i;
+            const bool markedHere = marked;
             while (s[i] != '\0' && s[i] != ' ') {
+                if (s[i] == detail::HELP_MARK) marked = !marked;
                 i += detail::help_arrow_at(s + i) ? 3 : 1;
-                ++cols;
             }
+            const int cols = detail::help_columns(s, start, i);
             if (col > 0 && col + 1 + cols > row_cols(row)) { ++row; col = 0; }
             if (cols > row_cols(row)) return false;
             if (col > 0) ++col;
-            emit(row, col, s + start, i - start, isKey);
+            emit(row, col, s + start, i - start, isKey, markedHere);
             col += cols;
         }
         return true;
@@ -129,7 +132,9 @@ constexpr int help_overlay_flow(const HelpEntry& e, Emit&& emit) {
     } else {
         // Prose: the lines run on into one another, as line2 and line3 do.
         for (int i = 0; i <= lastBody; ++i) {
-            if (e.body[i] != nullptr && e.body[i][0] != '\0') {
+            if (e.body[i] != nullptr && e.body[i][0] == '\n') {
+                end_paragraph();   // HELP_NEW_ROW
+            } else if (e.body[i] != nullptr && e.body[i][0] != '\0') {
                 if (!flow(e.body[i])) return TOO_WIDE;
             } else {
                 end_paragraph();
@@ -157,7 +162,7 @@ constexpr int help_overlay_flow(const HelpEntry& e, Emit&& emit) {
 namespace detail {
 
 struct HelpFlowNoEmit {
-    constexpr void operator()(int, int, const char*, int, bool) const {}
+    constexpr void operator()(int, int, const char*, int, bool, bool) const {}
 };
 
 constexpr bool help_overlay_fits() {

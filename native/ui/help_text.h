@@ -20,7 +20,7 @@ inline constexpr int HELP_MAX_CHARS = 32;
 // Title characters beside the large mascot in the full overlay (pinned in `modules/help_overlay.h`).
 inline constexpr int HELP_TITLE_MAX_CHARS = 26;
 
-inline constexpr int HELP_BODY_LINES = 8;   // the full overlay's room for body…
+inline constexpr int HELP_BODY_LINES = 20;  // the full overlay's room for body…
 inline constexpr int HELP_KEY_LINES = 9;    // …and for controls, one gesture per line
 
 // `line1` names the cell, a screen's short label written out ("REV" → REVERB SEND). The full overlay
@@ -29,6 +29,11 @@ inline constexpr int HELP_KEY_LINES = 9;    // …and for controls, one gesture 
 // (`help_key_bytes`), so a capital A, B, L or R that is not a button reads as one there. The guide shows `line1` and two controls: `guide` where it is written,
 // else the first two of `keys` — so the two that matter most go first. On an empty cell it shows
 // `guideEmpty` where that is written: how to fill it. A null line is a blank row.
+// In the body, `*` marks text the overlay draws in the highlight colour — "*6 OP* plays…". The stars
+// are not drawn and take no column; they pair up within each line. A body line `""` ends a paragraph
+// with a blank row; `HELP_NEW_ROW` only starts the next row, for a list of choices one per row.
+inline constexpr const char* HELP_NEW_ROW = "\n";
+
 struct HelpEntry {
     const char* line1 = "";
     const char* line2 = "";
@@ -283,13 +288,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── SONG ─────────────────────────────────────────────────────────────────────────────────────
     /* SONG_CELL */
     {"SONG CELL: chain to play", "The column is the track, the", "row is when it plays.",
-     {"The column is the track, the row",
-      "is when it plays. An empty cell",
-      "ends the group of chains above",
-      "it: the track jumps back to the",
-      "first one and plays the group",
-      "again. A clone copies the",
-      "phrases of the chain too."},
+     {"An empty cell (*--*) makes a loop:",
+      "the track jumps back up to the",
+      "first of the chains just above",
+      "it and plays them again.",
+      "",
+      "A clone copies its phrases too,",
+      "so the original stays as it is."},
      {"A on -- put last chain",
       "Tap A twice: new chain",
       "A+←/→ by 1, A+↑/↓ by 16",
@@ -328,12 +333,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── PHRASE ───────────────────────────────────────────────────────────────────────────────────
     /* PHRASE_NOTE */
     {"NOTE", "A+←/→ changes it by a semitone,", "A+↑/↓ by an octave.",
-     {"With a scale on, only notes of",
-      "that scale can be typed. If the",
-      "instrument has SLICE on, the",
-      "note picks a slice: C-4 is the",
-      "first, and each semitone up is",
-      "the next."},
+     {"Only notes of the scale in use",
+      "can be typed: scale 00, all",
+      "twelve notes until you change",
+      "it, or the one SCA or SCG above",
+      "picks.",
+      "",
+      "If the instrument has SLICE on,",
+      "each note plays one slice: C-4",
+      "the first, each semitone up the",
+      "next."},
      {"A on --- put last note",
       "Tap A twice: new instrument",
       "A+←/→ note, A+↑/↓ octave",
@@ -435,14 +444,19 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── INSTRUMENT, on every type ────────────────────────────────────────────────────────────────
     /* INST_TYPE */
     {"INSTRUMENT TYPE", "SAMPLER plays a file, SOUNDFONT", "a bank, EXTERNAL a MIDI device.",
-     {"SAMPLER plays an audio file.",
-      "SOUNDFONT plays one sound from a",
-      "SoundFont bank. EXTERNAL sends",
-      "the notes to a MIDI device.",
-      "If it has a file or settings,",
-      "it asks first. DISCARD starts",
-      "afresh, KEEP takes them along.",
-      "Level, pan, sends, EQ stay."},
+     {"*SAMPLER* plays an audio file.",
+      HELP_NEW_ROW,
+      "*SOUNDFONT* plays one sound from a",
+      "SoundFont bank.",
+      HELP_NEW_ROW,
+      "*EXTERNAL* sends the notes to a",
+      "MIDI device.",
+      "",
+      "If the instrument has a file or",
+      "settings, it asks first: *DISCARD*",
+      "starts afresh, *KEEP* takes them",
+      "along. Level, pan, sends and EQ",
+      "stay either way."},
      {"A+D-PAD change type",
       "A+START play instrument"}},
     /* INST_SOURCE_LOAD */
@@ -537,11 +551,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B reset to 00"}},
     /* INST_FILTER */
     {"FILTER TYPE", "LP keeps the lows, HP the highs,", "BP the middle. OFF: no filter.",
-     {"LP keeps the low sounds and cuts",
-      "the high ones. HP keeps the",
-      "highs. BP keeps a band in the",
-      "middle. FREQ sets where it cuts,",
-      "and RES adds a peak there."},
+     {"*LP* keeps the lows and cuts the",
+      "highs.",
+      HELP_NEW_ROW,
+      "*HP* keeps the highs and cuts the",
+      "lows.",
+      HELP_NEW_ROW,
+      "*BP* keeps a band in the middle.",
+      "",
+      "FREQ sets where it cuts, RES",
+      "adds a peak there."},
      {"A+D-PAD pick type"}},
     /* INST_CRUSH */
     {"BITCRUSH", "0 is off. Higher values make", "the sound rougher.",
@@ -605,19 +624,27 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── INSTRUMENT, sampler only ─────────────────────────────────────────────────────────────────
     /* INST_SLICE */
     {"SLICE MODE", "Each note plays one slice.", "Slices are made in EDIT.",
-     {"When the sample has slices (you",
-      "make them in EDIT), each note",
-      "plays one slice. CUT stops at",
-      "the end of the slice, TRU plays",
-      "on to the end of the sample. OFF",
-      "ignores the slices."},
+     {"When the sample has slices (made",
+      "in EDIT), each note plays one",
+      "slice.",
+      "",
+      "*OFF* ignores the slices.",
+      HELP_NEW_ROW,
+      "*CUT* stops at the end of the",
+      "slice.",
+      HELP_NEW_ROW,
+      "*TRU* plays on to the end of the",
+      "sample."},
      {"A+D-PAD pick mode"}},
     /* INST_LOOP_MODE */
     {"LOOP MODE", "OFF plays once, FWD repeats,", "PNG goes back and forth.",
-     {"OFF plays the sample once. FWD",
-      "repeats from LOOP ST to LOOP",
-      "END, PNG goes back and forth",
-      "between them."},
+     {"*OFF* plays the sample once.",
+      HELP_NEW_ROW,
+      "*FWD* repeats from LOOP ST to LOOP",
+      "END.",
+      HELP_NEW_ROW,
+      "*PNG* goes back and forth between",
+      "them."},
      {"A+D-PAD pick mode"}},
     /* INST_SAMPLE_START */
     {"SAMPLE START", "00 is the start of the file,", "FF is the end of it.",
@@ -873,20 +900,33 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── MODS ─────────────────────────────────────────────────────────────────────────────────────
     /* MOD_TYPE */
     {"MOD TYPE", "AHD, ADSR, DRUM, TRIG rise and", "fall, LFO swings. --- is off.",
-     {"--- is off. AHD and DRUM rise,",
-      "hold, then fall away. ADSR and",
-      "TRIG rise, then stay at SUS",
-      "until the note ends. LFO swings",
-      "up and down for as long as the",
-      "note plays."},
+     {"*---* is off.",
+      HELP_NEW_ROW,
+      "*AHD* rises, holds, then falls",
+      "away.",
+      HELP_NEW_ROW,
+      "*ADSR* rises, then stays at SUS",
+      "until the note ends.",
+      HELP_NEW_ROW,
+      "*LFO* swings up and down while the",
+      "note plays.",
+      HELP_NEW_ROW,
+      "*DRUM* works like AHD.",
+      HELP_NEW_ROW,
+      "*TRIG* works like ADSR."},
      {"A+D-PAD pick type"}},
     /* MOD_DEST */
     {"MOD DESTINATION", "The setting this mod changes", "while a note plays.",
      {"Volume, pan, pitch, fine pitch,",
       "filter cutoff, resonance or",
-      "sample start. MOD A, MOD R and",
-      "MOD B change the amount, the",
-      "speed or both of the next mod."},
+      "sample start.",
+      "",
+      "*MOD A*: the amount of the next",
+      "mod.",
+      HELP_NEW_ROW,
+      "*MOD R*: its speed.",
+      HELP_NEW_ROW,
+      "*MOD B*: both."},
      {"A+D-PAD pick target"}},
     /* MOD_AMOUNT */
     {"MOD AMOUNT", "00 does nothing, FF is the", "full swing.",
@@ -938,13 +978,17 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+D-PAD pick shape"}},
     /* MOD_TRIG */
     {"LFO TRIGGER", "RETG restarts on each note,", "FREE never restarts.",
-     {"RETG starts the wave over on",
-      "every note. FREE runs on and",
-      "never restarts. ONCE starts over",
-      "on each note, plays one cycle",
-      "and stops. HOLD takes one value",
-      "when the note starts and keeps",
-      "it."},
+     {"*FREE* runs on and never starts",
+      "over.",
+      HELP_NEW_ROW,
+      "*RETG* starts the wave over on",
+      "every note.",
+      HELP_NEW_ROW,
+      "*HOLD* takes one value when the",
+      "note starts and keeps it.",
+      HELP_NEW_ROW,
+      "*ONCE* starts over on each note,",
+      "plays one cycle and stops."},
      {"A+D-PAD pick mode"}},
     /* MOD_FREQ */
     {"LFO SPEED", "Higher is faster.", "",
@@ -1027,11 +1071,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── EFFECTS ──────────────────────────────────────────────────────────────────────────────────
     /* FX_MASTER_TYPE */
     {"MASTER FX TYPE", "OTT makes it loud and bright,", "DUST makes it sound old.",
-     {"OTT compresses the whole mix in",
-      "three bands for a loud, bright",
-      "sound. DUST makes it sound old",
-      "and worn. The MIXER sets how",
-      "strong it is."},
+     {"*OTT* compresses the whole mix in",
+      "three bands, for a loud, bright",
+      "sound.",
+      HELP_NEW_ROW,
+      "*DUST* makes it sound old and",
+      "worn.",
+      "",
+      "The MIXER sets how strong it is."},
      {"A+D-PAD pick OTT or DUST"}},
     /* FX_REVERB_SIZE */
     {"ROOM SIZE", "Bigger spreads the echoes out.", "PLATE and FOIL ignore it.",
@@ -1184,13 +1231,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+D-PAD on/off"}},
     /* SET_VISUALIZER */
     {"TOP PANEL", "The sound as a picture, nothing,", "or hints about the cell.",
-     {"OCTA draws a small wave for each",
-      "track that plays, OCTA.F for all",
-      "eight, and SPCT.P the spectrum.",
-      "",
-      "EMPTY shows nothing.",
-      "",
-      "GUIDE names the cell you are on",
+     {"*OCTA* draws a small wave for each",
+      "track that plays.",
+      HELP_NEW_ROW,
+      "*OCTA.F* draws all eight.",
+      HELP_NEW_ROW,
+      "*SPCT.P* draws the spectrum.",
+      HELP_NEW_ROW,
+      "*EMPTY* shows nothing.",
+      HELP_NEW_ROW,
+      "*GUIDE* names the cell you are on",
       "and tells what the buttons do."},
      {"A+D-PAD pick what it shows"}},
     /* SET_THEME */
@@ -1275,11 +1325,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A MIDI keyboard plays the",
       "instrument under the PHRASE",
       "cursor, or the last one used, on",
-      "the SONG cursor track. MONO",
-      "plays one note at a time. POLY",
-      "2-8 spreads a chord over that",
-      "many tracks, from the cursor",
-      "track to the right."},
+      "the track of the SONG cursor.",
+      "",
+      "*MONO* plays one note at a time.",
+      HELP_NEW_ROW,
+      "*POLY 2* to *POLY 8* spread a chord",
+      "over that many tracks, from the",
+      "cursor track to the right."},
      {"A+←/→ pick MONO or POLY 2-8"}},
     /* MIDI_PANIC */
     {"PANIC: all notes off", "A sends all notes off on", "every channel.",
@@ -1294,14 +1346,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A send test note"}},
     /* MIDI_CTL_CH */
     {"KNOB CHANNEL", "Where mapped knobs are read", "from. ALL means any channel.",
-     {"A mapped knob only moves its",
-      "control, and does not also play",
-      "a track. Other knobs work as",
-      "before, so ALL changes nothing",
-      "until you map one.",
+     {"*ALL* reads mapped knobs on every",
+      "channel. Pick one channel if two",
+      "devices send the same knob",
+      "numbers.",
       "",
-      "Pick one channel if two devices",
-      "send the same knob numbers."},
+      "A mapped knob only moves its",
+      "control, and does not also play",
+      "a track. Until you map a knob,",
+      "this row changes nothing."},
      {"A+←/→ pick ALL or 01 to 16"}},
     /* MIDI_MAPPING */
     {"KNOB MAPPING", "A opens the list of knobs", "and what each one moves.",
@@ -1380,12 +1433,20 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "START play, B close"}},
     /* EQ_TYPE */
     {"BAND TYPE", "SHELF lifts or lowers one end,", "BELL one spot, CUT removes it.",
-     {"LOSHELF lifts or lowers",
-      "everything below FREQ, HISHELF",
-      "everything above it. BELL works",
-      "only around FREQ. LOWCUT removes",
-      "the lows, HICUT the highs. OFF",
-      "turns the band off."},
+     {"*OFF* turns the band off.",
+      HELP_NEW_ROW,
+      "*LOSHELF* lifts or lowers",
+      "everything below FREQ.",
+      HELP_NEW_ROW,
+      "*LOWCUT* removes the lows.",
+      HELP_NEW_ROW,
+      "*BELL* lifts or lowers only around",
+      "FREQ.",
+      HELP_NEW_ROW,
+      "*HISHELF* lifts or lowers",
+      "everything above FREQ.",
+      HELP_NEW_ROW,
+      "*HICUT* removes the highs."},
      {"A+D-PAD pick type"}},
     /* EQ_FREQ */
     {"BAND FREQUENCY", "The frequency it works on,", "20 Hz up to 20 kHz.",
@@ -1441,12 +1502,21 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A there: load, B: back"}},
     /* THEME_SCHEME */
     {"COLOUR SCHEME", "The rule ROLL follows to pick", "colours that go together.",
-     {"ALL takes any colour. The others",
-      "start from one colour and add",
-      "its own shades, its neighbours,",
-      "its opposite, or three or four",
+     {"*ALL* takes any colour.",
+      HELP_NEW_ROW,
+      "*MONOCHROME*: one colour in",
+      "shades.",
+      HELP_NEW_ROW,
+      "*ANALOGOUS*: its close neighbours.",
+      HELP_NEW_ROW,
+      "*COMPLEMENT*: it and its opposite.",
+      HELP_NEW_ROW,
+      "*SPLIT-COMP*: it and both sides of",
+      "its opposite.",
+      HELP_NEW_ROW,
+      "*TRIADIC*, *TETRADIC*: three or four",
       "colours spread evenly around the",
-      "colour wheel."},
+      "wheel."},
      {"A+D-PAD pick scheme"}},
     /* THEME_ROLL */
     {"RANDOM PALETTE", "A makes a random one. L+A keeps", "a row, R+A rolls just that row.",
@@ -1569,18 +1639,25 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "R+↑/↓ zoom from any row"}},
     /* SE_SOURCE */
     {"SOURCE CHANNEL", "LEFT, RIGHT or MONO. Only", "STEREO keeps both sides.",
-     {"The left channel, the right one,",
-      "both (STEREO), or the two mixed",
-      "together (MONO). SAVE writes",
-      "what you pick here. A mono file",
-      "is always MONO."},
+     {"*LEFT* or *RIGHT*: one channel only.",
+      HELP_NEW_ROW,
+      "*STEREO*: both.",
+      HELP_NEW_ROW,
+      "*MONO*: the two mixed into one.",
+      "",
+      "SAVE writes what you pick here.",
+      "A mono file is always MONO."},
      {"A+D-PAD pick source"}},
     /* SE_RATE */
     {"SAMPLE RATE", "HIGH is the full rate, NORM", "half of it, LOFI a quarter.",
-     {"HIGH keeps the full sample rate.",
-      "NORM halves it and LOFI quarters",
-      "it, for a duller, grittier",
-      "sound."},
+     {"*HIGH* keeps the full sample rate.",
+      HELP_NEW_ROW,
+      "*NORM* halves it.",
+      HELP_NEW_ROW,
+      "*LOFI* quarters it.",
+      "",
+      "The lower the rate, the duller",
+      "and grittier the sound."},
      {"A+D-PAD pick rate"}},
     /* SE_PITCH */
     {"SAMPLE PITCH", "In semitones. It is written", "into the file when you SAVE.",
@@ -1618,11 +1695,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B to the very end"}},
     /* SE_SLICE_METHOD */
     {"SLICE METHOD", "TRANSIENT finds the hits,", "DIVIDE cuts equal parts.",
-     {"TRANSIENT finds the hits in the",
-      "sound, DIVIDE cuts it into equal",
-      "parts, MANUAL lets you place the",
-      "cuts yourself. OFF shows the",
-      "marks the file came with."},
+     {"*TRANSIENT* finds the hits in the",
+      "sound.",
+      HELP_NEW_ROW,
+      "*DIVIDE* cuts it into equal parts.",
+      HELP_NEW_ROW,
+      "*OFF* shows the marks the file",
+      "came with.",
+      HELP_NEW_ROW,
+      "*MANUAL* lets you place the cuts",
+      "yourself."},
      {"A+D-PAD pick method"}},
     /* SE_SLICE_SENS */
     {"SENSITIVITY", "Higher finds more of them,", "quiet ones included.",
@@ -1723,11 +1805,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "START play with effect"}},
     /* SE_FX_VALUE */
     {"EFFECT VALUE", "An amount, or an EQ slot, or", "which way SYNC fits it.",
-     {"How much of the effect. For EQ",
-      "it is the EQ slot. For SYNC,",
-      "RPITCH changes speed and pitch",
-      "together, TSTRETCH only the",
-      "length."},
+     {"*OTT*, *DUST*, *DRIVE*: how much of",
+      "the effect.",
+      HELP_NEW_ROW,
+      "*EQ*: which EQ slot.",
+      HELP_NEW_ROW,
+      "*SYNC*: *RPITCH* changes speed and",
+      "pitch together, *TSTRETCH* only",
+      "the length."},
      {"A+←/→ by 1, A+↑/↓ by 16",
       "A on EQ slot: open editor",
       "A+B on EQ slot: clear",
@@ -1882,11 +1967,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+D-PAD pick depth"}},
     /* FX_REVERB_ALGO */
     {"REVERB ALGORITHM", "DEFAULT, or a Dragonfly HALL,", "ROOM, PLATE or FOIL.",
-     {"DEFAULT is the standard reverb.",
-      "HALL is a large space, ROOM a",
-      "small one. PLATE and FOIL are",
-      "metal plates with no room, so",
-      "they ignore SIZE and MOD."},
+     {"*DEFAULT* is the standard reverb.",
+      HELP_NEW_ROW,
+      "*HALL* is a large space.",
+      HELP_NEW_ROW,
+      "*ROOM* is a small one.",
+      HELP_NEW_ROW,
+      "*PLATE* and *FOIL* are metal plates.",
+      "They have no room, so they",
+      "ignore SIZE and MOD."},
      {"A+D-PAD pick reverb"}},
     /* SET_HELP */ {},
     /* GROOVE_NAME */
@@ -1917,20 +2006,33 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "B back, load nothing"}},
     /* GROOVE_QNT */
     {"QUANTIZE: keep the bar in place", "When on, a longer step makes", "its partner shorter.",
-     {"OFF changes one step on its own.",
-      "Set to a fraction, changing a",
-      "step moves its partner the other",
-      "way by the same amount."},
+     {"*OFF*: a change moves one step",
+      "alone.",
+      HELP_NEW_ROW,
+      "*1/16* to *1/2*: a step and its",
+      "partner move together, one",
+      "longer and the other shorter by",
+      "the same amount, so the bar",
+      "stays in place.",
+      "",
+      "Steps pair up as neighbours at",
+      "1/16, two apart at 1/8, four at",
+      "1/4, eight at 1/2. It starts as",
+      "OFF."},
      {"A+D-PAD pick OFF or fraction",
       "B+↑/↓ set from any cell",
       "A+D-PAD on tick: move pair"}},
     /* GROOVE_SWG */
     {"SWING", "Shown, not set. 50 is even,", "66.7 is a triplet feel.",
-     {"How long the first half of a",
-      "group of steps lasts, as a share",
-      "of the whole group - for the",
-      "group under the TIC cursor. QNT",
-      "sets how many steps a group has."},
+     {"It only shows a value, worked",
+      "out from the ticks. 50 is even,",
+      "66.7 a triplet feel.",
+      "",
+      "It is the share of a group of",
+      "steps that its first half takes,",
+      "for the group the TIC cursor is",
+      "in. QNT sets how long a group",
+      "is."},
      {"Nothing: it only shows a value"}},
 
     /* MIDI_VELOCITY */
@@ -2041,14 +2143,18 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B reset to 12"}},
     /* MIDI_SYNC_IN */
     {"FOLLOW MIDI CLOCK", "Another device sets the tempo", "and when the song plays.",
-     {"TEMPO: the song plays at the",
+     {"*OFF* ignores the clock.",
+      HELP_NEW_ROW,
+      "*TEMPO*: the song plays at the",
       "tempo of the other device, on",
-      "its beat. You still start and",
-      "stop it here. FULL: the other",
-      "device also starts and stops the",
-      "song, from the place it starts",
-      "at. The TEMPO of the song is not",
-      "changed."},
+      "its beat. You start and stop it",
+      "here.",
+      HELP_NEW_ROW,
+      "*FULL*: the other device also",
+      "starts and stops it.",
+      "",
+      "The TEMPO of the song itself is",
+      "not changed."},
      {"A+D-PAD pick OFF, TEMPO, FULL"}},
     /* PROJECT_COLLECT */
     {"COLLECT SONG FILES", "One folder with everything the", "song needs, ready to share.",
@@ -2133,23 +2239,40 @@ constexpr bool help_arrow_at(const char* s) {
     return tail >= 0x90 && tail <= 0x93;
 }
 
-// The budget is code points, not bytes: an arrow is one column.
-constexpr bool help_line_ok(const char* s) {
-    if (s == nullptr) return true;   // an unwritten body line
+// Opens and closes a highlight in a body line; never drawn.
+inline constexpr char HELP_MARK = '*';
+
+// Columns `s[from, to)` takes on screen: an arrow is one, a highlight mark none.
+constexpr int help_columns(const char* s, int from, int to) {
     int n = 0;
-    for (int i = 0; s[i] != '\0'; ++n) {
-        if (help_arrow_at(s + i)) { i += 3; continue; }
-        if (!help_char_ok(s[i])) return false;
+    for (int i = from; i < to;) {
+        if (help_arrow_at(s + i)) { i += 3; ++n; continue; }
+        if (s[i] != HELP_MARK) ++n;
         ++i;
     }
-    return n <= HELP_MAX_CHARS;
+    return n;
+}
+
+// The budget is code points, not bytes: an arrow is one column. Only a body line may hold marks.
+constexpr bool help_line_ok(const char* s, bool body = false) {
+    if (s == nullptr) return true;   // an unwritten body line
+    if (body && s[0] == '\n' && s[1] == '\0') return true;   // HELP_NEW_ROW
+    int n = 0, marks = 0;
+    for (int i = 0; s[i] != '\0';) {
+        if (help_arrow_at(s + i)) { i += 3; ++n; continue; }
+        if (body && s[i] == HELP_MARK) { ++marks; ++i; continue; }
+        if (!help_char_ok(s[i])) return false;
+        ++i;
+        ++n;
+    }
+    return n <= HELP_MAX_CHARS && marks % 2 == 0;
 }
 
 constexpr bool help_table_ok() {
     for (const HelpEntry& e : HELP_ENTRIES) {
         if (!help_line_ok(e.line1) || !help_line_ok(e.line2) || !help_line_ok(e.line3)) return false;
         for (const char* b : e.body)
-            if (!help_line_ok(b)) return false;
+            if (!help_line_ok(b, true)) return false;
         for (const char* k : e.keys)
             if (!help_line_ok(k)) return false;
         for (const char* g : e.guide)
@@ -2233,7 +2356,8 @@ static_assert(sizeof(HELP_ENTRIES) / sizeof(HELP_ENTRIES[0]) ==
               "HELP_ENTRIES has one entry per HelpTopic");
 static_assert(detail::help_table_ok(),
               "a help line is over HELP_MAX_CHARS, or holds a mark the help guide does not allow "
-              "(an apostrophe or a semicolon draws blank; the only non-ASCII are the four arrows)");
+              "(an apostrophe or a semicolon draws blank; the only non-ASCII are the four arrows; "
+              "a * highlight only in the body, opened and closed on the same line)");
 static_assert(detail::help_titles_ok(),
               "a help title (line1 up to its colon) is over HELP_TITLE_MAX_CHARS, or holds an arrow");
 
