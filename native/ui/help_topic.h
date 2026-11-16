@@ -304,6 +304,9 @@ enum class HelpTopic {
     PROJECT_COLLECT,
     SET_ONE_HAND,
     SET_ONE_HAND_HOLD,
+    INST_MACRO_MODEL,
+    INST_MACRO_TIMBRE,
+    INST_MACRO_COLOR,
 
     COUNT
 };

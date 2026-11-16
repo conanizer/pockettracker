@@ -424,15 +424,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
 
     // ── INSTRUMENT, on every type ────────────────────────────────────────────────────────────────
     /* INST_TYPE */
-    {"TYPE: what kind of sound", "SAMPLER plays a file, SOUNDFONT", "a bank, EXTERNAL a MIDI device.",
-     {"SAMPLER plays an audio file.",
-      "SOUNDFONT plays one sound from a",
-      "SoundFont bank. EXTERNAL sends",
-      "the notes to a MIDI device.",
-      "If it has a file or settings,",
-      "it asks first. DISCARD starts",
-      "afresh, KEEP takes them along.",
-      "Level, pan, sends, EQ stay."},
+    {"TYPE: what kind of sound", "A file, a SoundFont, a synth", "(MACRO) or a MIDI device.",
+     {"SAMPLER plays an audio file,",
+      "SOUNDFONT one sound from a bank.",
+      "MACRO is a synth with 47 models.",
+      "EXTERNAL sends notes to a MIDI",
+      "device. If it has a file or",
+      "settings, it asks first. DISCARD",
+      "starts afresh, KEEP takes them.",
+      "Level, pan, sends and EQ stay."},
      {"A+D-PAD changes the type",
       "A+START plays the instrument"}},
     /* INST_SOURCE_LOAD */
@@ -2142,6 +2142,41 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"Shorter locks sooner, but a slow",
       "tap may then lock by mistake."},
      {"A+D-PAD picks one"}},
+
+    // ── INSTRUMENT, MACRO only ───────────────────────────────────────────────────────────────────
+    /* INST_MACRO_MODEL */
+    {"MODEL: which synth it is", "47 ways to make a sound. The", "note beside it says which.",
+     {"Each model makes sound its own",
+      "way: analog waves, FM, vowels,",
+      "strings, drums, wavetables,",
+      "noise. TIMBRE and COLOR shape",
+      "it, and the notes beside them",
+      "say what each does here. A new",
+      "model starts on the next note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 8",
+      "A+B goes back to the first",
+      "A+START plays the instrument"}},
+    /* INST_MACRO_TIMBRE */
+    {"TIMBRE: the first control", "What it shapes depends on the", "model: see the note beside it.",
+     {"The first of the two controls",
+      "a model has. What it does",
+      "depends on the model, and the",
+      "note beside it says: a cutoff,",
+      "a pulse width, a decay. A change",
+      "is heard on the sounding note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 16",
+      "A+B sets it back to 80",
+      "A+START plays the instrument"}},
+    /* INST_MACRO_COLOR */
+    {"COLOR: the second control", "What it shapes depends on the", "model: see the note beside it.",
+     {"The second of the two controls",
+      "a model has. What it does",
+      "depends on the model, and the",
+      "note beside it says. A change",
+      "is heard on the sounding note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 16",
+      "A+B sets it back to 80",
+      "A+START plays the instrument"}},
 };
 
 // ─── Line length and font, as compile errors — at runtime they fail silently ─────────────────────

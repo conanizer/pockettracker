@@ -29,6 +29,8 @@ enum class InstrumentCell {
     SLICE, LOOP, START, LOOP_START, END, LOOP_END, REVERSE,
     // EXTERNAL
     MIDI_CHANNEL, MIDI_BANK, MIDI_PROGRAM, MIDI_LENGTH, CC_NUMBER, CC_VALUE, MIDI_BEND,
+    // MACRO
+    MACRO_MODEL, MACRO_TIMBRE, MACRO_COLOR,
 };
 
 struct InstrumentRow {
@@ -103,7 +105,9 @@ inline constexpr InstrumentRow EXTERNAL[] = {
     {K::SINGLE, C::MIDI_BEND},                           // 14
 };
 
-// No source to load: the sound is the model. The chain, the sends and the EQ as on a sampler.
+// No source to load: the sound is the model. Its three cells are SINGLEs, because each has a note
+// beside it saying what it is in that model (macro_model_text.h). The chain, the sends and the EQ as on
+// a sampler.
 inline constexpr InstrumentRow MACRO[] = {
     {K::NAME, C::TYPE},                                  //  0
     {K::SINGLE, C::NAME},                                //  1
@@ -111,13 +115,16 @@ inline constexpr InstrumentRow MACRO[] = {
     {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
     {K::SPACER},                                         //  4
     {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
-    {K::SPACER},                                         //  6
-    {K::DUAL, C::DRIVE, C::FILTER},                      //  7
-    {K::DUAL, C::CRUSH, C::FREQ},                        //  8
-    {K::DUAL, C::DOWNSAMPLE, C::RES},                    //  9
-    {K::SPACER},                                         // 10
-    {K::DUAL, C::REV, C::DEL},                           // 11
-    {K::SINGLE, C::EQ},                                  // 12
+    {K::SINGLE, C::MACRO_MODEL},                         //  6
+    {K::SINGLE, C::MACRO_TIMBRE},                        //  7
+    {K::SINGLE, C::MACRO_COLOR},                         //  8
+    {K::SPACER},                                         //  9
+    {K::DUAL, C::DRIVE, C::FILTER},                      // 10
+    {K::DUAL, C::CRUSH, C::FREQ},                        // 11
+    {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 12
+    {K::SPACER},                                         // 13
+    {K::DUAL, C::REV, C::DEL},                           // 14
+    {K::SINGLE, C::EQ},                                  // 15
 };
 }  // namespace instrument_rows
 

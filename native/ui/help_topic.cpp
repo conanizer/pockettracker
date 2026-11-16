@@ -110,6 +110,9 @@ HelpTopic instrument_topic(songcore::InstrumentType type, int row, int column) {
         case Cell::CC_NUMBER:    return HelpTopic::INST_MIDI_CC_NUMBER;
         case Cell::CC_VALUE:     return HelpTopic::INST_MIDI_CC_VALUE;
         case Cell::MIDI_BEND:    return HelpTopic::INST_MIDI_BEND;
+        case Cell::MACRO_MODEL:  return HelpTopic::INST_MACRO_MODEL;
+        case Cell::MACRO_TIMBRE: return HelpTopic::INST_MACRO_TIMBRE;
+        case Cell::MACRO_COLOR:  return HelpTopic::INST_MACRO_COLOR;
     }
     return HelpTopic::NONE;
 }
