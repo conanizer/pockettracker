@@ -45,13 +45,13 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, const GuideLines& lines, con
         // Word by word, so the buttons stand out from what they do.
         const std::string& s = line.text;
         int col = 0;
-        for (size_t i = 0; i < s.size();) {
-            if (s[i] == ' ') { ++i; ++col; continue; }
-            size_t end = i;
+        for (size_t pos = 0; pos < s.size();) {
+            if (s[pos] == ' ') { ++pos; ++col; continue; }
+            size_t end = pos;
             while (end < s.size() && s[end] != ' ') ++end;
-            col += draw_control_word(c, s.data() + i, static_cast<int>(end - i), x + TEXT_X + col * CHAR_W,
+            col += draw_control_word(c, s.data() + pos, static_cast<int>(end - pos), x + TEXT_X + col * CHAR_W,
                                      textY, line.ink, line.keyInk);
-            i = end;
+            pos = end;
         }
     }
 }

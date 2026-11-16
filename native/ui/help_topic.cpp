@@ -272,6 +272,7 @@ HelpTopic settings_cell_topic(int row, int column) {
             return second ? HelpTopic::SET_TEMPLATE_CLEAR : HelpTopic::SET_TEMPLATE_SAVE;
         case SettingsRow::RESUME:     return HelpTopic::SET_RESUME;
         case SettingsRow::TRACE:      return HelpTopic::SET_TRACE;
+        case SettingsRow::HELP:       return HelpTopic::NONE;   // retired row, never on screen
     }
     return HelpTopic::NONE;
 }
