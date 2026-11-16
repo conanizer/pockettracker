@@ -58,7 +58,8 @@ inline std::string default_table_name(int id)      { return "TBL"  + hex2(id); }
 enum class ModType { NONE, AHD, ADSR, LFO, DRUM, TRIG, TRACKING, SCALAR };
 enum class ModDest {
     NONE, VOLUME, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES,
-    SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH
+    SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH,
+    TIMBRE, COLOR   // a MACRO instrument's two controls; nothing on any other type
 };
 // SAMPLER and SOUNDFONT play in the engine; EXTERNAL leaves as MIDI (midi_out.h); MACRO is the vendored
 // macro-oscillator (vendor/braids), one of MACRO_MODEL_NAMES.
@@ -70,7 +71,7 @@ inline constexpr const char* MOD_TYPE_NAMES[] = {"NONE", "AHD", "ADSR", "LFO", "
                                                  "TRACKING", "SCALAR"};
 inline constexpr const char* MOD_DEST_NAMES[] = {"NONE", "VOLUME", "PAN", "PITCH", "FINE_PITCH",
                                                  "FILTER_CUTOFF", "FILTER_RES", "SAMPLE_START",
-                                                 "MOD_AMT", "MOD_RATE", "MOD_BOTH"};
+                                                 "MOD_AMT", "MOD_RATE", "MOD_BOTH", "TIMBRE", "COLOR"};
 inline constexpr const char* INSTRUMENT_TYPE_NAMES[] = {"SAMPLER", "SOUNDFONT", "EXTERNAL", "MACRO"};
 
 // A MACRO instrument's models. A file stores the name; the index is the oscillator's own shape number
@@ -88,7 +89,8 @@ inline constexpr const char* MACRO_MODEL_NAMES[] = {
 inline constexpr const char* MOD_TYPE_DISPLAY_NAMES[] = {"---", "AHD", "ADSR", "LFO", "DRUM", "TRIG",
                                                          "TRK", "SCL"};
 inline constexpr const char* MOD_DEST_DISPLAY_NAMES[] = {"---", "VOL", "PAN", "PITCH", "FINE", "CUT",
-                                                         "RES", "STA", "MOD A", "MOD R", "MOD B"};
+                                                         "RES", "STA", "MOD A", "MOD R", "MOD B",
+                                                         "TIMB", "COLR"};
 
 template <typename E, size_t N>
 inline const char* enum_name(E e, const char* const (&names)[N]) {

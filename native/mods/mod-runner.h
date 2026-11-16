@@ -75,7 +75,7 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
         const VoiceModSlot& mod = voice.voiceMods[m];
         if (mod.type == 0) continue;
         if (mod.dest == 0 || mod.dest == 1) continue;
-        if (mod.dest >= 7) continue;
+        if (mod.dest >= 7 && mod.dest <= 10) continue;
 
         const ModSourceId srcId = sourceOf(mod, m);
         ParamId destId;
@@ -86,6 +86,9 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
             case 4: destId = PARAM_PITCH;      scale = mod.effectiveAmt * 1.0f;   break;
             case 5: destId = PARAM_FILTER_CUT; scale = mod.effectiveAmt * 255.0f; break;
             case 6: destId = PARAM_FILTER_RES; scale = mod.effectiveAmt * 255.0f; break;
+            // A MACRO voice's two controls; read by no other voice.
+            case 11: destId = PARAM_MACRO_TIMBRE; scale = mod.effectiveAmt * 255.0f; break;
+            case 12: destId = PARAM_MACRO_COLOR;  scale = mod.effectiveAmt * 255.0f; break;
             default: continue;
         }
         routes[routeCount++] = { srcId, destId, scale, MOD_SRC_NONE, 0.0f };

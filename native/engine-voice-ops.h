@@ -81,6 +81,15 @@ static inline void voiceSetCrush(IAudioVoice& v, int packed) {
     v.params.setBase(PARAM_DOWNSAMPLE, (float)songcore::crush_cmd_downsample(packed));
 }
 
+// TMB / CLR: a MACRO voice's TIMBRE and COLOR, which its oscillators glide to. Any other voice holds the
+// number and never reads it.
+static inline void voiceSetMacroTimbre(IAudioVoice& v, int value) {
+    v.params.setBase(PARAM_MACRO_TIMBRE, (float)value);
+}
+static inline void voiceSetMacroColor(IAudioVoice& v, int value) {
+    v.params.setBase(PARAM_MACRO_COLOR, (float)value);
+}
+
 // REV / DEL
 template <typename V> static inline void voiceSetSends(V& v, float rev, float dly) {
     v.reverbSend.set(rev, v.chain.started);
@@ -156,6 +165,8 @@ static inline void applyVoiceCc(V& v, int cc, float value, float sampleRate) {
         // Retunes a sounding note: 0x80 is in tune, the ends a semitone either way.
         case CC_FINE_TUNE:   voiceSetFineTune(v, byte); break;
         case CC_LOOP_SLIDE:  voiceSlideLoop(v, byte); break;  // ⚠️ accumulates: two records slide twice
+        case CC_MACRO_TIMBRE: voiceSetMacroTimbre(v, byte); break;
+        case CC_MACRO_COLOR:  voiceSetMacroColor(v, byte);  break;
         default: break;
     }
 }

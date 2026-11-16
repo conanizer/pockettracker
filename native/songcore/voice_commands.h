@@ -17,6 +17,7 @@ namespace songcore {
 enum VoiceLane : int {
     LANE_REVERB_SEND, LANE_DELAY_SEND, LANE_FILTER_MODE, LANE_FILTER_CUT, LANE_FILTER_RES,
     LANE_DRIVE, LANE_CRUSH, LANE_FINE_TUNE,
+    LANE_MACRO_TIMBRE, LANE_MACRO_COLOR,
     LANE_LOOP_SLIDE,
     VOICE_LANES
 };
@@ -43,6 +44,8 @@ inline constexpr VoiceCommand VOICE_COMMANDS[] = {
     { FX_DRV,   CC_DRIVE,       LANE_DRIVE,       true  },
     { FX_CRU,   CC_CRUSH,       LANE_CRUSH,       true  },
     { FX_FIN,   CC_FINE_TUNE,   LANE_FINE_TUNE,   false },   // goes out as the pitch wheel (midi_out.h)
+    { FX_TMB,   CC_MACRO_TIMBRE, LANE_MACRO_TIMBRE, false },   // this engine's oscillators only
+    { FX_CLR,   CC_MACRO_COLOR,  LANE_MACRO_COLOR,  false },
     { FX_LPO,   CC_LOOP_SLIDE,  LANE_LOOP_SLIDE,  true  },
 };
 

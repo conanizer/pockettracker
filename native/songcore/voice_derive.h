@@ -110,6 +110,8 @@ inline int mod_dest_code(ModDest dest) {
         case ModDest::MOD_AMT:       return 8;   // scales the NEXT slot's amount
         case ModDest::MOD_RATE:      return 9;   // scales the NEXT slot's time/freq
         case ModDest::MOD_BOTH:      return 10;
+        case ModDest::TIMBRE:        return 11;  // a MACRO voice's two controls
+        case ModDest::COLOR:         return 12;
         default:                     return 0;
     }
 }

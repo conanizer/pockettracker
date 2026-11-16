@@ -48,6 +48,9 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_DRV,    CC_DRIVE,       false, RampKind::BYTE },
     // FIN ramps as a pitch bend: it retunes the sounding note (effects.h).
     { FX_FIN,    CC_FINE_TUNE,   false, RampKind::BYTE },
+    // A MACRO note's two controls, swept.
+    { FX_TMB,    CC_MACRO_TIMBRE, false, RampKind::BYTE },
+    { FX_CLR,    CC_MACRO_COLOR,  false, RampKind::BYTE },
     // PVB / PVX: speed and depth in one byte, each nibble ramped on its own; ticks are EV_EXT_VIBRATO.
     { FX_PVB,    0,              false, RampKind::VIBRATO },
     { FX_PVX,    0,              false, RampKind::VIBRATO },

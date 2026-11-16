@@ -10,7 +10,7 @@ using songcore::FX_ARC, songcore::FX_ARPEGGIO, songcore::FX_BPF, songcore::FX_CH
       songcore::FX_FIN, songcore::FX_HOP, songcore::FX_HPF, songcore::FX_INS, songcore::FX_KILL,
       songcore::FX_LPF, songcore::FX_LPO, songcore::FX_OFFSET, songcore::FX_PAN, songcore::FX_RES,
       songcore::FX_RND, songcore::FX_RNL, songcore::FX_THO, songcore::FX_TIC, songcore::FX_TIM,
-      songcore::FX_VOLUME;
+      songcore::FX_TMB, songcore::FX_CLR, songcore::FX_VOLUME;
 
 // A TIC in the LAST row sets its column's rate (FX1 → lane 0 …); a column without one keeps the
 // instrument's. ⚠️ Only this row's TIC is read at the trigger, so it holds from row 0; a TIC anywhere
@@ -560,6 +560,9 @@ void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, flo
         // ⚠️ Writes the pitch BASE; the TRANSPOSE column drives the MOD half — the two add.
         case FX_FIN: voiceSetFineTune(voice, fxValue);  break;
 
+        case FX_TMB: voiceSetMacroTimbre(voice, fxValue); break;
+        case FX_CLR: voiceSetMacroColor(voice, fxValue);  break;
+
         // ⚠️ Accumulates, unlike every other arm: under a HOP the loop window walks a step per tic.
         case FX_LPO: voiceSlideLoop(voice, fxValue);    break;
 
@@ -656,6 +659,8 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
             case FX_DRV: voiceSetDrive(voice, value);     break;
             // A glide: two semitones end to end.
             case FX_FIN: voiceSetFineTune(voice, value);  break;
+            case FX_TMB: voiceSetMacroTimbre(voice, value); break;
+            case FX_CLR: voiceSetMacroColor(voice, value);  break;
             // The tape swoop; latched like the per-row arm.
             case FX_TIM:
                 delaySend.setTimeFree(value);

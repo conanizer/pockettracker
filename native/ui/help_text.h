@@ -895,7 +895,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "filter cutoff, resonance or",
       "sample start. MOD A, MOD R and",
       "MOD B change the amount, the",
-      "speed or both of the next mod."},
+      "speed or both of the next mod.",
+      "TIMB and COLR move a MACRO",
+      "instrument TIMBRE and COLOR."},
      {"A+D-PAD picks the target"}},
     /* MOD_AMOUNT */
     {"AMT: how far it moves", "00 does nothing, FF is the", "full swing.",
