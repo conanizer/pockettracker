@@ -21,7 +21,7 @@ One codebase and one audio engine across Android, Linux handhelds, Linux desktop
 ## Features
 
 ### Instruments
-Two instrument types: a **sampler** that loads WAV, MP3, M4A, FLAC, OGG and Opus files, and a **SoundFont** player for SF2 and SF3 files.
+Four instrument types: a **sampler** that loads WAV, MP3, M4A, FLAC, OGG and Opus files, a **SoundFont** player for SF2 and SF3 files, a **macrosynth** with 47 built-in models (based on Mutable Instruments' Braids), and an **external** instrument to drive other devices via MIDI.
 
 ### Sampling from video
 Just screen record stuff from YouTube or your favourite video games and sample it with the built-in video-to-WAV converter!
@@ -188,7 +188,7 @@ The engine, the sequencer and the whole UI are portable C++17 under `native/`; e
 
 ## Credits
 
-PocketTracker is built on excellent open-source work — Oboe, DaisySP, TinySoundFont, KissFFT, dr_libs, libopus, and more. Inspired by **M8**, **LGPT**, and **LSDJ**.
+PocketTracker is built on excellent open-source work — Oboe, DaisySP, TinySoundFont, Braids, KissFFT, dr_libs, libopus, and more. Inspired by **M8**, **LGPT**, and **LSDJ**.
 
 Full attributions, licenses, and DSP algorithm references: [`CREDITS.md`](CREDITS.md).
 

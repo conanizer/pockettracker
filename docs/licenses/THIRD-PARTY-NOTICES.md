@@ -197,6 +197,40 @@ SOFTWARE.
 
 ---
 
+## Braids and stmlib — MIT
+
+Used for: the MACRO instrument's oscillators (`native/vendor/braids/`) — the macro-oscillator from the
+Braids module's source and the four stmlib files it uses, by Emilie Gillet. Two local changes, listed
+in `native/vendor/braids/PT-VENDORING.md`. Notice as carried in each source file and in
+`native/vendor/braids/stmlib/LICENSE`.
+
+```
+Copyright 2012 Emilie Gillet.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+"Mutable Instruments" is a registered trademark of the module's maker. PocketTracker is not affiliated
+with it.
+
+---
+
 ## Soundpipe (pareq) — MIT
 
 Used for: the parametric-EQ biquad (`native/effects/soundpipe/pareq.c`), a stub extracted from

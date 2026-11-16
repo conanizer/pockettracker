@@ -11,6 +11,7 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [Oboe](https://github.com/google/oboe) | Apache 2.0 | Low-latency Android audio stream |
 | [DaisySP](https://github.com/electro-smith/DaisySP) | MIT **and** LGPL-2.1 (mixed — see note) | SVF filter, ReverbSc, DelayLine, Compressor, Limiter, BitCrush |
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | SF2 / SoundFont2 synthesizer (with per-channel rendering fork) |
+| [Braids](https://github.com/pichenettes/eurorack/tree/master/braids) and [stmlib](https://github.com/pichenettes/stmlib) by Émilie Gillet | MIT | The oscillators of the MACRO instrument: 47 synthesis models |
 | [KissFFT](https://github.com/mborgerding/kissfft) | BSD-3-Clause | FFT for spectrum analyzer and transient detection |
 | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (pareq stub) | MIT | Parametric EQ biquad |
 | [Dragonfly Reverb](https://github.com/michaelwillis/dragonfly-reverb) | GPL-3.0 | The HALL, ROOM, PLATE and FOIL reverbs |
