@@ -44,7 +44,7 @@ PocketTracker is a sample-based music tracker for Android handhelds and budget A
 
 **New to trackers?** A tracker is a music sequencer where notes are arranged in a grid, with time flowing downward. Each row is a step, each column carries a parameter (note, instrument, volume, effect). Songs are built by chaining together short patterns called **phrases**, grouped into **chains**, arranged in a **song**. Think of it as building music from small, reusable blocks.
 
-PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2 / SF3)** files that you load yourself — there are no bundled samples.
+PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2 / SF3)** files that you load yourself (there are no bundled samples), or from **MACRO**, a built-in synth with 47 models that needs no file.
 
 ### Minimum requirements
 
@@ -577,7 +577,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 | A + LEFT/RIGHT | +1 / −1 semitone (note — or the next note of the scale, see [section 14](#14-scale-screen)), +1 / −1 (other values) |
 | A + UP/DOWN | ±1 octave (note), ±16 (other values) |
 | A + B | Delete value at cursor |
-| A + B on an empty note | Insert **OFF** — the note sounding on the track is let go |
+| A + B on an empty note | Insert **OFF** — the note sounding on the track is let go (see [How a note ends](#how-a-note-ends)) |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
 | R + B on a command | Switch it off / on — it stays in its cell, drawn dim, and plays as an empty one. Let go of B before R to switch it back; a selection switches every command in it |
 | L + R | Switch every command in this phrase back on — one thing per press, most recent first, as with muted tracks |
@@ -652,7 +652,7 @@ works stays lit even when its two halves are in different phrases of the same ch
 
 ## 10. INSTRUMENT Screen
 
-The INSTRUMENT screen configures how a sample or SF2 preset is played, or what an outside MIDI device is sent.
+The INSTRUMENT screen configures how a sample or SF2 preset is played, which synth model a MACRO instrument plays, or what an outside MIDI device is sent.
 
 Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch between instruments without leaving the screen, and **B+UP/DOWN** to jump 16 at a time.
 
@@ -660,7 +660,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 
 | Parameter | Range | Description |
 |---|---|---|
-| TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and an EXTERNAL instrument has neither button. Changing the type of an instrument with a sound file or settings of its own asks first: **DISCARD** starts the new type afresh, **KEEP** takes the settings along, **CANCEL** leaves it. Both keep the level, pan, sends, EQ and table. |
+| TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and EXTERNAL and MACRO instruments have neither button. Changing the type of an instrument with a sound file or settings of its own asks first: **DISCARD** starts the new type afresh, **KEEP** takes the settings along, **CANCEL** leaves it. Both keep the level, pan, sends, EQ and table. |
 | NAME | — | Instrument name. Press A to edit it on the keyboard overlay. |
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
@@ -718,6 +718,83 @@ OUTPUT row ([section 22](#22-midi-screen)). Choose it with A + D-pad on TYPE.
 | CC A – CC D | `--` / 00–7F | Four controller slots, each a controller number and the **VAL** to send to it. A filled slot is sent with every note; `CCA`–`CCD` move it from a phrase (section 23). |
 | BEND | 01–48 | How many semitones the device bends at full wheel. The pitch commands are scaled to it, and the device is told it before the first bend. A device that does not take that message needs the same number set on it. |
 
+### MACRO instrument parameters
+
+A MACRO instrument is a synth: there is no file to load, and its sound is one of 47 models. Choose it
+with A + D-pad on TYPE. Each model is played by two controls, TIMBRE and COLOR, and what they do
+depends on the model: the screen says, beside each of the three cells. The oscillators are Émilie
+Gillet's Braids, under the MIT licence (see `CREDITS.md`).
+
+| Parameter | Range | Description |
+|---|---|---|
+| MODEL | `CSAW` – `QPSK` | The model, by its four-letter name, with what it is beside it. A + LEFT/RIGHT steps one model, A + UP/DOWN eight. A change is heard from the next note. A + B goes back to `CSAW`. |
+| TIMBRE | 00–FF | The model's first control (see the table below). `80` by default. A change moves a note already sounding, and so do `TMB`, a ramp and a TIMB modulation slot. |
+| COLOR | 00–FF | The model's second control. `80` by default. `CLR` and COLR move it the same way. |
+
+ROOT, DETUNE, TIC, VOL, TSP, PAN, DRIVE, FILTER, CRUSH, FREQ, DWNSMPL, RES, REV, DEL and EQ work as
+on a WAV instrument. Playing the ROOT note sounds C-4, as on a SoundFont. What only a sample has does
+nothing on a MACRO instrument: `OFF`, `SLI`, `BCK`, `LPO` and the STA modulation destination.
+
+A MACRO note **holds until something ends it**: the next note on the track, an OFF, a `KIL` or
+stopping playback. That goes for a drum or a plucked string too, after its sound has died away. To
+give a note a definite length, put an **AHD** or **DRUM** on VOL on the MODULATION screen; that also
+lets a hit ring on after a MIDI key is let go. See [How a note ends](#how-a-note-ends).
+
+`CHD` plays its chord on four oscillators, and `ARC` strums it as on any instrument.
+
+| Model | What it is | TIMBRE | COLOR |
+|---|---|---|---|
+| `CSAW` | CS-80 saw | Notch width | Notch polarity |
+| `MRPH` | Variable wave | Waveshape | Distort / filter |
+| `SWSQ` | Saw / square | Pulse width | Saw to square |
+| `FOLD` | Wavefolder | Fold amount | Sine to triangle |
+| `BUZZ` | Harmonic combs | Smoothness | Detune |
+| `SUBQ` | Square + sub | Pulse width | Sub -2 / -1 oct |
+| `SUBS` | Saw + sub | Saw shape | Sub -2 / -1 oct |
+| `SYNQ` | Synced square | Frequency ratio | Balance |
+| `SYNS` | Synced saw | Frequency ratio | Balance |
+| `SAW3` | Triple saw | Osc 2 detune | Osc 3 detune |
+| `SQR3` | Triple square | Osc 2 detune | Osc 3 detune |
+| `TRI3` | Triple triangle | Osc 2 detune | Osc 3 detune |
+| `SIN3` | Triple sine | Osc 2 detune | Osc 3 detune |
+| `RING` | Ring-mod sines | Osc 2 ratio | Osc 3 ratio |
+| `SWRM` | Saw swarm | Detune | High-pass filter |
+| `COMB` | Comb-filter saw | Delay time | Feedback -/+ |
+| `TOY*` | Circuit-bent toy | Sample rate | Bit toggling |
+| `ZLPF` | LP filtered wave | Cutoff | Waveshape |
+| `ZPKF` | PK filtered wave | Cutoff | Waveshape |
+| `ZBPF` | BP filtered wave | Cutoff | Waveshape |
+| `ZHPF` | HP filtered wave | Cutoff | Waveshape |
+| `VOSM` | Two formants | Formant 1 | Formant 2 |
+| `VOWL` | Lo-fi vowels | Vowel a e i o u | Gender |
+| `VFOF` | Hi-fi vowels | Vowel a e i o u | Gender |
+| `HARM` | 14 harmonics | Harmonic number | Peakedness |
+| `FM` | 2-operator FM | Modulation index | Frequency ratio |
+| `FBFM` | Feedback FM | Modulation index | Frequency ratio |
+| `WTFM` | Chaotic FM | Modulation index | Frequency ratio |
+| `PLUK` | Plucked string | Decay | Pluck position |
+| `BOWD` | Bowed string | Friction | Bow position |
+| `BLOW` | Reed | Air pressure | Geometry |
+| `FLUT` | Flute | Air pressure | Geometry |
+| `BELL` | Bell | Decay | Harmonicity |
+| `DRUM` | Metallic drum | Decay | Harmonicity |
+| `KICK` | 808 bass drum | Decay | Brightness |
+| `CYMB` | Cymbal noise | Cutoff | Noisiness |
+| `SNAR` | 808 snare drum | Tone | Noisiness/decay |
+| `WTBL` | 21 wavetables | Position | Table |
+| `WMAP` | 16x16 wave map | X position | Y position |
+| `WLIN` | Wavetable scan | Position | Interpolation |
+| `WTX4` | Wavetable chords | Position | Chord type |
+| `NOIS` | Tuned noise | Resonance | LP to HP |
+| `TWNQ` | Twin-peak noise | Resonance | Peak spacing |
+| `CLKN` | Clocked noise | Cycle length | Quantization |
+| `CLOU` | Grain cloud | Grain density | Freq dispersion |
+| `PRTC` | Droplets | Grain density | Freq dispersion |
+| `QPSK` | Modem noise | Bit rate | Data |
+
+> [!TIP]
+> The models differ a lot in level: a plain wave such as `SQR3` is far louder than `BELL` or `PLUK`. Balance them with VOL.
+
 ### Volume chain
 
 Volume is applied in this order:
@@ -767,6 +844,29 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 
 > [!NOTE]
 > Set **LOOP END** below **END** to reserve a release tail. Leaving **LOOP END = FF** makes the loop run to the sample end (the classic behaviour) with no separate tail.
+
+### How a note ends
+
+A track plays one note at a time; a chord counts as one. What ends it, and how, depends on the
+instrument:
+
+| What happens | A sample played once | A looping sample, or MACRO | SoundFont | EXTERNAL |
+|---|---|---|---|---|
+| The next note on the track | A short fade | A short fade | A short fade | A note-off |
+| An **OFF** in the note column | An ADSR or TRIG on VOL plays its release; otherwise a short fade | The same | The SoundFont's own release | A note-off |
+| `KIL` | A short fade, whatever envelope | The same | A short fade | A note-off |
+| Letting go of a MIDI key | Plays out | An ADSR or TRIG on VOL plays its release. MACRO under an AHD or DRUM on VOL plays out. Otherwise a short fade | The SoundFont's own release | A note-off |
+| Nothing at all | Ends at the sample's END | Ends when every AHD, DRUM, ADSR or TRIG on VOL has finished (an ADSR or TRIG only after its release). With none, never | Ends when the SoundFont's sound does | Ends after LEN ticks; LEN `00` never |
+| Stopping playback | A short fade | A short fade | A short fade | A note-off |
+
+A short fade takes a few milliseconds, just enough not to click.
+
+`LEG` on the next note is the one exception to the first row: the note already sounding moves to the
+new pitch and carries on.
+
+**The OFF note.** On the PHRASE screen, press **A + B** on an empty note cell to write an OFF. It ends
+the track's note as the table says, playing a release where the instrument has one: the way to let a
+held note go without starting another. An OFF writes no instrument and plays nothing new.
 
 ### Navigating instruments
 
@@ -1041,7 +1141,7 @@ threes under a volume moving in fours.
 ```
 
 A table `AUS` can move **VOL**, **PAN**, **CUT**, **RES**, **LPF**, **HPF**, **BPF**, **DRV**, **FIN**,
-**TIM**, **EQN** and **EQM**; anything else to its left is
+**TMB**, **CLR**, **TIM**, **EQN** and **EQM**; anything else to its left is
 passed over. The fade follows the playhead of the column holding the value it is moving — `CUT` in
 FX1 above, so that fade runs at FX1's speed whichever column the `AUS` sits in. **HOP steers it** —
 back to the `AUS` row restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC`
@@ -1267,6 +1367,9 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | LFO | Cyclic oscillator |
 | TRIG | Envelope triggered by note, behaves like ADSR |
 
+On VOL, an AHD or DRUM gives a note a definite length, and an ADSR or TRIG holds it until it is let
+go. See [How a note ends](#how-a-note-ends).
+
 ### Modulation destinations
 
 | Dest | Affects |
@@ -1281,6 +1384,8 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | MOD A | Depth of the next mod slot |
 | MOD R | Speed of the next mod slot |
 | MOD B | Both depth and speed of the next mod slot |
+| TIMB | A MACRO instrument's TIMBRE (nothing on other types) |
+| COLR | A MACRO instrument's COLOR (nothing on other types) |
 
 ### Layout
 
@@ -1763,6 +1868,10 @@ Another PocketTracker's `REV`, `CUT` and the other commands above play on the no
 from its first sound; the next note starts from the instrument again.
 
 Keys are played, not recorded: nothing is written into the phrase.
+
+Letting go of a key releases its note: an ADSR or TRIG on VOL plays its release, while a sample that
+plays once rings on, and so does a MACRO note under an AHD or DRUM on VOL.
+See [How a note ends](#how-a-note-ends).
 
 ### Following another device
 
@@ -2323,6 +2432,7 @@ skipping any that are not:
 | `LPF` `HPF` `BPF` | the cutoff of the filter they switch on |
 | `DRV` | the overdrive amount |
 | `FIN` | the fine tune — end to end is a two-semitone glide |
+| `TMB` `CLR` | a MACRO note's TIMBRE and COLOR |
 | `PVB` `PVX` | the vibrato — its speed and its depth each slide on their own |
 | `CHD` | the chord — each note slides to its place in the `AUF`'s chord (not on an EXTERNAL instrument) |
 | `EQN` | this track's EQ — **between two presets** (see below) |
@@ -2472,6 +2582,23 @@ apart beat against each other.
 It **retunes the note that is already playing**, so it can be written on a step of its own to bend a
 held note, and an `AUS`/`AUF` ramp across the whole byte is a two-semitone glide. On the same step as
 a note it tunes that note. Gone at the next note, like `CUT` and `DRV`, and it works on a table row.
+
+---
+
+### TMB `XX` — Timbre · CLR `XX` — Color
+
+Set a MACRO instrument's TIMBRE or COLOR for **this note**: the same two controls the INSTRUMENT screen
+holds, `00`–`FF`. What they shape depends on the model ([section 10](#macro-instrument-parameters)).
+On the same step as a note they are that note's values from its first sound; on a step of their own
+they move the note already playing, over a few milliseconds.
+
+```
+    00    C-3   TMB 20               ← a dark ZLPF note (its TIMBRE is the cutoff)
+    04    ---   TMB C0               ← opened up while it holds
+```
+
+The next note starts from the instrument's own values again. Both ramp with `AUS`/`AUF`, work on a
+table row, and do nothing on any other instrument type.
 
 ---
 
@@ -3355,6 +3482,8 @@ Open with **A** on an EQ cell.
 | DRV | Overdrive | `XX` | This note's overdrive, `00` clean to `FF` heavy |
 | CRU | Crush + Downsample | `XY` | `X` = bits crushed, `Y` = rate drop; both `0` = clean |
 | FIN | Fine Tune | `XX` | `80` in tune, a semitone either way; retunes a note already playing |
+| TMB | Timbre | `XX` | A MACRO note's TIMBRE; moves a note already playing |
+| CLR | Color | `XX` | A MACRO note's COLOR; moves a note already playing |
 | TSX | Transpose Multiplier | `XX` | How far TSP moves this note: `01` normal, `00` not at all, `FF` the other way. Phrase only |
 | INS | Instrument | `XX` | This note plays instrument `XX` (00–7F); randomize it with RND or RNL. On a table row it hands the note on to that instrument and its table |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
