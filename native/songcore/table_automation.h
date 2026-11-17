@@ -39,6 +39,8 @@ inline constexpr Arm ARMS[] = {
     { songcore::FX_DRV,    true,  false },
     { songcore::FX_CRU,    false, false },  // a packed pair, deliberately out of the registry
     { songcore::FX_FIN,    true,  false },
+    { songcore::FX_TMB,    true,  false },
+    { songcore::FX_CLR,    true,  false },
     { songcore::FX_LPO,    false, false },  // a relative STEP, so a ramp over it has nothing to interpolate
     { songcore::FX_TIM,    true,  false },  // the delay's echo time; a ramp over it is the tape swoop
 };

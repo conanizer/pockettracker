@@ -44,7 +44,7 @@ struct InstrumentParams {
 // One modulation slot; copied to VoiceModSlot at the trigger.
 struct InstrumentModSlot {
     int type = 0;            // 0 NONE, 1 AHD, 2 ADSR, 3 LFO, 4 DRUM, 5 TRIG, 6 SCALAR
-    int dest = 0;            // 0 NONE, 1 VOL, 2 PAN, 3 PITCH, 4 FINE_PITCH, 5 CUT, 6 RES, 7 STA, 8 MOD_AMT, 9 MOD_RATE, 10 MOD_BOTH
+    int dest = 0;            // 0 NONE, 1 VOL, 2 PAN, 3 PITCH, 4 FINE_PITCH, 5 CUT, 6 RES, 7 STA, 8 MOD_AMT, 9 MOD_RATE, 10 MOD_BOTH, 11 TIMBRE, 12 COLOR
     float amount = 0.5f;     // 0-1
     int attackSamples = 0;
     int holdSamples = 0;     // AHD only

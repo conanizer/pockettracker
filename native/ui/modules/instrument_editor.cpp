@@ -4,6 +4,7 @@
 
 #include "ui/helpers.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/macro_model_text.h"
 
 namespace pt::ui {
 
@@ -96,6 +97,8 @@ constexpr FieldCell FIELD_CELLS[] = {
     flag_cell(Cell::REVERSE,     "REVERSE",  &Instrument::reverse),
     // LEN 00 is gate-to-next, a mode, not empty: A+B resets to it.
     byte_cell(Cell::MIDI_LENGTH, "LEN",      &Instrument::midiLen,      0x00, D::NONE, ValueUnit::MIDI_LENGTH),
+    byte_cell(Cell::MACRO_TIMBRE, "TIMBRE",  &Instrument::macroTimbre,  0x80),
+    byte_cell(Cell::MACRO_COLOR, "COLOR",    &Instrument::macroColor,   0x80),
 };
 
 const FieldCell* field_cell(Cell cell) {
@@ -105,6 +108,20 @@ const FieldCell* field_cell(Cell cell) {
 }
 
 const char* on_off(bool v) { return v ? "on" : "off"; }
+
+// What a MACRO cell is in the instrument's model; null for every other cell.
+const char* macro_note(Cell cell, const Instrument& ins) {
+    const MacroModelText& text = macro_model_text(ins.macroModel);
+    switch (cell) {
+        case Cell::MACRO_MODEL:  return text.about;
+        case Cell::MACRO_TIMBRE: return text.timbre;
+        case Cell::MACRO_COLOR:  return text.color;
+        default:                 return nullptr;
+    }
+}
+
+// Where a MACRO cell's note starts: past the widest value there, a model's four letters.
+constexpr int MACRO_NOTE_X = 5 * CHAR_W;
 
 const char* cell_label(Cell cell, int cc_slot_index) {
     static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
@@ -123,6 +140,7 @@ const char* cell_label(Cell cell, int cc_slot_index) {
         case Cell::CC_NUMBER:    return CC_LABELS[clamp(cc_slot_index, 0, 3)];
         case Cell::CC_VALUE:     return "VAL";
         case Cell::MIDI_BEND:    return "BEND";
+        case Cell::MACRO_MODEL:  return "MODEL";
         default:                 return "";   // the table's, or drawn by their own rows
     }
 }
@@ -166,6 +184,7 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
             const auto* slot = cc_slot(ins, cc_slot_index);
             return slot ? midi_opt(slot->value) : "";
         }
+        case Cell::MACRO_MODEL: return songcore::macro_model_name(ins.macroModel);
         // EQ has its own painter; the rest are the table's or drawn by their own rows.
         default:
             return "";
@@ -214,6 +233,9 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
                 break;
             case InstrumentRowKind::SINGLE:
                 pair(0, nameX, valueX);
+                // A MACRO cell says what it is in this model, in the labels' ink: it is not a value.
+                if (const char* note = macro_note(r.cells[0], ins))
+                    c.draw_text(note, valueX + MACRO_NOTE_X, textY, t.textParam, CHAR_SPACING, FONT_SCALE);
                 break;
             case InstrumentRowKind::DUAL:
                 pair(0, nameX, valueX);
@@ -269,6 +291,7 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     switch (type) {
         case InstrumentType::SOUNDFONT: typeText = "soundfont"; break;
         case InstrumentType::EXTERNAL:  typeText = "external";  break;
+        case InstrumentType::MACRO:     typeText = "macro";     break;
         case InstrumentType::SAMPLER:   break;
     }
 
@@ -385,6 +408,14 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             const auto* slot = cc_slot(ins, r.ccSlot);
             return slot ? midi_opt_context(slot->value, 127) : cc::none();
         }
+        // Steps through the models and stops at either end; A+B goes back to the first.
+        case Cell::MACRO_MODEL: {
+            const int last = songcore::MACRO_MODEL_COUNT - 1;
+            CursorContext c = cc::hex_byte(clamp(ins.macroModel, 0, last), 0, last, -1, false, false,
+                                           false, /*def=*/0);
+            c.largeStep = 8;
+            return c;
+        }
         default:
             return cc::none();   // the table's
     }
@@ -456,6 +487,10 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
             break;
         case Cell::CC_VALUE:
             if (auto* slot = cc_slot(ins, ccSlot)) optional(slot->value, 127);
+            break;
+
+        case Cell::MACRO_MODEL:
+            if (isSet) ins.macroModel = clamp(v, 0, songcore::MACRO_MODEL_COUNT - 1);
             break;
 
         // TYPE, NAME and the buttons are the dispatcher's: host verbs, not field writes.

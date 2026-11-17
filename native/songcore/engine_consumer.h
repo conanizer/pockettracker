@@ -17,6 +17,7 @@
 namespace songcore {
 
 // The engine's table rolls cap a command where the editor does.
+static_assert(MACRO_MODEL_COUNT == ::MacroBank::MODELS, "a name for every model the engine plays");
 static_assert(::tableFxCeiling(FX_INS) == effect_value_max(FX_INS) &&
               ::tableFxCeiling(FX_EQN) == effect_value_max(FX_EQN) &&
               ::tableFxCeiling(FX_CUT) == effect_value_max(FX_CUT),

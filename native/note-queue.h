@@ -52,6 +52,9 @@ struct ScheduledNote {
     int  sfPreset    = 0;
     float detuneSemitones = 0.0f; // the instrument's fine detune
 
+    // MACRO notes only: the model the note starts on. -1 = not one — a sample plays.
+    int macroModel = -1;
+
     // ⚠️ With `instrumentId >= 0` every field above is UNSET: it is derived at the trigger from the
     // program table, so a table row can change the instrument on the hit. -1 = arrived derived
     // (previews, retrigger, MIDI in, the file browser).

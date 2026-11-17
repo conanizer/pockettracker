@@ -29,6 +29,8 @@ enum class InstrumentCell {
     SLICE, LOOP, START, LOOP_START, END, LOOP_END, REVERSE,
     // EXTERNAL
     MIDI_CHANNEL, MIDI_BANK, MIDI_PROGRAM, MIDI_LENGTH, CC_NUMBER, CC_VALUE, MIDI_BEND,
+    // MACRO
+    MACRO_MODEL, MACRO_TIMBRE, MACRO_COLOR,
 };
 
 struct InstrumentRow {
@@ -102,12 +104,35 @@ inline constexpr InstrumentRow EXTERNAL[] = {
     {K::SPACER},                                         // 13
     {K::SINGLE, C::MIDI_BEND},                           // 14
 };
+
+// No source to load: the sound is the model. Its three cells are SINGLEs, because each has a note
+// beside it saying what it is in that model (macro_model_text.h). The chain, the sends and the EQ as on
+// a sampler.
+inline constexpr InstrumentRow MACRO[] = {
+    {K::NAME, C::TYPE},                                  //  0
+    {K::SINGLE, C::NAME},                                //  1
+    {K::TRIPLE, C::ROOT, C::DETUNE, C::TIC},             //  2
+    {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
+    {K::SPACER},                                         //  4
+    {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
+    {K::SINGLE, C::MACRO_MODEL},                         //  6
+    {K::SINGLE, C::MACRO_TIMBRE},                        //  7
+    {K::SINGLE, C::MACRO_COLOR},                         //  8
+    {K::SPACER},                                         //  9
+    {K::DUAL, C::DRIVE, C::FILTER},                      // 10
+    {K::DUAL, C::CRUSH, C::FREQ},                        // 11
+    {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 12
+    {K::SPACER},                                         // 13
+    {K::DUAL, C::REV, C::DEL},                           // 14
+    {K::SINGLE, C::EQ},                                  // 15
+};
 }  // namespace instrument_rows
 
 inline int instrument_row_count(songcore::InstrumentType type) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return static_cast<int>(std::size(instrument_rows::SOUNDFONT));
         case songcore::InstrumentType::EXTERNAL:  return static_cast<int>(std::size(instrument_rows::EXTERNAL));
+        case songcore::InstrumentType::MACRO:     return static_cast<int>(std::size(instrument_rows::MACRO));
         case songcore::InstrumentType::SAMPLER:   break;
     }
     return static_cast<int>(std::size(instrument_rows::SAMPLER));
@@ -120,6 +145,7 @@ inline InstrumentRow instrument_row(songcore::InstrumentType type, int row) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return instrument_rows::SOUNDFONT[r];
         case songcore::InstrumentType::EXTERNAL:  return instrument_rows::EXTERNAL[r];
+        case songcore::InstrumentType::MACRO:     return instrument_rows::MACRO[r];
         case songcore::InstrumentType::SAMPLER:   break;
     }
     return instrument_rows::SAMPLER[r];

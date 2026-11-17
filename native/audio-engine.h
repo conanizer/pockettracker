@@ -21,6 +21,7 @@
 #include "soundfont-trim.h"
 #include "note-queue.h"
 #include "instrument-params.h"
+#include "macro-source.h"
 #include "table-store.h"
 #include "effects/send-chain.h"
 #include "effects/master-chain.h"
@@ -538,7 +539,11 @@ private:
     void prepareSamplerPiece(Voice& voice, int frames, float sampleRate);
     void mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to);
     // ⚠️ Compiled twice: a single note must not pay for a chord's playheads in its loop.
-    template <bool Chord> void mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to);
+    template <bool Chord, bool Macro>
+    void mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to);
+    void startMacroVoice(int v, const ScheduledNote& note);
+    void renderMacroNotes(Voice& voice, float rate, int from, int to, const int* wait, int notes,
+                          float sampleRate);
     void mixSoundfontVoices(BlockMix& b);
     void prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int frames, float sampleRate);
     void renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const BlockMix& b, int from, int to);
@@ -664,6 +669,8 @@ private:
     void prepareReverb();   // control thread — the one place the reverb's engines are allocated
 
     Voice voices[MAX_VOICES];
+    // The MACRO oscillators, four to a voice of `voices`, by its index. Made once, here.
+    std::unique_ptr<MacroBank> macroBank = std::make_unique<MacroBank>(MAX_VOICES);
 
     // Where a TIC00 table stands once no voice is left to carry it, so the next note and the TABLE
     // screen continue from there. Written only in the sampler table-tick loop; per column.
@@ -1012,6 +1019,7 @@ private:
     float revWetL[PROCESS_SUBBLOCK], revWetR[PROCESS_SUBBLOCK];
     float dlyWetL[PROCESS_SUBBLOCK], dlyWetR[PROCESS_SUBBLOCK];
     float instrSpectrumTempL[PROCESS_SUBBLOCK];                           // the monitored instrument, mono
+    float macroBuf[MacroBank::NOTES][PROCESS_SUBBLOCK];                   // a MACRO voice's notes for one piece
     float sfBuf[PROCESS_SUBBLOCK * 2];                                    // a track's SF render, interleaved
     float sfNoteBuf[PROCESS_SUBBLOCK * 2];                                // a stealing note's own pass
     float trackWaveAccumL[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];

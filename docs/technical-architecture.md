@@ -76,6 +76,7 @@ native/                            The portable program
 ├── audio-decoders.cpp / .h        WAV, MP3, FLAC, OGG, Opus, M4A decoding
 ├── sampler-voice.h                Per-voice state for sample playback
 ├── soundfont-voice.cpp / .h       Per-voice state for SF2/SF3 (TinySoundFont — see the note below)
+├── macro-source.cpp / .h          MACRO's oscillators: Braids, four per sampler voice (see below)
 ├── note-queue.h                   Sample-accurate note, kill and parameter queues
 ├── instrument-params.h            An instrument's engine copy: sample window, filter, EQ, mod slots
 ├── table-store.h                  The 256 tables the audio thread reads without waiting
@@ -191,6 +192,13 @@ docs/                              The manual, this document, and the licence no
 >    per-block voice gain rather than applied per sample, which is exact because everything between the
 >    fetch and that gain (the interpolation, the lowpass) is linear.
 
+> **Braids carries two local changes**, both in `vendor/braids/braids/digital_oscillator.cc` and
+> listed with the reasons in `vendor/braids/PT-VENDORING.md`, and both must be
+> **re-applied on any update**. It is built as its own target with stmlib's `TEST` defined and with
+> `-fwrapv`, because the code overflows 32-bit signed arithmetic on purpose, as the module's ARM core
+> wraps it. `macro-source.cpp` is the only file that includes its headers. A caller must keep the
+> oscillator's pitch within 0..16383 (MIDI note × 128): outside it, tables are read past their ends.
+
 ---
 
 ## The Seams
@@ -302,6 +310,15 @@ Its grid is a quarter note measured from the transport's own start frame, which 
 Two voice types — `SamplerVoice` and `SoundfontVoice` — both driven by the same note path. A
 dedicated **preview lane** (voice 9) carries auditions, so hearing a note you are dialling in never
 steals a voice from the song.
+
+A **MACRO** note is a `SamplerVoice` with no sample. Its samples come from `MacroBank`
+(`macro-source.h`): four Braids oscillators per voice, one for the note and three for a chord,
+allocated once with the engine. They run at twice the engine rate — at 48 kHz, the 96 kHz they were
+written for — and a 35-tap halfband filter halves that. The pitch is the voice's playback rate, so
+every pitch source a sample obeys moves it with no code of its own. Ahead of the instrument chain, a
+one-pole high-pass at 10 Hz takes out the constant offset several models carry, as the module's output
+stage does. `mixSamplerPieceAs<Chord, Macro>` compiles the sampler's loop without the sample playhead
+for it, so a sampler voice runs exactly the code it ran before MACRO.
 
 Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
 TRIG voice rings until something explicitly stops it.
@@ -523,6 +540,9 @@ compared as raw binary32 bits:
 Random effects (CHA, RND, RNL, random-mode ARP), `oscShape >= 8` RND/DRNK LFOs, and DUST on the
 master bus are clock-seeded and therefore **not** byte-reproducible. Whether a given project can be
 byte-compared at all is a property of the project, and has to be answered before any A/B.
+
+MACRO's noise and physical models draw on one random generator that every Braids oscillator shares.
+`resetEffectState` reseeds it, so a render repeats; live playback does not.
 
 ---
 
@@ -953,3 +973,5 @@ inserting an entry leaves saved songs alone but moves what every index reaches �
 picker, the recorded input tests. The same applies to `SettingsRow`, `ProjectRow` and
 `InstrumentType`, all of which are persisted or recorded by number. Where a build hides a member, it
 hides one from the **end** of the list and the walkers skip it — they never close the gap.
+`InstrumentType` is the exception: MACRO was appended after EXTERNAL, so a build without MIDI
+passes over EXTERNAL in the TYPE cycle (`step_instrument_type`) rather than stopping short of it.

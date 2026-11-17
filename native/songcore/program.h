@@ -24,7 +24,9 @@ inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi
 constexpr float C4_HZ = 261.63f;
 
 // Instrument kinds as numbers, in InstrumentType's order. ⚠️ A number is an identity: append only.
-enum ProgramType : int8_t { PROGRAM_SAMPLER = 0, PROGRAM_SOUNDFONT = 1, PROGRAM_EXTERNAL = 2 };
+enum ProgramType : int8_t {
+    PROGRAM_SAMPLER = 0, PROGRAM_SOUNDFONT = 1, PROGRAM_EXTERNAL = 2, PROGRAM_MACRO = 3
+};
 
 // One instrument, flattened by make_program() (voice_derive.h) with the loaders' rate ratio and slot.
 // ⚠️ `sliceMarkers` is a VIEW into caller-owned memory that must outlive the Program.
@@ -41,6 +43,10 @@ struct Program {
     int32_t sfPreset       = 0;
     int32_t tableTicRate   = 6;
     int32_t slicingMode    = 0;       // 0 off, 1 CUT, 2 TRU
+    // PROGRAM_MACRO only: the model (an index into MACRO_MODEL_NAMES), TIMBRE and COLOR (00-FF).
+    int32_t macroModel     = 0;
+    int32_t macroTimbre    = 0x80;
+    int32_t macroColor     = 0x80;
 
     const int64_t* sliceMarkers = nullptr;
     int32_t        sliceCount   = 0;
@@ -77,6 +83,14 @@ struct ProgramTable {
         return p;
     }
 };
+
+// A MACRO program plays in a sampler voice with no sample behind it: its sound is the oscillator's.
+inline bool program_is_macro(const Program& p) { return p.type == PROGRAM_MACRO; }
+
+// Nothing to play: an empty sampler slot, or a SoundFont instrument that names no file.
+inline bool program_is_empty(const Program& p) {
+    return !p.hasSample && !p.hasSoundfont && !program_is_macro(p);
+}
 
 // ⚠️ Must agree with model.h's note_selects_slice(), which the scale quantizer asks.
 inline bool program_selects_slice(const Program& p, int sliceOverride) {
@@ -186,8 +200,8 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
                                            int tempo, int sampleRate, int64_t sampleLength) {
     SamplerNoteArgs a;
     // ⚠️ An empty slot is "no sample FILE", nothing else — or stale engine PCM would sound for an
-    // instrument the UI shows as empty.
-    if (!p.hasSample) return a;   // valid = false → dropped
+    // instrument the UI shows as empty. A MACRO program needs no file.
+    if (!p.hasSample && !program_is_macro(p)) return a;   // valid = false → dropped
 
     // Recover (pitch, octave) by the raw formula; a 0..127 guard would empty an authored B-9 (131).
     int notePitch  = n.note % 12;

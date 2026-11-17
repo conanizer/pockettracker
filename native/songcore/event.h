@@ -136,6 +136,10 @@ constexpr uint8_t CC_LOOP_SLIDE = 141;  // scheduleVoiceLoopSlide (authored byte
 // The delay's echo time (TIM). ⚠️ Rides TRACK_GLOBAL like CC_MASTER_VOL: the delay is a shared send.
 constexpr uint8_t CC_DELAY_TIME = 142;  // scheduleDelayTime (authored byte /255), TRACK_GLOBAL
 
+// TMB and CLR: a MACRO voice's TIMBRE and COLOR. Nothing goes on the wire.
+constexpr uint8_t CC_MACRO_TIMBRE = 143;  // (authored byte /255)
+constexpr uint8_t CC_MACRO_COLOR  = 144;  // (authored byte /255)
+
 /** Slot index 0-3 for CC_SLOT_A..D, or -1 for a literal controller number. */
 constexpr int cc_slot_index(uint8_t param) {
     return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;

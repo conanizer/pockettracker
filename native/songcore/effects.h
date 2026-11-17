@@ -67,6 +67,7 @@ inline constexpr EffectDef EFFECTS[] = {
     {FX_NTH, "NTH", 0xFF},
     {FX_CHD, "CHD", 0xFF},
     {FX_LEG, "LEG", 0xFF},
+    {FX_TMB, "TMB", 0xFF}, {FX_CLR, "CLR", 0xFF},
     {FX_LPO, "LPO", 0xFF},
     {FX_MPG, "MPG", 0x7F}, {FX_MPB, "MPB", 0xFF},
     {FX_CCA, "CCA", 0xFF}, {FX_CCB, "CCB", 0xFF}, {FX_CCC, "CCC", 0xFF}, {FX_CCD, "CCD", 0xFF},

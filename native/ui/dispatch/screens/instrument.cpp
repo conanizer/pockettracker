@@ -211,19 +211,13 @@ bool InputDispatcher::instrument_is_untouched() const {
     return settings(ins) == settings(blank);
 }
 
-/** Step TYPE, wrapping through this build's types. ⚠️ EXTERNAL is last, so a build hiding MIDI stops
- *  one short. */
+/** Step TYPE, wrapping through this build's types: one without MIDI passes over EXTERNAL. */
 void InputDispatcher::toggle_instrument_type(int delta, bool keepSettings) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
-    const int count = s_.caps.midi ? songcore::INSTRUMENT_TYPE_COUNT
-                                   : songcore::INSTRUMENT_TYPE_COUNT - 1;
-    const int cur   = static_cast<int>(ins.instrumentType);
-    const int step  = delta < 0 ? -1 : +1;
-    // An EXTERNAL slot in such a build steps from the last reachable type.
-    const int from  = (cur >= count) ? count - 1 : cur;
-    const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
+    const songcore::InstrumentType next =
+        songcore::step_instrument_type(ins.instrumentType, delta, s_.caps.midi);
 
     // The name it adopted from the source it is about to lose.
     const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);

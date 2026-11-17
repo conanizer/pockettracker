@@ -281,6 +281,10 @@ inline Instrument parse_instrument(const json& j, int index) {
               i.midiCC[s].value = get_int(e, "value", i.midiCC[s].value);
           }
       } }
+    // A model this build does not know plays as the default one.
+    { auto it = j.find("macroModel"); if (it != j.end() && it->is_string()) macro_model_from_name(it->get<std::string>(), i.macroModel); }
+    i.macroTimbre = std::clamp(get_int(j, "macroTimbre", i.macroTimbre), 0x00, 0xFF);
+    i.macroColor  = std::clamp(get_int(j, "macroColor", i.macroColor), 0x00, 0xFF);
     return i;
 }
 
@@ -769,6 +773,10 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
         }
         w.end_array();
     }
+    // MACRO: default-guarded like the rest, and the model by name.
+    if (i.macroModel != 0)     w.field_string("macroModel", macro_model_name(i.macroModel));
+    if (i.macroTimbre != 0x80) w.field_int("macroTimbre", i.macroTimbre);
+    if (i.macroColor != 0x80)  w.field_int("macroColor", i.macroColor);
     w.end_object();
 }
 

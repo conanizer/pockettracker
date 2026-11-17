@@ -140,6 +140,11 @@ constexpr int FX_CHD      = 0x3F;
 // note. Phrase only.
 constexpr int FX_LEG      = 0x40;
 
+// ─── A MACRO instrument's two controls, on the sounding note; the next note starts on the instrument's ──
+// What each shapes depends on the model. Any other instrument type ignores them.
+constexpr int FX_TMB      = 0x41;  // TMB  TIMBRE (00-FF)
+constexpr int FX_CLR      = 0x42;  // CLR  COLOR  (00-FF)
+
 }  // namespace songcore
 
 #endif

@@ -264,8 +264,14 @@ struct Voice : public IAudioVoice {
     // engine zeroes it after every block.
     int fadeStartFrame = 0;
 
-    // A looping sample: nothing ends it but its envelopes, an OFF or a KIL.
-    bool sustains() const { return loopMode != 0; }
+    // A MACRO note: the samples come from the engine's oscillators, not from `sampleData`, which is
+    // null. Set by the engine after trigger(), which clears it.
+    bool  macro = false;
+    // Its DC blocker's last input and output sample.
+    float macroDcIn = 0.0f, macroDcOut = 0.0f;
+
+    // A looping sample or an oscillator: nothing ends it but its envelopes, an OFF or a KIL.
+    bool sustains() const { return loopMode != 0 || macro; }
 
     // Still holding its note — not fading, not released: what a LEG note can take over.
     bool holdsNote() const {
@@ -299,6 +305,8 @@ struct Voice : public IAudioVoice {
         sampleData = sample;
         sampleDataRight = sampleRight;
         sampleLength = length;
+        macro = false;
+        macroDcIn = macroDcOut = 0.0f;
         trackId = track;
         playbackRate = rate;
         basePlaybackRate = rate;
@@ -618,10 +626,20 @@ struct Voice : public IAudioVoice {
         if (!releaseVolMods()) startFadeOut(KILL_FADE_SAMPLES, atFrame);
     }
 
-    // A live key was let go of. ⚠️ An OFF in every arm but one: with no release envelope a looping
-    // voice still gets the kill fade (nothing else would end it), but a one-shot plays out.
+    // An AHD or DRUM on VOL: an envelope that runs out by itself and takes a sustaining voice with it.
+    bool volEnvelopeEndsNote() const {
+        for (const VoiceModSlot& m : voiceMods)
+            if (m.dest == 1 && (m.type == 1 || m.type == 4)) return true;
+        return false;
+    }
+
+    // A live key was let go of. ⚠️ An OFF in every arm but two: with no release envelope a looping
+    // voice still gets the kill fade (nothing else would end it), but a one-shot plays out — and so
+    // does a MACRO note an envelope will end, which is how a drum hit outlasts a tapped key.
     void keyRelease(int atFrame = 0) {
-        if (!releaseVolMods() && sustains()) startFadeOut(KILL_FADE_SAMPLES, atFrame);
+        if (releaseVolMods() || !sustains()) return;
+        if (macro && volEnvelopeEndsNote()) return;
+        startFadeOut(KILL_FADE_SAMPLES, atFrame);
     }
 
     void setVolume(float v) override { volume = v; params.setBase(PARAM_VOL, v); }

@@ -38,6 +38,7 @@ inline Program make_program(const Instrument& ins, float sampleRateRatio, int sf
     Program p;
     p.type            = (ins.instrumentType == InstrumentType::SOUNDFONT) ? PROGRAM_SOUNDFONT
                       : (ins.instrumentType == InstrumentType::EXTERNAL) ? PROGRAM_EXTERNAL
+                      : (ins.instrumentType == InstrumentType::MACRO)    ? PROGRAM_MACRO
                                                                          : PROGRAM_SAMPLER;
     p.hasSample       = ins.sampleFilePath.has_value();
     p.hasSoundfont    = ins.soundfontPath.has_value();
@@ -52,6 +53,18 @@ inline Program make_program(const Instrument& ins, float sampleRateRatio, int sf
     p.slicingMode     = ins.slicingMode;
     p.sliceMarkers    = ins.sliceMarkers.empty() ? nullptr : ins.sliceMarkers.data();
     p.sliceCount      = static_cast<int32_t>(ins.sliceMarkers.size());
+    if (p.type == PROGRAM_MACRO) {
+        // No file behind it, so nothing of one: a slot kept from its days as a sampler may still
+        // carry slices.
+        p.hasSample       = false;
+        p.sampleRateRatio = 1.0f;
+        p.slicingMode     = 0;
+        p.sliceMarkers    = nullptr;
+        p.sliceCount      = 0;
+        p.macroModel      = ins.macroModel;
+        p.macroTimbre     = ins.macroTimbre;
+        p.macroColor      = ins.macroColor;
+    }
     return p;
 }
 
@@ -97,6 +110,8 @@ inline int mod_dest_code(ModDest dest) {
         case ModDest::MOD_AMT:       return 8;   // scales the NEXT slot's amount
         case ModDest::MOD_RATE:      return 9;   // scales the NEXT slot's time/freq
         case ModDest::MOD_BOTH:      return 10;
+        case ModDest::TIMBRE:        return 11;  // a MACRO voice's two controls
+        case ModDest::COLOR:         return 12;
         default:                     return 0;
     }
 }
@@ -304,7 +319,8 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     }
 
     // ── Sampler path ─────────────────────────────────────────────────────────────────────────────
-    if (!program.hasSample) return;   // sampleFilePath == null — the empty-slot convention
+    // sampleFilePath == null — the empty-slot convention. A MACRO program has no file to lack.
+    if (!program.hasSample && !program_is_macro(program)) return;
 
     ensure_table_loaded(tableId);
     push_instrument_state();
