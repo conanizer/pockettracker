@@ -52,19 +52,20 @@ inline constexpr InstrumentRow SAMPLER[] = {
     {K::NAME, C::TYPE, C::SOURCE_LOAD, C::SOURCE_EDIT},  //  0
     {K::SINGLE, C::NAME},                                //  1
     {K::TRIPLE, C::ROOT, C::DETUNE, C::TIC},             //  2
-    {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
+    {K::TRIPLE, C::VOL, C::PAN, C::TSP},                 //  3
     {K::SPACER},                                         //  4
     {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
     {K::SPACER},                                         //  6
-    {K::DUAL, C::DRIVE, C::FILTER},                      //  7
-    {K::DUAL, C::CRUSH, C::FREQ},                        //  8
-    {K::DUAL, C::DOWNSAMPLE, C::RES},                    //  9
-    {K::SPACER},                                         // 10
-    {K::DUAL, C::REV, C::DEL},                           // 11
-    {K::DUAL, C::EQ, C::SLICE},                          // 12
-    {K::DUAL, C::LOOP, C::START},                        // 13
-    {K::DUAL, C::LOOP_START, C::END},                    // 14
-    {K::DUAL, C::LOOP_END, C::REVERSE},                  // 15
+    {K::DUAL, C::LOOP, C::SLICE},                        //  7
+    {K::DUAL, C::LOOP_START, C::START},                  //  8
+    {K::DUAL, C::LOOP_END, C::END},                      //  9
+    {K::SINGLE, C::REVERSE},                             // 10
+    {K::SPACER},                                         // 11
+    {K::DUAL, C::DRIVE, C::FILTER},                      // 12
+    {K::DUAL, C::CRUSH, C::FREQ},                        // 13
+    {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 14
+    {K::SPACER},                                         // 15
+    {K::TRIPLE, C::REV, C::DEL, C::EQ},                  // 16
 };
 
 // No EDIT and no sample window; PATCH picks a patch inside the SF2.
@@ -72,7 +73,7 @@ inline constexpr InstrumentRow SOUNDFONT[] = {
     {K::NAME, C::TYPE, C::SOURCE_LOAD},                  //  0
     {K::SINGLE, C::NAME},                                //  1
     {K::TRIPLE, C::ROOT, C::DETUNE, C::TIC},             //  2
-    {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
+    {K::TRIPLE, C::VOL, C::PAN, C::TSP},                 //  3
     {K::SPACER},                                         //  4
     {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
     {K::SINGLE, C::PATCH},                               //  6
@@ -81,9 +82,7 @@ inline constexpr InstrumentRow SOUNDFONT[] = {
     {K::DUAL, C::CRUSH, C::FREQ},                        //  9
     {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 10
     {K::SPACER},                                         // 11
-    {K::SINGLE, C::REV},                                 // 12
-    {K::SINGLE, C::DEL},                                 // 13
-    {K::SINGLE, C::EQ},                                  // 14
+    {K::TRIPLE, C::REV, C::DEL, C::EQ},                  // 12
 };
 
 // Every cell is a byte the device is sent. DUALs, because BANK prints four hex digits.
@@ -112,19 +111,19 @@ inline constexpr InstrumentRow MACRO[] = {
     {K::NAME, C::TYPE},                                  //  0
     {K::SINGLE, C::NAME},                                //  1
     {K::TRIPLE, C::ROOT, C::DETUNE, C::TIC},             //  2
-    {K::TRIPLE, C::VOL, C::TSP, C::PAN},                 //  3
+    {K::TRIPLE, C::VOL, C::PAN, C::TSP},                 //  3
     {K::SPACER},                                         //  4
     {K::SOURCE, C::PRESET_SAVE, C::PRESET_LOAD},         //  5
-    {K::SINGLE, C::MACRO_MODEL},                         //  6
-    {K::SINGLE, C::MACRO_TIMBRE},                        //  7
-    {K::SINGLE, C::MACRO_COLOR},                         //  8
-    {K::SPACER},                                         //  9
-    {K::DUAL, C::DRIVE, C::FILTER},                      // 10
-    {K::DUAL, C::CRUSH, C::FREQ},                        // 11
-    {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 12
-    {K::SPACER},                                         // 13
-    {K::DUAL, C::REV, C::DEL},                           // 14
-    {K::SINGLE, C::EQ},                                  // 15
+    {K::SPACER},                                         //  6
+    {K::SINGLE, C::MACRO_MODEL},                         //  7
+    {K::SINGLE, C::MACRO_TIMBRE},                        //  8
+    {K::SINGLE, C::MACRO_COLOR},                         //  9
+    {K::SPACER},                                         // 10
+    {K::DUAL, C::DRIVE, C::FILTER},                      // 11
+    {K::DUAL, C::CRUSH, C::FREQ},                        // 12
+    {K::DUAL, C::DOWNSAMPLE, C::RES},                    // 13
+    {K::SPACER},                                         // 14
+    {K::TRIPLE, C::REV, C::DEL, C::EQ},                  // 15
 };
 }  // namespace instrument_rows
 

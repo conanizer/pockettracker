@@ -216,18 +216,11 @@ void InputDispatcher::toggle_instrument_type(int delta, bool keepSettings) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
-    const songcore::InstrumentType next =
-        songcore::step_instrument_type(ins.instrumentType, delta, s_.caps.midi);
+    const songcore::InstrumentType next = songcore::next_instrument_type(ins.instrumentType, delta, s_.caps.midi);
 
-    // The name it adopted from the source it is about to lose.
-    const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
-
+    const NameFollow name = name_follows(ins);
     host_.set_instrument_type(s_.currentInstrument, next, keepSettings);
-
-    // ⚠️ A type change drops the source, so a name ADOPTED from it must go too — otherwise the next
-    // load reads it as a typed name and keeps it forever. A name the user typed survives.
-    if (!previousAutoName.empty() && ins.name == previousAutoName)
-        ins.name = songcore::default_instrument_name(ins.id);
+    name.settle(ins);
 
     // Row 0's TYPE cell exists in every layout: nothing to clamp.
     set_status(s_, std::string("TYPE: ") + songcore::instrument_type_name(next), true);
@@ -249,10 +242,14 @@ CursorContext InputDispatcher::instrument_context() const {
 }
 
 bool InputDispatcher::instrument_edit(const InputAction& action) {
-    Project& p = host_.edit_project();
-    const InstrumentInputResult r = instrument_.handle_input(
-        p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursor.row,
-        s_.instrumentCursor.column, action);
+    Project&    p   = host_.edit_project();
+    Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+    const bool  onModel = instrument_cell_at(ins.instrumentType, s_.instrumentCursor.row,
+                                             s_.instrumentCursor.column) == InstrumentCell::MACRO_MODEL;
+    const NameFollow name = name_follows(ins);
+    const InstrumentInputResult r =
+        instrument_.handle_input(ins, s_.instrumentCursor.row, s_.instrumentCursor.column, action);
+    if (onModel && r.modified) name.settle(ins);
 
     // The PRESET row: only the engine knows the SF2's list, so the index is resolved here.
     if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);

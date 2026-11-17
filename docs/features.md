@@ -81,10 +81,11 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 
 ## Instruments
 
-- **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan.
-- **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance. Only the chosen sound is loaded out of a SoundFont, not the bank around it — SF2 and SF3 alike, so banks of hundreds of megabytes are usable; the list of sounds inside a file opens instantly.
-- **Macro**: a "macro-synthesizer" with 47 built-in models, based on Mutable Instruments' Braids. It includes analog waves, FM, a vocal synthesizer, plucked strings, drums, and noise. The sound is shaped by "timbre" and "color" parameters, the specific effect of which varies for each model. Both parameters can be modulated and written per note.
-- **External**: an instrument type that plays no sound on its own, but sends note control code data over MIDI.
+- **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
+- **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
+- Only the chosen sound is loaded out of a SoundFont, not the bank around it — SF2 and SF3 alike, so banks of hundreds of megabytes are usable; the list of sounds inside a file opens instantly
+- **MACRO**: a synth with 47 models (analog waves, FM, vowels, strings, drums, noise), based on Braids; TIMBRE and COLOR set per instrument, per note (`TMB`, `CLR`) or by a mod slot
+- **External**: plays notes on a MIDI device
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
 - Non-destructive start and end point trimming

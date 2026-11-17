@@ -16,14 +16,15 @@ struct MacroModelText {
     const char* color;
 };
 
-// The module is 510 wide and a note starts 235 in: 16 characters of 17 pixels.
-inline constexpr int MACRO_NOTE_CHARS = 16;
+// A note starts 235 in; 15 characters of 17 pixels end where the screen's other rows do, clear of the
+// side panel.
+inline constexpr int MACRO_NOTE_CHARS = 15;
 
 inline constexpr MacroModelText MACRO_MODEL_TEXT[] = {
     /* CSAW */ {"CS-80 saw",         "notch width",      "notch polarity"},
-    /* MRPH */ {"variable wave",     "waveshape",        "distort / filter"},
+    /* MRPH */ {"variable wave",     "waveshape",        "distort/filter"  },
     /* SWSQ */ {"saw / square",      "pulse width",      "saw to square"},
-    /* FOLD */ {"wavefolder",        "fold amount",      "sine to triangle"},
+    /* FOLD */ {"wavefolder",        "fold amount",      "sine to tri"     },
     /* BUZZ */ {"harmonic combs",    "smoothness",       "detune"},
     // Below the middle COLOR brings in a sub two octaves down, above it one octave down.
     /* SUBQ */ {"square + sub",      "pulse width",      "sub -2 / -1 oct"},
@@ -35,20 +36,20 @@ inline constexpr MacroModelText MACRO_MODEL_TEXT[] = {
     /* TRI3 */ {"triple triangle",   "osc 2 detune",     "osc 3 detune"},
     /* SIN3 */ {"triple sine",       "osc 2 detune",     "osc 3 detune"},
     /* RING */ {"ring-mod sines",    "osc 2 ratio",      "osc 3 ratio"},
-    /* SWRM */ {"saw swarm",         "detune",           "high-pass filter"},
+    /* SWRM */ {"saw swarm",         "detune",           "high-pass"       },
     /* COMB */ {"comb-filter saw",   "delay time",       "feedback -/+"},
-    /* TOY* */ {"circuit-bent toy",  "sample rate",      "bit toggling"},
-    /* ZLPF */ {"LP filtered wave",  "cutoff",           "waveshape"},
-    /* ZPKF */ {"PK filtered wave",  "cutoff",           "waveshape"},
-    /* ZBPF */ {"BP filtered wave",  "cutoff",           "waveshape"},
-    /* ZHPF */ {"HP filtered wave",  "cutoff",           "waveshape"},
+    /* TOY* */ {"circuit-bent"    ,  "sample rate",      "bit toggling"},
+    /* ZLPF */ {"LP filter wave"  ,  "cutoff",           "waveshape"},
+    /* ZPKF */ {"PK filter wave"  ,  "cutoff",           "waveshape"},
+    /* ZBPF */ {"BP filter wave"  ,  "cutoff",           "waveshape"},
+    /* ZHPF */ {"HP filter wave"  ,  "cutoff",           "waveshape"},
     /* VOSM */ {"two formants",      "formant 1",        "formant 2"},
     /* VOWL */ {"lo-fi vowels",      "vowel a e i o u",  "gender"},
     /* VFOF */ {"hi-fi vowels",      "vowel a e i o u",  "gender"},
     /* HARM */ {"14 harmonics",      "harmonic number",  "peakedness"},
-    /* FM   */ {"2-operator FM",     "modulation index", "frequency ratio"},
-    /* FBFM */ {"feedback FM",       "modulation index", "frequency ratio"},
-    /* WTFM */ {"chaotic FM",        "modulation index", "frequency ratio"},
+    /* FM   */ {"2-operator FM",     "mod index",        "frequency ratio"},
+    /* FBFM */ {"feedback FM",       "mod index",        "frequency ratio"},
+    /* WTFM */ {"chaotic FM",        "mod index",        "frequency ratio"},
     /* PLUK */ {"plucked string",    "decay",            "pluck position"},
     /* BOWD */ {"bowed string",      "friction",         "bow position"},
     /* BLOW */ {"reed",              "air pressure",     "geometry"},
@@ -61,7 +62,7 @@ inline constexpr MacroModelText MACRO_MODEL_TEXT[] = {
     /* WTBL */ {"21 wavetables",     "position",         "table"},
     /* WMAP */ {"16x16 wave map",    "x position",       "y position"},
     /* WLIN */ {"wavetable scan",    "position",         "interpolation"},
-    /* WTX4 */ {"wavetable chords",  "position",         "chord type"},
+    /* WTX4 */ {"wavetable chord" ,  "position",         "chord type"},
     /* NOIS */ {"tuned noise",       "resonance",        "LP to HP"},
     /* TWNQ */ {"twin-peak noise",   "resonance",        "peak spacing"},
     /* CLKN */ {"clocked noise",     "cycle length",     "quantization"},

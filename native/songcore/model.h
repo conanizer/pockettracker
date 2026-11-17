@@ -63,7 +63,7 @@ enum class ModDest {
 };
 // SAMPLER and SOUNDFONT play in the engine; EXTERNAL leaves as MIDI (midi_out.h); MACRO is the vendored
 // macro-oscillator (vendor/braids), one of MACRO_MODEL_NAMES.
-// ⚠️ Append only. A build without MIDI hides EXTERNAL: `step_instrument_type` passes over it.
+// ⚠️ Append only. The TYPE cell steps in `INSTRUMENT_TYPE_CYCLE` order, not this one.
 enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL, MACRO };
 
 // Each enum's names, in enum order: index 0 also answers for an out-of-range value.
@@ -461,14 +461,27 @@ inline void keep_instrument_place(Instrument& to, const Instrument& from) {
 
 // The type `delta` steps on from `from`, wrapping. `external` false passes over EXTERNAL (a build
 // without MIDI), also when stepping away from a slot that already is one.
-inline InstrumentType step_instrument_type(InstrumentType from, int delta, bool external) {
-    const int step = delta < 0 ? -1 : +1;
-    int       next = static_cast<int>(from);
-    if (next < 0 || next >= INSTRUMENT_TYPE_COUNT) next = 0;
-    do {
-        next = (next + step + INSTRUMENT_TYPE_COUNT) % INSTRUMENT_TYPE_COUNT;
-    } while (!external && static_cast<InstrumentType>(next) == InstrumentType::EXTERNAL);
-    return static_cast<InstrumentType>(next);
+/** The order the TYPE cell steps through — not the enum's, which only grows at its end. */
+inline constexpr InstrumentType INSTRUMENT_TYPE_CYCLE[] = {
+    InstrumentType::SAMPLER, InstrumentType::SOUNDFONT, InstrumentType::MACRO, InstrumentType::EXTERNAL};
+static_assert(std::size(INSTRUMENT_TYPE_CYCLE) == std::size(INSTRUMENT_TYPE_NAMES), "every type in the cycle");
+
+/** What the TYPE cell offers: everything, but EXTERNAL only where there is MIDI. */
+inline bool instrument_type_offered(InstrumentType t, bool midi) {
+    return midi || t != InstrumentType::EXTERNAL;
+}
+
+/** The next offered type from `cur`, one step either way, wrapping. */
+inline InstrumentType next_instrument_type(InstrumentType cur, int delta, bool midi) {
+    const int n = static_cast<int>(std::size(INSTRUMENT_TYPE_CYCLE));
+    int at = 0;
+    for (int i = 0; i < n; ++i) if (INSTRUMENT_TYPE_CYCLE[i] == cur) at = i;
+    const int step = delta < 0 ? -1 : 1;
+    for (int k = 1; k <= n; ++k) {
+        const InstrumentType t = INSTRUMENT_TYPE_CYCLE[((at + step * k) % n + n) % n];
+        if (instrument_type_offered(t, midi)) return t;
+    }
+    return cur;
 }
 
 // A note that picks a slice (C-4 = slice 0) rather than a pitch. `sliceOverride` = the step's SLI or -1.

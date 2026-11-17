@@ -683,7 +683,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
-| TSP | ON / OFF | Between VOL and PAN. `OFF` takes this instrument out of **every** note transposition — the scale on its track, the chain transpose column and the project TRANSPOSE setting. Turn it off for a drum kit whose slots you have pitched by hand. |
+| TSP | ON / OFF | Right of PAN. `OFF` takes this instrument out of **every** note transposition — the scale on its track, the chain transpose column and the project TRANSPOSE setting. Turn it off for a drum kit whose slots you have pitched by hand. |
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
 | START | 00–FF | Sample start point (fraction of sample length). |
 | END | 00–FF | Sample end point. |
@@ -738,10 +738,9 @@ OUTPUT row ([section 22](#22-midi-screen)). Choose it with A + D-pad on TYPE.
 
 ### MACRO instrument parameters
 
-A MACRO instrument is a synth: there is no file to load, and its sound is one of 47 models. Choose it
-with A + D-pad on TYPE. Each model is played by two controls, TIMBRE and COLOR, and what they do
-depends on the model: the screen says, beside each of the three cells. The oscillators are Émilie
-Gillet's Braids, under the MIT licence (see `CREDITS.md`).
+A synth with 47 models and no file to load. Each model has two controls, TIMBRE and COLOR, and what
+they do depends on the model: the screen says, beside each cell. The oscillators are Émilie Gillet's
+Braids (see `CREDITS.md`).
 
 | Parameter | Range | Description |
 |---|---|---|
@@ -753,12 +752,9 @@ ROOT, DETUNE, TIC, VOL, TSP, PAN, DRIVE, FILTER, CRUSH, FREQ, DWNSMPL, RES, REV,
 on a WAV instrument. Playing the ROOT note sounds C-4, as on a SoundFont. What only a sample has does
 nothing on a MACRO instrument: `OFF`, `SLI`, `BCK`, `LPO` and the STA modulation destination.
 
-A MACRO note **holds until something ends it**: the next note on the track, an OFF, a `KIL` or
-stopping playback. That goes for a drum or a plucked string too, after its sound has died away. To
-give a note a definite length, put an **AHD** or **DRUM** on VOL on the MODULATION screen; that also
-lets a hit ring on after a MIDI key is let go. See [How a note ends](#how-a-note-ends).
-
-`CHD` plays its chord on four oscillators, and `ARC` strums it as on any instrument.
+A MACRO note **holds until something ends it**: the next note, an OFF, a `KIL` or stop — a drum or a
+plucked string too. An **AHD** or **DRUM** on VOL gives it a definite length, and lets a hit ring on
+after a MIDI key is let go. See [How a note ends](#how-a-note-ends).
 
 | Model | What it is | TIMBRE | COLOR |
 |---|---|---|---|
@@ -882,9 +878,8 @@ A short fade takes a few milliseconds, just enough not to click.
 `LEG` on the next note is the one exception to the first row: the note already sounding moves to the
 new pitch and carries on.
 
-**The OFF note.** On the PHRASE screen, press **A + B** on an empty note cell to write an OFF. It ends
-the track's note as the table says, playing a release where the instrument has one: the way to let a
-held note go without starting another. An OFF writes no instrument and plays nothing new.
+An **OFF** (A + B on an empty note cell) lets a held note go without starting another; it writes no
+instrument.
 
 ### Navigating instruments
 
@@ -1343,7 +1338,7 @@ Switching a note on or off afterwards leaves the name alone and puts a `*` in fr
 - **Playing.** Every note the track plays lands on a note of the scale — including notes written before the scale existed, and notes moved by a chain transpose.
 - **PIT and ARP.** The pitch offset and the arpeggio land in the scale too. Because each result goes to the *nearest* note in the scale, a small `PIT` under a narrow scale can leave a note exactly where it was rather than moving it.
 
-Two things are left alone. **Sliced instruments are never moved** — there the note picks which slice of the sample to play rather than a pitch, so moving it would play a different slice. And any instrument whose **TSP** is `OFF` (INSTRUMENT screen, between VOL and PAN) is left exactly as written, which is how you keep a hand-pitched drum kit out of the scale.
+Two things are left alone. **Sliced instruments are never moved** — there the note picks which slice of the sample to play rather than a pitch, so moving it would play a different slice. And any instrument whose **TSP** is `OFF` (INSTRUMENT screen, right of PAN) is left exactly as written, which is how you keep a hand-pitched drum kit out of the scale.
 
 ### Choosing a scale for a track
 
