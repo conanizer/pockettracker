@@ -153,6 +153,22 @@ class ExternalConsumer : public IMidiConsumer {
         if (i > 0) pending_.erase(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(i));
     }
 
+    // The tracks MUTE/SOLO has silenced, bit per track. Applied as notes LEAVE, so a mute is heard at
+    // once rather than after the lookahead: a muted track's note-ons are dropped (its note-offs, CCs
+    // and wheel still go), and the keys it holds now are let go.
+    void set_muted_tracks(uint8_t mask) {
+        std::lock_guard<std::mutex> lk(mu_);
+        const uint8_t newly = static_cast<uint8_t>(mask & ~muted_);
+        muted_ = mask;
+        for (int t = 0; t < POOL_TRACKS; ++t) {
+            if (!(newly & (1u << t))) continue;
+            for (int c = 0; c < 16; ++c)
+                for (int n = 0; n < 128; ++n)
+                    if (heldBy_[t][c][static_cast<size_t>(n)])
+                        send_now(MIDI_NOTE_OFF | static_cast<uint8_t>(c), static_cast<uint8_t>(n), 0);
+        }
+    }
+
     // All notes off now on every channel touched (per note, then CC 123), and the queue dropped.
     void panic() {
         std::lock_guard<std::mutex> lk(mu_);
@@ -744,6 +760,9 @@ class ExternalConsumer : public IMidiConsumer {
     }
 
     void emit(const MidiMessage& m, int64_t nowFrame) {
+        if (m.track < POOL_TRACKS && (muted_ & (1u << m.track)) &&
+            (m.bytes[0] & 0xF0) == MIDI_NOTE_ON && m.len == 3 && m.bytes[2] > 0)
+            return;
         const bool isBend = (m.bytes[0] & 0xF0) == MIDI_PITCH_BEND && m.len == 3;
         const int  ch     = m.bytes[0] & 0x0F;
         const int  value  = m.bytes[1] | (m.bytes[2] << 7);
@@ -761,11 +780,19 @@ class ExternalConsumer : public IMidiConsumer {
     }
 
     // The notes the device holds, per channel, as the bytes left.
+    // …and per track, which a mute lets go. A key's note-off clears it whichever track sent it.
     void track_sounding(const MidiMessage& m) {
-        const uint8_t kind = m.bytes[0] & 0xF0, ch = m.bytes[0] & 0x0F;
-        if (kind == MIDI_NOTE_ON && m.bytes[2] > 0) soundingOut_[ch].set(m.bytes[1] & 0x7F);
-        else if (kind == MIDI_NOTE_ON || kind == MIDI_NOTE_OFF) soundingOut_[ch].reset(m.bytes[1] & 0x7F);
-        else if (kind == MIDI_CC && m.bytes[1] == MIDI_CC_ALL_NOTES_OFF) soundingOut_[ch].reset();
+        const uint8_t kind = m.bytes[0] & 0xF0, ch = m.bytes[0] & 0x0F, key = m.bytes[1] & 0x7F;
+        if (kind == MIDI_NOTE_ON && m.bytes[2] > 0) {
+            soundingOut_[ch].set(key);
+            if (m.track < POOL_TRACKS) heldBy_[m.track][ch].set(key);
+        } else if (kind == MIDI_NOTE_ON || kind == MIDI_NOTE_OFF) {
+            soundingOut_[ch].reset(key);
+            for (auto& t : heldBy_) t[ch].reset(key);
+        } else if (kind == MIDI_CC && m.bytes[1] == MIDI_CC_ALL_NOTES_OFF) {
+            soundingOut_[ch].reset();
+            for (auto& t : heldBy_) t[ch].reset();
+        }
     }
 
     // RPN 0: the channel's bend range in semitones, then the null RPN, so a CC slot set to 6 later
@@ -820,6 +847,8 @@ class ExternalConsumer : public IMidiConsumer {
     };
     ChannelSent sent_[16];
     std::bitset<128> soundingOut_[16];   // the notes each channel holds — what a panic ends
+    std::bitset<128> heldBy_[POOL_TRACKS][16];   // the same, by the track that struck them
+    uint8_t          muted_ = 0;                 // set_muted_tracks'
 
     MidiWheel wheel_[TrackInstruments::LANES];
     int64_t lastDue_ = INT64_MIN;   // the newest "now" `pump` has seen

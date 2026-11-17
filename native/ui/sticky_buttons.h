@@ -6,11 +6,10 @@
 //
 // A lock outlives the chords that are repeated and lets go after one done in one go — on that chord's
 // release, as a hand would. Which is which is the mapper's answer (`Chord`, ui/buttons.h). L+R lets go
-// once it has nothing left to clear. L after L+B waits out the widen window, so B again widens the
-// selection.
+// once it has nothing left to clear. L after L+B stays down a moment more, so B again widens the
+// selection and A clones.
 
 #include "ui/buttons.h"
-#include "ui/selection.h"   // MULTI_TAP_WINDOW
 
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +19,9 @@ namespace pt::ui {
 class StickyButtons {
 public:
     static constexpr uint64_t DEFAULT_HOLD_MS = 300;
+
+    // How long a locked L stays down after L+B, from B's press: time for the next B or the A.
+    static constexpr uint64_t AFTER_L_B_MS = 500;
 
     // Off gates only new locks; the caller lets go of the old ones with `release_all`.
     void set_mode(bool enabled, uint64_t holdMs) {
@@ -43,8 +45,8 @@ public:
                 s.letGoAt   = 0;
                 return;
             }
-            // L waiting after L+B: B widens, A cuts — the chord goes on. Anything else lets L go
-            // first, or a D-pad press would fill rows instead of moving.
+            // L waiting after L+B: B widens, A clones (or cuts, where nothing clones) — the chord goes
+            // on. Anything else lets L go first, or a D-pad press would fill rows instead of moving.
             for (size_t i = 0; i < COUNT; ++i) {
                 Slot& l = slots_[i];
                 if (!l.letGoAt) continue;
@@ -90,15 +92,14 @@ public:
             const ChordEnd a = l.after;
             l.after = ChordEnd::KEEP;
             if (a == ChordEnd::WIDEN) {
-                // The window runs from B's press, as the selection's own does.
-                const uint64_t until = s.downAt + static_cast<uint64_t>(MULTI_TAP_WINDOW);
+                const uint64_t until = s.downAt + AFTER_L_B_MS;
                 if (until > now) { l.letGoAt = until; continue; }
             }
             if (a != ChordEnd::ASK_L_R || !l_r_has_more()) let_go(i, emit);
         }
     }
 
-    // Every frame: L lets go once the widen window after L+B has passed with no B.
+    // Every frame: L lets go once its wait after L+B has passed with no B or A.
     template <class Emit>
     void tick(uint64_t now, Emit&& emit) {
         for (size_t i = 0; i < COUNT; ++i) {

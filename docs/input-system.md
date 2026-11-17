@@ -77,9 +77,9 @@ This creates a consistent, learnable pattern where:
 ### Basic Actions
 - **A button** - Insert value on empty cell
 - **B button** - Cancel / back / copy a selection
-- **SELECT** - Shows help for the cell under the cursor: the visualizer strip at the top of the screen
-  becomes three lines describing it, and any other button puts it away. In the file browser it is the
-  modifier for the rename / delete / new-folder chords instead, and it cancels the keyboard overlay.
+- **SELECT** - Shows help for the cell under the cursor: a page over the screen, which any button
+  closes. In the file browser it is also the modifier for the rename / delete / new-folder chords, and
+  it cancels the keyboard overlay.
   ⚠️ SELECT does **not** delete — clearing a value is always **A + B**.
 - **START** - Play/Stop sequencer
 
@@ -235,13 +235,13 @@ INST.POOL still walk their pools.
 
 | Control | Action |
 |---------|--------|
-| **L+B** | Enter selection mode; tap again inside 500 ms to widen it (CELL -> ROW -> SCREEN) |
+| **L+B** | Enter selection mode; each L+B after that widens it (CELL -> ROW -> SCREEN, then CELL again) |
 | **D-PAD (in selection)** | Expand/contract selection |
 | **B (in selection)** | Copy + exit |
 | **L+A (in selection)** | Cut (copy + delete) + exit |
 | **L+A (outside selection)** | Paste at cursor |
 | **A+B (in selection)** | Delete (no clipboard) + exit |
-| **L+B+A** | Deep-clone the chain/phrase under the cursor into free slots |
+| **L+B, then A** | Deep-clone the chain/phrase under the cursor into free slots: hold L, press B, then A. B may be let go before the A; L may not, or the A is the L+A below |
 | **L+R** | Leave selection mode — the copy buffer survives. Pressed *outside* a selection it clears the buffer instead, which is how you dismiss the clipboard readout in the top strip. |
 
 **Screens supported:** PHRASE, CHAIN, SONG, TABLE
@@ -295,7 +295,7 @@ than SONG and MIXER it stays the consumed no-op it has always been.
 | **SELECT+A** | Rename the file or folder under the cursor (opens the keyboard) |
 | **SELECT+B** | Delete it — arms an `A=YES B=NO` confirm; nothing is deleted on the press itself |
 | **SELECT+R** | Create a folder here (opens the keyboard) |
-| **L+B** | Start a file selection; tap again inside 500 ms to select all |
+| **L+B** | Start a file selection; L+B again selects all |
 | **B (in selection)** | Copy the selected files |
 | **L+A (in selection)** | Cut the selected files |
 | **L+A (outside selection)** | Paste them here |
@@ -347,7 +347,7 @@ B + UP/DOWN             Page the SONG screen / jump 16 instruments, tables, chai
 ```
 L + A                   Paste (outside selection) / Cut (in selection)
 L + B                   Enter selection mode / widen it
-L + B + A               Clone current item (deep clone)
+L + B, then A           Clone current item (deep clone), L held throughout
 L + UP/DOWN/LEFT/RIGHT  Fill rows from one cell (PHRASE)
 L + R                   Restore muted tracks / leave selection mode / clear the copy buffer
 ```

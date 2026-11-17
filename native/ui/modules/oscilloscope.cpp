@@ -36,6 +36,8 @@ void OscilloscopeModule::draw(Canvas& c, int x, int y, const OscilloscopeState& 
         case VisualizerType::SPECTRUM_PEAKS:
             draw_bar_amps(c, x, y, s.spectrum, t, /*peak_mode=*/true);
             break;
+        case VisualizerType::GUIDE:   // the layout draws the guide in this module's place
+            break;
     }
 }
 

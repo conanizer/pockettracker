@@ -4,6 +4,7 @@
 #include "ui/dispatch/dispatch_common.h"
 
 #include "ui/autosave.h"        // the crash-recovery autosave — clear / load
+#include "ui/settings_store.h"
 
 #include <algorithm>
 #include <string>
@@ -83,9 +84,15 @@ void InputDispatcher::confirm_accept() {
             break;
         }
 
+        case ConfirmDialogState::Kind::TOP_PANEL:
+            if (argv == ConfirmDialogState::TOP_PANEL_YES) s_.theme.visualizerType = VisualizerType::GUIDE;
+            top_panel_answered();
+            break;
+
         case ConfirmDialogState::Kind::NONE:
             break;
     }
+    ask_top_panel_if_owed();
 }
 
 void InputDispatcher::confirm_cancel() {
@@ -95,6 +102,30 @@ void InputDispatcher::confirm_cancel() {
     // ⚠️ The one NO that acts: it discards the work, or the prompt returns every launch and is
     // dismissed unread.
     if (kind == ConfirmDialogState::Kind::RECOVER) autosave_clear(fs_);
+    if (kind == ConfirmDialogState::Kind::TOP_PANEL) top_panel_answered();
+    ask_top_panel_if_owed();
+}
+
+// ─── The top panel's question, once per install ──────────────────────────────────────────────────
+
+void InputDispatcher::boot_ask_top_panel() {
+    topPanelAskOwed_ = !s_.settings.topPanelAsked;
+    ask_top_panel_if_owed();
+}
+
+// Behind any question already up (RECOVER WORK? at boot): it opens when that one is answered.
+void InputDispatcher::ask_top_panel_if_owed() {
+    if (!topPanelAskOwed_ || s_.confirm.is_open()) return;
+    topPanelAskOwed_ = false;
+    s_.confirm.open(ConfirmDialogState::Kind::TOP_PANEL, ConfirmDialogState::TOP_PANEL_YES);
+}
+
+void InputDispatcher::top_panel_answered() {
+    s_.settings.topPanelAsked = true;
+    // ⚠️ Written now, not at quit: a handheld switched off at the power button never gets there, and
+    // would ask again on every launch.
+    save_settings_if_changed(fs_, s_.settings, s_.theme);
+    set_status(s_, "CHANGE IT IN SETTINGS: TOP PANEL", true);
 }
 
 }  // namespace pt::ui

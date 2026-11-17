@@ -687,6 +687,11 @@ bool SampleEditSession::save_to(const std::string& path, bool adopt_name) {
 
 // ─── CHOP ────────────────────────────────────────────────────────────────────────────────────────
 
+std::string SampleEditSession::home_folder() {
+    const std::string& src = s_.sampleEditor.sampleFilePath;
+    return src.empty() ? fs_.samples_directory() : fs_.parent_path(src);
+}
+
 void SampleEditSession::chop() {
     SampleEditorState& se = s_.sampleEditor;
     if (se.sliceMethod == SampleEditorModule::SLICE_OFF) return;
@@ -697,12 +702,10 @@ void SampleEditSession::chop() {
     // A slice becomes a file name, sanitized like every other the app writes.
     const std::string base = safe_name(se.sampleName.empty() ? "SAMPLE" : se.sampleName);
 
-    // Samples/Chops/<base>/ — its own folder, so a 32-slice break does not bury the sample directory.
-    const std::string samples = fs_.samples_directory();
-    fs_.create_folder(samples, "Chops");                     // "" if it already exists — either is fine
-    const std::string chops = samples + "/Chops";
-    fs_.create_folder(chops, base);
-    const std::string dir = chops + "/" + base;
+    // A folder of its own beside the source, so a 32-slice break does not bury the folder it came from.
+    const std::string home = home_folder();
+    fs_.create_folder(home, base);                           // "" if it already exists — either is fine
+    const std::string dir = home + "/" + base;
 
     const int written = ops_.chop_sample(se.instrumentId, dir, base, slices, se.sourceMode,
                                           se.hasStereoData, se.bitDepth);

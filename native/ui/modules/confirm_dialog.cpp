@@ -36,6 +36,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
         case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";
         case ConfirmDialogState::Kind::COLLECT_EXISTS: return "ALREADY IN SONGS";
+        case ConfirmDialogState::Kind::TOP_PANEL:   return "SHOW HINTS AT THE TOP?";
         case ConfirmDialogState::Kind::NONE:        break;
     }
     return "";
@@ -59,6 +60,7 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
 std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind) {
     if (kind == ConfirmDialogState::Kind::COLLECT_EXISTS) return {"REPLACE", "NEW COPY", "CANCEL"};
     if (kind == ConfirmDialogState::Kind::CHANGE_TYPE)    return {"DISCARD", "KEEP", "CANCEL"};
+    if (kind == ConfirmDialogState::Kind::TOP_PANEL)      return {"YES", "NO"};
     return {};
 }
 

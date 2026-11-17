@@ -39,7 +39,7 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
     }
 
     // The headers say which column: the cursor is one cell, and four columns look alike.
-    const int  headerY = y + ROW_HEIGHT + 14;
+    const int  headerY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const auto head    = [&](int col) { return header_color(s.cursorColumn, col, col, t); };
     c.draw_text("# ",   x + ID_X,   headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
     c.draw_text("NAME", x + NAME_X, headerY, head(0), CHAR_SPACING, FONT_SCALE);

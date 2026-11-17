@@ -94,6 +94,10 @@ class InputDispatcher {
     // Call after loading settings.json and the shell's `push_params()`.
     BootRecovery boot_recovery();
 
+    // Once per install: ask whether the top panel should show the guide. Call after `boot_recovery()`
+    // — where that one is asking, this waits for its answer.
+    void boot_ask_top_panel();
+
     // Write the autosave now if there is unsaved work — the app is leaving.
     // ⚠️ From the frame loop's exit path, never a signal handler: it allocates and writes a file.
     void flush_autosave();
@@ -123,6 +127,9 @@ class InputDispatcher {
 
     // A went down or up, whatever it then does.
     void on_a_held(bool down) { s_.aHeld = down; }
+    // B and L likewise, for the guide; R's is `on_r_held`.
+    void on_b_held(bool down) { s_.bHeld = down; }
+    void on_l_held(bool down) { s_.lHeld = down; }
 
     // A+START: audition the instrument on the three instrument screens and TABLE.
     void on_a_start();
@@ -162,7 +169,7 @@ class InputDispatcher {
     void on_r_combo_revert();
 
     // ── L: selection and the clipboard ───────────────────────────────────────────────────────────
-    // L+B: enter selection, then widen it CELL → ROW → SCREEN on each tap inside 500 ms.
+    // L+B: enter selection, then widen it CELL → ROW → SCREEN on each press.
     void on_l_b();
     // L+A: cut inside a selection, paste outside one.
     void on_l_a();
@@ -173,6 +180,9 @@ class InputDispatcher {
     bool l_r_has_more();
     // L+B+A: deep-clone the chain/phrase under the cursor into free slots.
     void on_l_b_a();
+    // The same played one button at a time: L held, B, then A with B already let go. Where the screen
+    // has no clone it is L+A.
+    void on_l_b_then_a();
     // L + a direction: fill rows from the selection's top row (or the cursor's cell on PHRASE).
     // RIGHT walks the spacings, LEFT the even spreads, UP rolls random values, DOWN scatters.
     void on_l_up();
@@ -192,11 +202,11 @@ class InputDispatcher {
     // B inside a selection copies it and exits.
     void on_button_b();
     void on_button_a();
-    // Bare SELECT raises help (per SETTINGS > HELP) and aborts the keyboard. Called on the release,
+    // Bare SELECT raises the full help and aborts the keyboard. Called on the release,
     // only when nothing else was pressed meanwhile.
     void on_select();
 
-    // A button went down: put help away (the compact panel on any press but SELECT, the overlay on any).
+    // A button went down with the help overlay up: put it away.
     void on_help_dismiss();
 
     bool help_full_open() const { return s_.helpFull; }
@@ -562,6 +572,12 @@ class InputDispatcher {
     // prompt would return on every launch.
     void confirm_cancel();
 
+    // The top panel's question (`boot_ask_top_panel`): owed until no other question is up, and its
+    // answer is written to settings.json at once.
+    void ask_top_panel_if_owed();
+    void top_panel_answered();
+    bool topPanelAskOwed_ = false;
+
     // ── The EQ editor (ui/dispatch/layers/eq.cpp) — an overlay: `currentScreen` is still the one under ──
 
     bool eq_open() const { return s_.eq.isOpen; }
@@ -679,7 +695,6 @@ class InputDispatcher {
     void resample_selection(const std::string& customBaseName);
 
     // ── The file browser (ui/dispatch/screens/file_browser.cpp) ─────────────────────────────────
-    bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
     GestureResult file_browser_screen(Gesture g);
     // B: disarm a pending SELECT chord, copy a selection, or leave.
     void browser_back();

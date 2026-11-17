@@ -17,9 +17,6 @@
 
 namespace pt::ui {
 
-// SETTINGS > HELP. ⚠️ The value is what settings.json stores — append, never reorder.
-enum class HelpMode { OFF = 0, SHORT = 1, FULL = 2 };
-
 // ONE HAND's MS values. The file stores the number, so these may change freely.
 inline constexpr int ONE_HAND_HOLD_STEPS[] = {150, 200, 250, 300, 400, 500, 700, 1000};
 inline constexpr int ONE_HAND_HOLD_COUNT   = sizeof(ONE_HAND_HOLD_STEPS) / sizeof(int);
@@ -70,9 +67,9 @@ struct SettingsValues {
     bool metronomeEnabled = false;
     int  metronomeVolume  = 0x80;
 
-    // ── HELP — what SELECT shows: 0 OFF, 1 SHORT (panel), 2 FULL (overlay) ───────────────────────
-    // ⚠️ This default reaches upgrading installs, so it is the long-standing behaviour.
-    int  helpMode         = 1;
+    // ── TOP PANEL — asked once whether it should show the guide (ConfirmDialogState::TOP_PANEL) ──
+    // ⚠️ False reaches every install that has no such key yet, on purpose: they are asked too.
+    bool topPanelAsked    = false;
 
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
     // Bilinear: integer scaling leaves black borders at anything but exact multiples of 640×480.
@@ -128,7 +125,7 @@ struct SettingsValues {
     int         audioOutIndex = 0;
     int         audioOutCount = 1;
 
-    // ⚠️ VISUALIZER lives on the theme (`Theme::visualizerType`), carried across a theme change.
+    // ⚠️ TOP PANEL lives on the theme (`Theme::visualizerType`), carried across a theme change.
 
     // ── Debug ────────────────────────────────────────────────────────────────────────────────────
     bool traceEnabled = false;
@@ -157,14 +154,18 @@ public:
     static constexpr int WIDTH  = 510;
     static constexpr int HEIGHT = 392;
 
-    // In VisualizerType order.
+    // What TOP PANEL calls each `VisualizerType`, in that order.
     static const std::vector<std::string>& visualizer_names();
+
+    // The ones the row steps through, in the order it steps. ⚠️ SCOPE and SPECT are left out, not
+    // gone: an install that chose one keeps it until the row is turned.
+    static const std::vector<VisualizerType>& top_panel_cycle();
 
     void draw(Canvas& c, int x, int y, const SettingsState& s) const;
 
     CursorContext cursor_context(const SettingsState& s) const;
 
-    // Writes into `values` (and `theme`, for VISUALIZER).
+    // Writes into `values` (and `theme`, for TOP PANEL).
     void handle_input(SettingsValues& values, Theme& theme, const PlatformCaps& caps,
                       int cursor_row, int cursor_column, const InputAction& action) const;
 };

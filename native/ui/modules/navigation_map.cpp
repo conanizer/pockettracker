@@ -41,8 +41,12 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
             const std::string label  = screen_short_label(screen);
             const int         labelW = Canvas::text_width(label, CHAR_SPACING, FONT_SCALE);
 
-            c.draw_text(label, cellX + (CELL_WIDTH - labelW) / 2, cellY + 3,
-                        isCurrent ? cursor_mark_ink(t) : t.textValue, CHAR_SPACING, FONT_SCALE);
+            const int labelX = cellX + (CELL_WIDTH - labelW) / 2;
+            if (isCurrent && s.rHeld)
+                draw_cursor_cell(c, label, labelX, cellY + TEXT_PADDING, true, t.textValue, t);
+            else
+                c.draw_text(label, labelX, cellY + TEXT_PADDING, isCurrent ? cursor_mark_ink(t) : t.textValue,
+                            CHAR_SPACING, FONT_SCALE);
         }
     }
 }

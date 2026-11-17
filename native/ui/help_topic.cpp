@@ -270,12 +270,12 @@ HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::FOLDER:     return HelpTopic::SET_FOLDER;
         case SettingsRow::NOTE_PREV:  return HelpTopic::SET_NOTE_PREVIEW;
         case SettingsRow::VISUALIZER: return HelpTopic::SET_VISUALIZER;
-        case SettingsRow::HELP:       return HelpTopic::SET_HELP;
         case SettingsRow::THEME:      return HelpTopic::SET_THEME;
         case SettingsRow::TEMPLATE:
             return second ? HelpTopic::SET_TEMPLATE_CLEAR : HelpTopic::SET_TEMPLATE_SAVE;
         case SettingsRow::RESUME:     return HelpTopic::SET_RESUME;
         case SettingsRow::TRACE:      return HelpTopic::SET_TRACE;
+        case SettingsRow::HELP:       return HelpTopic::NONE;   // retired row, never on screen
     }
     return HelpTopic::NONE;
 }
@@ -499,6 +499,13 @@ HelpTopic help_topic(const AppState& s) {
     }
 
     return (cell == HelpTopic::NONE) ? help_screen_topic(s.currentScreen) : cell;
+}
+
+HelpTopic help_screen(const AppState& s) {
+    if (s.eq.isOpen)           return HelpTopic::SCREEN_EQ;
+    if (theme_editor_up(s))    return HelpTopic::SCREEN_THEME;
+    if (send_editor_up(s))     return HelpTopic::SCREEN_EFFECTS;
+    return help_screen_topic(s.currentScreen);
 }
 
 }  // namespace pt::ui

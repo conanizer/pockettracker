@@ -10,19 +10,19 @@ namespace pt::ui {
 
 namespace {
 
-constexpr int ROW_AREA_TOP = TEXT_PADDING + ROW_HEIGHT + 14;   // 3 + 21 + 14 = 38
+constexpr int ROW_AREA_TOP = ROW_HEIGHT + 14;   // 35, the side panel's first row
 
 int total_rows() { return THEME_FIRST_COLOR_ROW + static_cast<int>(theme_color_rows().size()); }
 
 }  // namespace
 
 int ThemeEditorModule::visible_row_count() {
-    return std::max(1, (HEIGHT - ROW_AREA_TOP) / ROW_HEIGHT);   // (392 − 38) / 21 = 16
+    return std::max(1, (HEIGHT - ROW_AREA_TOP) / ROW_HEIGHT);   // (392 − 35) / 21 = 17
 }
 
 int ThemeEditorModule::scroll_offset(int cursor_row) {
     const int visible   = visible_row_count();
-    const int max_scroll = std::max(0, total_rows() - visible);   // 18 − 16 = 2
+    const int max_scroll = std::max(0, total_rows() - visible);   // 18 − 17 = 1
     const int wanted    = (cursor_row >= visible) ? cursor_row - visible + 1 : 0;
     return std::min(std::max(wanted, 0), max_scroll);
 }

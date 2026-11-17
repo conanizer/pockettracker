@@ -74,7 +74,10 @@ class SampleEditSession {
     // SAVE / SAVE-AS / OVERWRITE: write the WAV, adopt it, leave the editor. False: nothing written.
     bool save_to(const std::string& path, bool adopt_name);
 
-    // CHOP: every slice to `Samples/Chops/<name>/` as its own WAV.
+    // Where SAVE and CHOP write: the folder of the file the sample came from; Samples if it has none.
+    std::string home_folder();
+
+    // CHOP: every slice to `<home_folder>/<name>/` as its own WAV.
     void chop();
 
   private:

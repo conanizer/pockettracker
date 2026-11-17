@@ -34,8 +34,8 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     c.draw_text("PROJECT", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // The first row's background sits below the title and its 14px of air.
-    const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
+    // The first row sits below the title and its 14px of air, level with the side panel's rows.
+    const int firstRowY = y + ROW_HEIGHT + 14;
     const auto rowY = [&](ProjectRow row) {
         return firstRowY + project_row_offset_y(row, s.caps, ROW_HEIGHT);
     };

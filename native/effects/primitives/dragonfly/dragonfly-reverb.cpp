@@ -283,7 +283,7 @@ struct PlateEngine final : Engine {
 
 // Per-algorithm trim so switching changes character, not loudness. Matched at the default cells
 // only; other DCAY/SIZE values are not compensated.
-//                                           OLD   HALL   ROOM   PLATE  FOIL
+//                                         DEFAULT HALL   ROOM   PLATE  FOIL
 constexpr float kTrim[kReverbAlgoCount] = {1.0f, 2.22f, 4.62f, 3.63f, 2.26f};
 
 std::unique_ptr<Engine> make_engine(int algo) {

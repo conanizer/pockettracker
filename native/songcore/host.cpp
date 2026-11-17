@@ -127,6 +127,11 @@ void SongcoreHost::keep_walking(int64_t aheadMs) {
     sync_clock();
     apply_follow_step(aheadMs);
     seq_.updatePlaybackBuffer(aheadMs);
+    // MUTE/SOLO on the cable: a track the mixer silences, or every track while a return is heard alone.
+    uint8_t muted = 0;
+    for (int t = 0; t < POOL_TRACKS; ++t)
+        if (project_.dryMute || !track_audible(project_, t)) muted |= static_cast<uint8_t>(1u << t);
+    external_.set_muted_tracks(muted);
     // ⚠️ The MIDI queue is released here (unless a sender thread owns it), even when stopped: a
     // LEN gate and a panic's note-offs are owed after the last note.
     if (!midiPumpExternal_) external_.pump(seq_.clock());

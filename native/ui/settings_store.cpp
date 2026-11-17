@@ -43,14 +43,13 @@ constexpr struct { const char* key; bool V::* field; } BOOLS[] = {
     {"touchButtonsWithPad", &V::touchButtonsWithPad}, {"metronome", &V::metronomeEnabled},
     {"midi_sync_out", &V::midiSyncOut},             {"midi_velocity", &V::midiVelocity},
     {"autosaveResumeAuto", &V::autosaveResumeAuto}, {"buttonSound", &V::buttonSoundEnabled},
-    {"buttonVibro", &V::buttonVibroEnabled},
+    {"buttonVibro", &V::buttonVibroEnabled},            {"topPanelAsked", &V::topPanelAsked},
 };
 
 constexpr struct { const char* key; int V::* field; int lo, hi; } INTS[] = {
     {"oneHandHoldMs", &V::oneHandHoldMs, 50, 5000},
     {"abxy", &V::abxyIndex, 0, 2},                  // 0 AUTO, 1 XBOX, 2 NINTENDO
     {"metronomeVolume", &V::metronomeVolume, 0, 255},
-    {"help", &V::helpMode, 0, 2},                   // 0 OFF, 1 SHORT, 2 FULL
     {"midi_offset_ms", &V::midiOffsetMs, -99, 99},
     {"midi_sync_in", &V::midiSyncIn, 0, 2},
     {"buttonSoundVolume", &V::buttonSoundVolume, 0, 255},
@@ -65,8 +64,6 @@ constexpr struct { const char* key; std::string V::* field; } STRINGS[] = {
     {"audio_output", &V::audioOutput},      // a driver name
     {"portrait_skin", &V::portraitSkin},    {"overlay_name", &V::overlayName},
 };
-
-constexpr int VISUALIZER_COUNT = 6;   // VisualizerType — SCOPE … SPECTRUM_PEAKS
 
 }  // namespace
 
@@ -94,7 +91,7 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
 
     // The user's, not the theme's: read first, so the theme load below cannot overwrite it.
     const int viz = std::clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
-                               0, VISUALIZER_COUNT - 1);
+                               0, VISUALIZER_TYPE_COUNT - 1);
 
     // ⚠️ The whole palette, not its name: an invented palette exists nowhere else. Through the `.ptt`
     // parser, so the two formats cannot drift.

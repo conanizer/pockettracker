@@ -125,12 +125,14 @@ WAV exports are saved to:
 <home>/Renders/
 ```
 
-Resampled instruments and CHOP exports are saved to:
+Resampled instruments are saved to:
 
 ```
 <home>/Samples/Resampled/
-<home>/Samples/Chops/{name}/
 ```
+
+The SAMPLE EDITOR's SAVE and CHOP write beside the file the sample came from (into `Samples/` for a
+sample with no file).
 
 On Linux, Windows, PortMaster handhelds and the Miyoo Mini there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same ten sub-folders live in it.
 
@@ -142,7 +144,7 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 
 ```
 ┌────────────────────────────────────────────────┐
-│  VISUALIZER  (620×70 px)                       │
+│  TOP PANEL  (620×70 px)                        │
 ├──────────────────────────────┬─────────────────┤
 │                              │  NAV MAP        │
 │  MAIN EDITOR                 │  (80×105 px)    │
@@ -152,27 +154,27 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 └──────────────────────────────┴─────────────────┘
 ```
 
-**Visualizer** — the top bar displays real-time audio. It has six display modes you can switch in SETTINGS:
+**Top panel** — the strip across the top. **SETTINGS → TOP PANEL** picks what it shows:
 
 | Mode | What it shows |
 |---|---|
-| SCOPE | Classic oscilloscope waveform (ProTracker-style pixel dots) |
-| FLAT | Blank bar (saves battery / CPU) |
 | OCTA | Mini-scopes side by side, one per active track |
 | OCTA.F | All 8 track scopes at once (active or not) |
-| SPECT | 40-bin FFT spectrum |
 | SPCT.P | FFT spectrum with peak-hold dots |
+| EMPTY | Blank bar (saves battery / CPU) |
+| GUIDE | What the cell under the cursor is, and its controls (see §5.2, *The guide*) |
 
 **Main editor** — the active screen (PHRASE, CHAIN, SONG, etc.).
 
-**Navigation map** — a miniature 5×5 grid in the top-right showing your position in the screen layout.
+**Navigation map** — a miniature 5×5 grid in the bottom-right showing your position in the screen layout.
+While R is held, the current screen's letter wears the cursor.
 
 **Status line** — brief messages (e.g., `SAVED`, `RESAMPLED TO INST 0C`) that auto-dismiss after a few seconds.
 
 Some screens (SAMPLE EDITOR, EQ EDITOR, THEME EDITOR) open as full-screen overlays that temporarily replace the main layout.
 
 > [!TIP]
-> If you're on a low-power device and notice audio hiccups, switch the visualizer to **FLAT** — it disables the real-time waveform rendering and frees up CPU for the audio engine.
+> If you're on a low-power device and notice audio hiccups, switch the top panel to **EMPTY** — it disables the real-time waveform rendering and frees up CPU for the audio engine.
 
 ---
 
@@ -269,13 +271,27 @@ Both keyboard and gamepad work simultaneously.
 
 #### Help on SELECT
 
-Tap **SELECT** for help on the cell the cursor is on. **SETTINGS → HELP** chooses what you get:
+Tap **SELECT** for help on the cell the cursor is on: a page over the screen that says what the cell is and
+lists every control it has. Any button closes it, and that press does nothing else.
 
-- **SHORT** — the visualizer strip at the top of the screen becomes three lines describing the cell. Tap **SELECT** again, or press any other button, to put it away. On the sample editor it appears in place of the waveform. The file browser has no room for it, so there it shows nothing.
-- **FULL** — a help screen over everything: the same text, and a longer description where one has been written. Any button closes it, and that press does nothing else.
-- **OFF** — **SELECT** shows no help.
+#### The guide
 
-The strip uses the theme's **VIZ BG** and **VIZ WAVE** colours.
+With **SETTINGS → TOP PANEL** set to **GUIDE**, the top panel shows three lines that follow the cursor: what
+the cell is, then its two main controls. On an empty cell of SONG, CHAIN or PHRASE they say how to fill it.
+The two control lines change with what you hold:
+
+| Held | The guide shows |
+|---|---|
+| R | The screens R + D-pad leads to from here, by name, and what else R does on this screen |
+| L | What the clipboard holds, and what L does on this screen |
+| B | The B combinations of this screen |
+| A, on a frequency or a time | The value in Hz or ms |
+| *(a selection is up)* | The size of the selection, and the buttons that work on it |
+
+On SONG in LIVE mode the lines say what START does there. A status message takes the first line while it
+lasts. The sample editor and the file browser have no top panel, so they have no guide.
+
+The app asks once, when it starts, whether to turn the guide on.
 
 ---
 
@@ -292,7 +308,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 | A + B | Delete / clear value |
 
 - **Key repeat is active:** hold the combo for ~400 ms and it starts repeating, speeding up to ~30/s. Both can be changed in `config.json` — see [section 27](#27-configuration-file-configjson).
-- While A is held on a frequency or a time, the visualizer strip spells it out: a filter's FREQ and `CUT`/`LPF`/`HPF`/`BPF` in Hz, an LFO's FREQ, envelope times, `LAT`, `KIL`, `PSL`, `LEG`, `TIC`, EXTERNAL LEN and a groove step in ms at the song's tempo, and the reverb's PRE, DCAY and DAMP and the delay's TIME, `TIM` and TONE. On a `CHD` it names the chord.
+- While A is held on a frequency or a time, the top panel spells it out: a filter's FREQ and `CUT`/`LPF`/`HPF`/`BPF` in Hz, an LFO's FREQ, envelope times, `LAT`, `KIL`, `PSL`, `LEG`, `TIC`, EXTERNAL LEN and a groove step in ms at the song's tempo, and the reverb's PRE, DCAY and DAMP and the delay's TIME, `TIM` and TONE. On a `CHD` it names the chord.
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
 - Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.
@@ -350,13 +366,15 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 
 | Input | Action |
 |---|---|
-| L + B | Enter selection mode (tap again to cycle: CELL → ROW → SCREEN) |
+| L + B | Enter selection mode. Each **L + B** after that widens it: CELL → ROW → SCREEN, then CELL again |
 | B (in selection) | Copy selection, exit selection mode |
 | L + A (in selection) | Cut (copy + clear), exit selection mode |
 | L + A (outside selection) | Paste clipboard at cursor |
 | A + B (in selection) | Delete selection (no clipboard), exit selection mode |
-| L + B + A | Deep-clone the chain or phrase under the cursor into the next free slot |
+| L + B, then A | Deep-clone the chain or phrase under the cursor into the next free slot. Hold **L**, press **B**, then **A** — B may be let go before the A, L may not |
 | L + R | Leave selection mode (nothing copied) |
+
+> On SONG, CHAIN and PHRASE, an **A** pressed while **L** is still held from the **L + B** clones. To cut a selection you have only just made, let go of **L** and press **L + A**.
 
 **Selection increment:** In selection mode, **A + D-pad** steps the selected values — LEFT/RIGHT by one,
 UP/DOWN by the large step. On SONG that is the whole selection; on CHAIN, PHRASE and TABLE, the cursor's
@@ -365,7 +383,7 @@ what A would put there, and they step together.
 
 **Clearing the clipboard:** the copy buffer deliberately survives leaving a selection — you can select
 again by accident without losing what you copied. Press **L + R** when you are *not* selecting to clear
-it, which is also how you dismiss the clipboard readout in the top strip.
+it, which is also how you dismiss the clipboard readout in the top panel.
 
 **L + R** also restores muted and soloed tracks (§5.7). It undoes one thing per press, most recent
 first: if you muted a channel after making a selection, the first press brings the channel back and
@@ -1052,7 +1070,7 @@ neighbours — its number follows its position — and deleting one renumbers th
 > Anything that changes the sample's **length** — CROP, CUT, DUPL, PASTE, DEL, UNDO, a resizing SYNC —
 > clears every slice boundary, including the ones the file arrived with.
 
-**CHOP** — exports each slice as a separate WAV file to `Samples/Chops/{name}/`.
+**CHOP** — exports each slice as a separate WAV file to a `{name}/` folder beside the sample's file.
 
 > [!TIP]
 > After using CHOP, you need to manually load the individual slice files onto new instrument slots. There is no automatic batch-load — but using numbered filenames (which CHOP generates) makes the process fast.
@@ -1516,7 +1534,7 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 |---|---|
 | *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets, from **DEFAULT** through small rooms to long halls and plates. Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Presets/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
-| ALGO | Which reverb the cells below drive: **OLD** (the original), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
+| ALGO | Which reverb the cells below drive: **DEFAULT** (the app's own reverb), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
 | SIZE | Size of the room (`00`–`FF`) — how far apart its walls are. A bigger room also makes the movement from MOD slower. It does not change how long the tail rings or how loud it is. |
 | DCAY | Length of the reverb tail (`00`–`FF`), from about half a second to about twenty-five, whatever the room. `FF` is a tail that never ends. The level stays where it is as you turn it. |
@@ -1702,8 +1720,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | ONE HAND | ON / OFF (+ MS) | For playing with one hand. With it on, **A**, **B**, **L**, **R** or **SELECT** held alone for a moment and let go stays down until you press it again, so a combination can be played one button at a time: lock R, then press B to mute. Its letter shows under the note monitor while it is held. A lock lets go by itself after a combination done in one go — delete, cut, paste, clone, a new selection — and when a question box opens; it stays for the ones you repeat, such as A + D-pad or a mute. **MS**, shown while it is on, sets how long the hold takes, from 150 to 1000 ms (300 by default). |
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 27). |
 | NOTE PREV | ON / OFF | On the PHRASE screen, play the note under the cursor for as long as you hold **A** — when you insert it, change it with A + D-pad, or just hold A on it. Not in selection mode, and not while playing. |
-| VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
-| HELP | OFF / SHORT / FULL | What a tap of **SELECT** shows: nothing, three lines in the visualizer strip, or a full help screen (see §5.2, *Help on SELECT*). |
+| TOP PANEL | OCTA / OCTA.F / SPCT.P / EMPTY / GUIDE | What the strip across the top shows: a visualizer, nothing, or the guide (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 | ABXY | AUTO / XBOX / NINTENDO | Which face button your controller has **printed** A. Appears only while a controller is attached. **AUTO** trusts the controller and is right for a handheld's built-in pad and for a real Switch pad. Use **NINTENDO** if A is the right-hand button but the app reads it as B - common with 8BitDo pads in XInput mode, which report themselves as Xbox controllers. **XBOX** = A is the bottom button. Keyboard keys are never affected. |
@@ -1981,7 +1998,7 @@ Persists across steps. Configure with **ARC**.
 
 The row's note plays as a chord of four notes, on its own track and through the instrument's one
 filter and effects. `X` picks the chord, `Y` how its notes are laid out. Hold **A** on the value to
-see the chord's name and notes over the visualizer.
+see the chord's name and notes in the top panel.
 
 | X | Chord | X | Chord |
 |---|---|---|---|
@@ -2792,8 +2809,7 @@ modifiers.
 
 **Moving and copying several files** works like the tracker's own copy/paste:
 
-1. **L + B** starts a selection at the cursor. Tap **L + B** again inside half a second to select
-   everything in the folder.
+1. **L + B** starts a selection at the cursor. **L + B** again selects everything in the folder.
 2. **D-pad UP/DOWN** stretches the selection.
 3. **B** copies the selected files, or **L + A** cuts them. Either way the selection ends and the
    status line reports how many files are on the clipboard.
@@ -2880,7 +2896,7 @@ Output: `<home>/Samples/Resampled/Resample_0001.wav`, …
 
 When slice markers are set in the SAMPLE EDITOR, use CHOP to export each slice as a separate WAV:
 
-Output: `<home>/Samples/Chops/{instrument_name}/`
+Output: a `{instrument_name}/` folder beside the sample's file (in `<home>/Samples/` for a sample with no file).
 
 > [!NOTE]
 > CHOP exports do not automatically load into instrument slots. After chopping, open the INSTRUMENT screen and use the file browser to load the individual slice files onto new instruments.
@@ -3240,13 +3256,13 @@ exports and sample-editor saves keep their own folders.
 
 | Input | Action |
 |---|---|
-| L + B | Enter selection mode (tap again: CELL → ROW → SCREEN) |
+| L + B | Enter selection mode (again: CELL → ROW → SCREEN) |
 | B *(in selection)* | Copy, exit selection |
 | L + A *(in selection)* | Cut (copy + clear), exit selection |
 | L + A *(outside selection)* | Paste at cursor |
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
 | A + D-pad *(in selection)* | Step the selected values (SONG: all; elsewhere the cursor's column); empty cells stay empty |
-| L + B + A | Deep-clone the chain / phrase under the cursor |
+| L + B, then A | Deep-clone the chain / phrase under the cursor (L held throughout) |
 | L + D-pad | Fill rows from one cell (PHRASE) |
 | L + R *(in selection)* | Leave selection mode; the copy buffer survives |
 | L + R *(outside selection)* | Clear the copy buffer |
@@ -3280,7 +3296,7 @@ exports and sample-editor saves keep their own folders.
 | SELECT + A | Rename |
 | SELECT + B | Delete, or delete the selection (asks first) |
 | SELECT + R | New folder |
-| L + B | Start a file selection (tap again: select all) |
+| L + B | Start a file selection (again: select all) |
 | B *(in selection)* | Copy the selected files |
 | L + A *(in selection)* | Cut them |
 | L + A *(outside selection)* | Paste them here |

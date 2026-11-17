@@ -42,6 +42,15 @@ std::string format_ms(double ms) {
     return buf;
 }
 
+std::string instrument_label(const songcore::Instrument& ins) {
+    using songcore::InstrumentType;
+    if ((ins.instrumentType == InstrumentType::SAMPLER && !ins.sampleFilePath) ||
+        (ins.instrumentType == InstrumentType::SOUNDFONT && !ins.soundfontPath))
+        return "EMPTY";
+    if (songcore::instrument_has_default_name(ins)) return songcore::instrument_type_name(ins.instrumentType);
+    return ins.name;
+}
+
 ValueUnit fx_value_unit(int effect_code) {
     using namespace songcore;
     switch (effect_code) {
@@ -117,13 +126,23 @@ ValueHint chord_hint(int value, const AppState& s) {
     return {head, notes};
 }
 
+ValueHint instrument_hint(int value, const AppState& s) {
+    const auto& list = s.project->instruments;
+    if (value < 0 || value >= static_cast<int>(list.size())) return {};
+    const songcore::Instrument& ins  = list[static_cast<size_t>(value)];
+    const std::string           type = songcore::instrument_type_name(ins.instrumentType);
+    const std::string           name = instrument_label(ins);
+    if (name != type) return {name, type};
+    return {type + " " + songcore::hex2(value), ""};
+}
+
 }  // namespace
 
 ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
     if (!s.project) return {};
     const songcore::Project& p     = *s.project;
     const int                tempo = p.tempo;
-    const bool               old   = p.reverb.algo == kReverbAlgoOld;
+    const bool               dflt  = p.reverb.algo == kReverbAlgoDefault;
 
     switch (unit) {
         case ValueUnit::NONE:
@@ -141,12 +160,12 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
             return {format_ms(reverb_pre_delay_seconds(value) * 1000.0), ""};
 
         case ValueUnit::REVERB_DECAY:
-            if (old && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
-            return {format_ms((old ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
+            if (dflt && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
+            return {format_ms((dflt ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
                     std::string("TILL THE TAIL FADES")};
 
         case ValueUnit::REVERB_DAMP:
-            return {format_hz(old ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
+            return {format_hz(dflt ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
 
         case ValueUnit::DELAY_TIME: {
             const double ms = delay_time_seconds(value) * 1000.0;
@@ -188,8 +207,18 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
 
         case ValueUnit::CHORD:
             return chord_hint(value, s);
+
+        case ValueUnit::INSTRUMENT:
+            return instrument_hint(value, s);
     }
     return {};
+}
+
+ValueHint held_value_hint(const AppState& s) {
+    if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return {};
+    const CursorContext k = s.cellUnderCursor();
+    if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return {};
+    return value_hint(k.unit, k.currentValue, s);
 }
 
 }  // namespace pt::ui

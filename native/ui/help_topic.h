@@ -280,7 +280,7 @@ enum class HelpTopic {
     FX_REVERB_DECAY,
     SE_BIT,
     FX_REVERB_ALGO,
-    SET_HELP,
+    SET_HELP,   // no cell (the HELP row is retired); the slot stays because the value indexes HELP_ENTRIES
     GROOVE_NAME,
     GROOVE_SAVE,
     GROOVE_LOAD,
@@ -315,5 +315,8 @@ struct AppState;
 
 // What the cursor is on, overlays first. Never NONE: a cell with no entry falls back to its screen.
 HelpTopic help_topic(const AppState& s);
+
+// The screen it is on — the in-place editors count as screens. Its entry lists the screen's gestures.
+HelpTopic help_screen(const AppState& s);
 
 }  // namespace pt::ui

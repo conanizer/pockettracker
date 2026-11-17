@@ -116,14 +116,14 @@ struct ReverbModule {
     void run(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         const int  want     = algo;
         const bool switched = want != soundingAlgo;
-        if (switched && want == kReverbAlgoOld) {
+        if (switched && want == kReverbAlgoDefault) {
             // ⚠️ Rebuilt rather than resumed: it went silent mid-tail and would replay it.
             reverb.Init(sampleRate);
             setParams(decayHex, dampHex, sizeHex);
             reverb.SetPitchMod(reverb_mod_scale(modHex));
         }
         soundingAlgo = want;
-        if (want != kReverbAlgoOld) {
+        if (want != kReverbAlgoDefault) {
             processDragonfly(want, switched, inL, inR, outL, outR, numFrames);
             return;
         }

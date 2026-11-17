@@ -27,10 +27,13 @@ struct MapperState {
     // SELECT went down alone; any other press clears it, so help fires on release only for a bare tap
     // (on the file browser SELECT is a modifier).
     bool selectPressedAlone = false;
+
+    // L+B was pressed in this hold of L, and nothing but B since: the next A clones.
+    bool lThenB = false;
 };
 
-// ⚠️ The order of the checks is the specification: most specific first, each arm returns. L+B+A before
-// L+A, A+B before A, R+A / R+B before A and B.
+// ⚠️ The order of the checks is the specification: most specific first, each arm returns. The clone
+// (L, B, then A) before L+A, A+B before A, R+A / R+B before A and B.
 // ⚠️ Modifiers come from the event, never a poll: a frame's events arrive at once, and a poll would
 // see the frame's end (B-then-A in one frame would delete on the B press).
 template <class Dispatcher>
@@ -44,11 +47,14 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
     // A press with R held is a combo (R+DPAD switches screens): that hold never learns.
     else if (e.action == ButtonAction::PRESSED && m.r) d.on_r_combo_press();
-    // A's state for what is drawn while it is held. Above every early return too.
+    // A's, B's and L's state for what is drawn while they are held. Above every early return too.
     if (e.button == Button::A) d.on_a_held(e.action == ButtonAction::PRESSED);
+    if (e.button == Button::B) d.on_b_held(e.action == ButtonAction::PRESSED);
+    if (e.button == Button::L_SHIFT) d.on_l_held(e.action == ButtonAction::PRESSED);
 
     // ── Release ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
+        if (e.button == Button::L_SHIFT) ms.lThenB = false;
         // The mute/solo chord ends on a release and consumes it (an armed A must not reach
         // `on_a_released()`). On the A/B release, `m.r` is "is R still down?".
         if (ms.rComboArmed) {
@@ -94,14 +100,15 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
         return {};
     }
 
-    // Any press but SELECT puts the compact panel away and falls through — it swallows nothing.
-    if (e.button != Button::SELECT) {
-        ms.selectPressedAlone = false;   // SELECT is a modifier here, not a tap
-        d.on_help_dismiss();
-    }
+    // Any press but its own makes SELECT a modifier, not the tap that asks for help.
+    if (e.button != Button::SELECT) ms.selectPressedAlone = false;
 
     // Any plain press silences an audition; START and A-combos (edits stay audible) do not.
     if (e.button != Button::START && !m.a) d.on_stop_preview();
+
+    // L, B, then A is one gesture: any press but another B ends it, the A it was waiting for included.
+    const bool lThenB = ms.lThenB;
+    if (e.button != Button::B) ms.lThenB = false;
 
     // ── A + … ────────────────────────────────────────────────────────────────────────────────────
     if (m.a && !m.l && !m.r) {
@@ -152,17 +159,18 @@ Chord handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64
         }
     }
 
-    // ── L+B+A: clone — before L+A, which would paste ─────────────────────────────────────────────
-    if (m.l && m.b && !m.r && e.button == Button::A) {
-        d.on_l_b_a();
-        return one_go(L | B);
+    // ── L, B, then A: clone — before L+A, which would cut ────────────────────────────────────────
+    // B may still be down (the three-button chord) or let go, as long as L never was.
+    if (m.l && !m.r && e.button == Button::A) {
+        if (m.b)    { d.on_l_b_a();      return one_go(L | B); }
+        if (lThenB) { d.on_l_b_then_a(); return one_go(L); }
     }
 
     // ── L + … : selection and the clipboard ──────────────────────────────────────────────────────
     if (m.l && !m.r) {
         switch (e.button) {
             case Button::A:     d.on_l_a(); return one_go(L);   // cut (in a selection) / paste (outside one)
-            case Button::B:     d.on_l_b(); return {ChordEnd::WIDEN, L};   // enter selection, then widen it
+            case Button::B:     d.on_l_b(); ms.lThenB = true; return {ChordEnd::WIDEN, L};   // enter selection, then widen it
             case Button::START: d.on_l_start(); return one_go(L);   // LIVE's row queue; never play/stop
             default: break;
         }

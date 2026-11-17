@@ -1,13 +1,11 @@
 #pragma once
 
-// The compact help panel: three lines about the cell under the cursor, drawn in place of the
-// visualizer strip (or the sample editor's waveform), mascot at the left.
-// ⚠️ It replaces its box: the status message and selection readout stand down while it is up.
-// Both boxes are 620 wide, so `HELP_MAX_CHARS` derives from the width alone; the taller one is air.
-// Colours: VIZ BG, VIZ WAVE text, TXT TITLE mascot — readable wherever the scope is.
-// ⚠️ The file browser cannot show it: no box to spare, and SELECT is its own chord there.
+// The panel the guide is drawn in (ui/guide.h): three lines in place of the visualizer, mascot at the
+// left. `HELP_MAX_CHARS` derives from its width.
+// Colours: VIZ BG under the lines' own inks, TXT TITLE mascot — readable wherever the scope is.
 
 #include "ui/canvas.h"
+#include "ui/guide.h"
 #include "ui/help_text.h"
 #include "ui/helpers.h"
 #include "ui/mascot_sprite.h"
@@ -15,10 +13,27 @@
 
 namespace pt::ui {
 
+// One word of a controls line at (x, y): the buttons it opens with (`help_key_bytes`) in `keyInk`,
+// the rest in `ink`. Returns its width in columns.
+inline int draw_control_word(Canvas& c, const char* word, int bytes, int x, int y, Argb ink, Argb keyInk) {
+    const auto columns = [&](int from, int to) {
+        int n = 0;
+        for (int i = from; i < to; ++n) i += detail::help_arrow_at(word + i) ? 3 : 1;
+        return n;
+    };
+    const int keyBytes = help_key_bytes(word, bytes);
+    const int keyCols  = columns(0, keyBytes);
+    if (keyBytes > 0)
+        c.draw_text(std::string(word, static_cast<size_t>(keyBytes)), x, y, keyInk, CHAR_SPACING, FONT_SCALE);
+    if (keyBytes < bytes)
+        c.draw_text(std::string(word + keyBytes, static_cast<size_t>(bytes - keyBytes)), x + keyCols * CHAR_W,
+                    y, ink, CHAR_SPACING, FONT_SCALE);
+    return keyCols + columns(keyBytes, bytes);
+}
+
 class HelpPanelModule {
   public:
     static constexpr int WIDTH  = 620;
-    // The smallest box the panel fills.
     static constexpr int HEIGHT = 70;
 
     // 64 + 3 + 3 = 70: snug top and bottom.
@@ -37,9 +52,7 @@ class HelpPanelModule {
     static_assert(TEXT_X + (HELP_MAX_CHARS + 1) * CHAR_W - CHAR_SPACING > WIDTH,
                   "HELP_MAX_CHARS is short by a character or more - widen it");
 
-    // Fills `box_height` from `y`. The 70px block is centred, so both boxes show the same panel.
-    void draw(Canvas& c, int x, int y, HelpTopic topic, const Theme& t,
-              int box_height = HEIGHT) const;
+    void draw(Canvas& c, int x, int y, const GuideLines& lines, const Theme& t) const;
 };
 
 }  // namespace pt::ui

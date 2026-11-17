@@ -1330,6 +1330,9 @@ int run(const AppConfig& cfg) {
         case BR::DROPPED:  std::printf("autosave: FOUND but UNREADABLE - dropped\n"); break;
     }
 
+    // Once per install, behind RECOVER WORK? where that is up.
+    dispatch.boot_ask_top_panel();
+
     // After boot_recovery, so a backgrounding during start-up cannot save over the autosave in question.
     SDL_AddEventWatch(on_app_event, &bg);
 
