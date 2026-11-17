@@ -451,6 +451,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       HELP_NEW_ROW,
       "*EXTERNAL* sends the notes to a",
       "MIDI device.",
+      HELP_NEW_ROW,
+      "*MACRO* is a synth with 47 models.",
       "",
       "If the instrument has a file or",
       "settings, it asks first: *DISCARD*",
@@ -926,7 +928,10 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       HELP_NEW_ROW,
       "*MOD R*: its speed.",
       HELP_NEW_ROW,
-      "*MOD B*: both."},
+      "*MOD B*: both.",
+      HELP_NEW_ROW,
+      "*TIMB*, *COLR*: TIMBRE and COLOR",
+      "of a MACRO instrument."},
      {"A+D-PAD pick target"}},
     /* MOD_AMOUNT */
     {"MOD AMOUNT", "00 does nothing, FF is the", "full swing.",
@@ -2179,6 +2184,41 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"Shorter locks sooner, but a slow",
       "tap may then lock by mistake."},
      {"A+D-PAD pick one"}},
+
+    // ── INSTRUMENT, MACRO only ───────────────────────────────────────────────────────────────────
+    /* INST_MACRO_MODEL */
+    {"MODEL: which synth it is", "47 ways to make a sound. The", "note beside it says which.",
+     {"Each model makes sound its own",
+      "way: analog waves, FM, vowels,",
+      "strings, drums, wavetables,",
+      "noise. TIMBRE and COLOR shape",
+      "it, and the notes beside them",
+      "say what each does here. A new",
+      "model starts on the next note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 8",
+      "A+B goes back to the first",
+      "A+START plays the instrument"}},
+    /* INST_MACRO_TIMBRE */
+    {"TIMBRE: the first control", "What it shapes depends on the", "model: see the note beside it.",
+     {"The first of the two controls",
+      "a model has. What it does",
+      "depends on the model, and the",
+      "note beside it says: a cutoff,",
+      "a pulse width, a decay. A change",
+      "is heard on the sounding note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 16",
+      "A+B sets it back to 80",
+      "A+START plays the instrument"}},
+    /* INST_MACRO_COLOR */
+    {"COLOR: the second control", "What it shapes depends on the", "model: see the note beside it.",
+     {"The second of the two controls",
+      "a model has. What it does",
+      "depends on the model, and the",
+      "note beside it says. A change",
+      "is heard on the sounding note."},
+     {"A+←/→ changes by 1, A+↑/↓ by 16",
+      "A+B sets it back to 80",
+      "A+START plays the instrument"}},
 };
 
 // ─── The guide's own lines (ui/guide.h) ──────────────────────────────────────────────────────────
