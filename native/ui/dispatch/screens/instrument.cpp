@@ -25,9 +25,9 @@ void cycle_instrument(AppState& s, int delta) {
     show_instrument(s, step_wrapping(s.currentInstrument, delta, songcore::POOL_INSTRUMENTS));
 }
 
-/** B+UP/DOWN: 16 on or back, stopping at 00 and 7F; UP raises the number. */
+/** B+UP/DOWN: 16 on or back, wrapping like a single step (7F up is 0F); UP raises the number. */
 void page_instrument(AppState& s, int direction) {
-    show_instrument(s, page_clamping(s.currentInstrument, direction, songcore::POOL_INSTRUMENTS));
+    show_instrument(s, step_wrapping(s.currentInstrument, direction * 16, songcore::POOL_INSTRUMENTS));
 }
 
 }  // namespace

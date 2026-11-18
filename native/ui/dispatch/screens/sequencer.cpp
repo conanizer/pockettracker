@@ -254,7 +254,7 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
             return GestureResult::TAKEN;
         case Gesture::B_UP:
         case Gesture::B_DOWN:
-            s_.currentTable    = page_clamping(s_.currentTable, (g == Gesture::B_UP) ? +1 : -1, 128);
+            s_.currentTable    = step_wrapping(s_.currentTable, (g == Gesture::B_UP) ? +16 : -16, 128);
             s_.lastEditedTable = s_.currentTable;
             return GestureResult::TAKEN;
 
