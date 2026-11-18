@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdint>
 #include "audio-defs.h"
+#include "songcore/voice_codes.h"
 #include "effects/glide.h"
 
 // A voice's parameters: each slot is a base (set at trigger or by an effect) plus a mod accumulator
@@ -67,28 +68,20 @@ enum ModSourceId {
     MOD_SRC_COUNT  // = 17
 };
 
-// One instrument mod slot's running state in a voice.
-struct VoiceModSlot {
-    int type = 0;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
-    int dest = 0;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
-    float amount = 0.5f;   // Depth 0.0-1.0
-    // AHD/ADSR stage: 0=idle, 1=attack, 2=hold(AHD)/decay(ADSR), 3=decay(AHD)/sustain(ADSR), 4=done
-    // LFO stage: 1=running
+using songcore::ModType;
+using songcore::ModDest;
+
+// One instrument mod slot in a voice: its settings, copied at the trigger, and its running state.
+// An envelope's `stage`: AHD and DRUM 1 attack, 2 hold, 3 decay, 4 done; ADSR and TRIG 1 attack, 2 decay,
+// 3 sustain, 4 release, 5 done. An LFO runs at 1 (ONCE holds at 4). 0 is a slot not running.
+struct VoiceModSlot : songcore::EngineModSlot {
     int stage = 0;
-    float envValue = 0.0f;     // AHD/ADSR: 0.0-1.0; LFO: -1.0 to +1.0
-    int stageCounter = 0;      // Samples elapsed in current stage
-    int attackSamples = 0;
-    int holdSamples = 0;
-    int decaySamples = 0;
-    float sustainLevel = 0.5f;   // ADSR: sustain level 0.0-1.0
-    float lfoHz = 4.0f;          // LFO: frequency in Hz
-    float lfoPhase = 0.0f;       // LFO: current phase (0 to 2π)
-    int oscShape = 0;            // LFO: oscillator shape (0=TRI, 1=SIN, ...; 8=RND, 9=DRNK are stateful)
-    int lfoTrigMode = 1;         // LFO: 0=FREE (clock-aligned phase), 1=RETG, 2=HOLD, 3=ONCE
-    float lfoRandValue = 0.0f;   // LFO RND/DRNK: current sample-&-hold / drunk-walk level
-    uint32_t lfoRngState = 1u;   // LFO RND/DRNK: per-slot xorshift32 state (seeded at trigger, never 0)
-    int releaseSamples = 0;      // ADSR/TRIG: release duration in audio samples
-    float releaseFrom = 0.0f;    // ADSR/TRIG: envValue when the release began — it falls from there
+    float envValue = 0.0f;       // an envelope 0..1, an LFO −1..+1
+    int stageCounter = 0;        // samples into the stage
+    float lfoPhase = 0.0f;       // 0 to 2π
+    float lfoRandValue = 0.0f;   // RND/DRNK: the current sample-&-hold / drunk-walk level
+    uint32_t lfoRngState = 1u;   // RND/DRNK: per-slot xorshift32 state (seeded at trigger, never 0)
+    float releaseFrom = 0.0f;    // where the release began — it falls from there
 
     // Mod-to-mod, recomputed every block
     float effectiveAmt = 0.5f;        // amount + incoming MOD_AMT/BOTH
@@ -96,6 +89,18 @@ struct VoiceModSlot {
 
     float prevEnvValue = 0.0f;   // envValue at the block's start, for per-sample interpolation
 };
+
+// Slot types by behaviour: every envelope, and those with a release.
+inline bool mod_is_envelope(ModType t) {
+    return t == ModType::AHD || t == ModType::ADSR || t == ModType::DRUM || t == ModType::TRIG;
+}
+inline bool mod_has_release(ModType t) { return t == ModType::ADSR || t == ModType::TRIG; }
+
+inline bool mod_running(const VoiceModSlot& m) { return m.type != ModType::NONE && m.stage != 0; }
+// An envelope still on its way to the sustain — the stages an OFF moves into the release.
+inline bool env_before_release(const VoiceModSlot& m) { return m.stage >= 1 && m.stage <= 3; }
+inline bool env_releasing(const VoiceModSlot& m) { return mod_has_release(m.type) && m.stage == 4; }
+inline bool env_done(const VoiceModSlot& m) { return m.stage >= (mod_has_release(m.type) ? 5 : 4); }
 
 // An envelope's attack stage (stage 1, 0 → 1), shared by AHD and ADSR; then on to stage 2.
 inline void tickAttack(VoiceModSlot& mod, int effAttack) {
@@ -106,9 +111,6 @@ inline void tickAttack(VoiceModSlot& mod, int effAttack) {
     mod.envValue = 1.0f;
     mod.stage = 2; mod.stageCounter = 0;
 }
-
-// ADSR and TRIG: the kinds with a release stage.
-inline bool has_release_stage(const VoiceModSlot& m) { return m.type == 2 || m.type == 5; }
 
 // Into the release, falling from wherever the envelope stands — an OFF mid-attack included.
 inline void enter_release(VoiceModSlot& m) {
@@ -121,7 +123,7 @@ inline void enter_release(VoiceModSlot& m) {
 // call: they decide whether it has a release to run at all.
 inline void release_non_vol_envelopes(VoiceModSlot (&mods)[4]) {
     for (VoiceModSlot& m : mods)
-        if (m.dest != 1 && has_release_stage(m) && m.stage >= 1 && m.stage <= 3) enter_release(m);
+        if (m.dest != ModDest::VOLUME && mod_has_release(m.type) && env_before_release(m)) enter_release(m);
 }
 
 // One source → one destination: dest += source × ((1 − viaAmount) + via × viaAmount) × depth.

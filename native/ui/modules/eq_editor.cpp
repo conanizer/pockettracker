@@ -85,7 +85,7 @@ double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rat
     const double emjwB_Im = cosW * bIm - sinW * bRe;
 
     double magSq;
-    if (type == 5) {  // HICUT — the low-pass output
+    if (type == EQ_HIGH_CUT) {  // the low-pass output
         const double hRe = 0.5 * (lRe + emjwL_Re + f * emjwB_Re);
         const double hIm = 0.5 * (lIm + emjwL_Im + f * emjwB_Im);
         magSq            = hRe * hRe + hIm * hIm;
@@ -102,14 +102,17 @@ double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rat
                     std::max(-static_cast<double>(EqModule::VIS_DB), db));
 }
 
-// Type 0 (OFF) contributes nothing. The shelves and bell from the engine's own coefficients.
+// OFF contributes nothing. The shelves and bell from the engine's own coefficients.
 float band_gain_db(const songcore::EqBand& band, float freq, float sample_rate) {
     const float fc     = eqFreqHzFromHex(band.freq);
     const float gainDb = eqGainDbFromHex(band.gain);
     const float q      = eqQFromHex(band.q);
     switch (band.type) {
-        case 2: case 5: return static_cast<float>(svf_gain_db(band.type, fc, q, freq, sample_rate));
-        case 1: case 3: case 4:
+        case EQ_LOW_CUT:
+        case EQ_HIGH_CUT:   return static_cast<float>(svf_gain_db(band.type, fc, q, freq, sample_rate));
+        case EQ_LOW_SHELF:
+        case EQ_BELL:
+        case EQ_HIGH_SHELF:
             return static_cast<float>(eqPareqGainDb(band.type, fc, gainDb, q, sample_rate, freq));
         default: return 0.0f;
     }
@@ -177,7 +180,7 @@ float EqModule::combined_gain_db(const std::vector<songcore::EqBand>& bands, flo
     if (sampleRate <= 0.0f) sampleRate = kDefaultSampleRate;
     float total = 0.0f;
     for (const songcore::EqBand& b : bands) {
-        if (b.type == 0) continue;  // OFF
+        if (b.type == EQ_OFF) continue;
         total += band_gain_db(b, freq, sampleRate);
     }
     return std::min(VIS_DB, std::max(-VIS_DB, total));

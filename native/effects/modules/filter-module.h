@@ -3,13 +3,14 @@
 #include "../cell-curves.h"
 #include "../glide.h"
 #include "../primitives/daisysp/svf.h"
+#include "../../songcore/voice_codes.h"
 
-// A voice's resonant filter (DaisySP's state-variable filter, all outputs at once).
-// Types: 0 off, 1 LP, 2 HP, 3 BP, 4 notch, 5 peak. Cutoff 0-255 → 20 Hz–20 kHz exponential,
+// A voice's resonant filter (DaisySP's state-variable filter, all outputs at once), of a
+// songcore::FilterType. Cutoff 0-255 → 20 Hz–20 kHz exponential,
 // resonance 0-255 → 0..1, drive 0-255 → SetDrive 0..10. `setParams` once per block when one changes.
 struct FilterModule {
     // The glide rule (glide.h): `fresh` until the note's first sample.
-    int   type       = 0;
+    int   type       = songcore::FILTER_OFF;
     int   drive      = 150;
     float sampleRate = 44100.0f;
     daisysp::Svf svfL;   // mono or left channel
@@ -27,11 +28,11 @@ struct FilterModule {
     float fromFreqL = 0.25f, fromDampL = 0.0f, fromFreqR = 0.25f, fromDampR = 0.0f;
     Ramp  glide;
     // A type change crossfades from the old type's output (0 = the dry input) to the new one's.
-    int   prevType = 0;
+    int   prevType = songcore::FILTER_OFF;
     Ramp  typeFade;
 
     void reset() {
-        type = 0;
+        type = songcore::FILTER_OFF;
         fresh = true;
         glide = typeFade = Ramp{};
         svfL.Init(sampleRate);
@@ -49,14 +50,15 @@ struct FilterModule {
     }
 
     void setParams(int filterType, int cutoff, int resonance, int filterDrive, float sr) {
-        const int oldType = type;
+        const int  oldType    = type;
+        const bool switchedOn = oldType == songcore::FILTER_OFF && filterType != songcore::FILTER_OFF;
         type  = filterType;
         drive = filterDrive;
         if (sr != sampleRate) {
             sampleRate = sr;
             svfL.Init(sr);
             svfR.Init(sr);
-        } else if (!fresh && oldType == 0 && filterType != 0) {
+        } else if (!fresh && switchedOn) {
             // Switched on mid-note: its integrators hold whatever they held when it was last on.
             svfL.Init(sr);
             svfR.Init(sr);
@@ -69,7 +71,7 @@ struct FilterModule {
         svfR.SetFreq(hz);  svfR.SetRes(res);  svfR.SetDrive(drv);
         const float newFreqL = svfL.GetFreq(), newDampL = svfL.GetDamp();
         const float newFreqR = svfR.GetFreq(), newDampR = svfR.GetDamp();
-        if (!fresh && oldType != 0 && filterType != 0 &&
+        if (!fresh && oldType != songcore::FILTER_OFF && filterType != songcore::FILTER_OFF &&
             (newFreqL != targetFreqL || newDampL != targetDampL)) {
             fromFreqL = lastFreqL; fromDampL = lastDampL;
             fromFreqR = lastFreqR; fromDampR = lastDampR;
@@ -77,7 +79,7 @@ struct FilterModule {
         }
         targetFreqL = newFreqL; targetDampL = newDampL;
         targetFreqR = newFreqR; targetDampR = newDampR;
-        if (oldType == 0 && filterType != 0) {   // nothing to glide from: start where it is set
+        if (switchedOn) {   // nothing to glide from: start where it is set
             prevFreqL = lastFreqL = targetFreqL; prevDampL = lastDampL = targetDampL;
             prevFreqR = lastFreqR = targetFreqR; prevDampR = lastDampR = targetDampR;
         }
@@ -102,15 +104,15 @@ struct FilterModule {
         svfR.SetCoeffs(fR, dR);
     }
 
-    bool enabled() const { return type != 0; }
+    bool enabled() const { return type != songcore::FILTER_OFF; }
 
     static inline float tap(daisysp::Svf& s, int t, float in) {
         switch (t) {
-            case 1: return s.Low();
-            case 2: return s.High();
-            case 3: return s.Band();
-            case 4: return s.Notch();
-            case 5: return s.Peak();
+            case songcore::FILTER_LP:    return s.Low();
+            case songcore::FILTER_HP:    return s.High();
+            case songcore::FILTER_BP:    return s.Band();
+            case songcore::FILTER_NOTCH: return s.Notch();
+            case songcore::FILTER_PEAK:  return s.Peak();
             default: return in;
         }
     }

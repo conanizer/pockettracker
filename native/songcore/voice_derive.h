@@ -75,46 +75,11 @@ inline Program make_program(const Project& project, const Routing& routing, int 
     return make_program(ins, routing.sampleRateRatio[id], routing.sfSlot[id]);
 }
 
-// One modulation slot's push. `type == 0` is a real "clear this slot" call, made for NONE and
-// unrouted-dest slots.
-struct ModPush {
-    int   sampleId = 0;
-    int   slotIndex = 0;
-    int   type = 0;
-    int   dest = 0;
-    float amount = 0.0f;
-    int   attackSamples = 0;
-    int   holdSamples = 0;
-    int   decaySamples = 0;
-    float sustainLevel = 0.5f;   // the default for every non-ADSR/TRIG slot
-    float lfoHz = 4.0f;          // the default for every non-LFO slot
-    int   oscShape = 0;
-    int   releaseSamples = 0;
-    int   lfoTrigMode = 1;
-};
-
+// The four modulation slots as the engine runs them.
 struct ModPushes {
-    ModPush slots[4];
-    bool anyActive = false;   // false → the caller instead issues clearInstrumentModulation(sampleId)
+    EngineModSlot slots[4];
+    bool anyActive = false;   // false → the caller instead issues clearInstrumentModulation(id)
 };
-
-inline int mod_dest_code(ModDest dest) {
-    switch (dest) {
-        case ModDest::VOLUME:        return 1;
-        case ModDest::PAN:           return 2;
-        case ModDest::PITCH:         return 3;
-        case ModDest::FINE_PITCH:    return 4;
-        case ModDest::FILTER_CUTOFF: return 5;
-        case ModDest::FILTER_RES:    return 6;
-        case ModDest::SAMPLE_START:  return 7;
-        case ModDest::MOD_AMT:       return 8;   // scales the NEXT slot's amount
-        case ModDest::MOD_RATE:      return 9;   // scales the NEXT slot's time/freq
-        case ModDest::MOD_BOTH:      return 10;
-        case ModDest::TIMBRE:        return 11;  // a MACRO voice's two controls
-        case ModDest::COLOR:         return 12;
-        default:                     return 0;
-    }
-}
 
 // ⚠️ "off" is the answer for any name this does not know, so a newer build's project opens with the
 // loop lost rather than mis-read. That failure is SILENT — know it before adding a mode.
@@ -125,75 +90,53 @@ inline int loop_mode_code(const std::string& mode) {
     return 0;
 }
 
-inline int filter_type_code(const std::string& type) {
-    if (type == "lp") return 1;
-    if (type == "hp") return 2;
-    if (type == "bp") return 3;
-    return 0;
+// The engine's filter for the stored name; any other name is OFF.
+inline FilterType filter_type_code(const std::string& type) {
+    if (type == "lp") return FILTER_LP;
+    if (type == "hp") return FILTER_HP;
+    if (type == "bp") return FILTER_BP;
+    return FILTER_OFF;
 }
 
-// The modulation push. The sustainLevel / lfoHz / oscShape defaults are deliberate: they shape a
-// non-LFO slot.
+// The modulation push. A slot with no destination is cleared, as are NONE and TRACKING.
 inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleRate) {
     ModPushes out;
     const float framesPerTic = frames_per_tic_f(tempo, sampleRate);
-    const int   sampleId     = ins.id;
+    const auto  tics         = [framesPerTic](int v) { return tics_to_frames(v, framesPerTic); };
 
-    for (int i = 0; i < 4; ++i) {
-        ModPush& p = out.slots[i];
-        p.sampleId  = sampleId;
-        p.slotIndex = i;
-
-        if (i >= static_cast<int>(ins.modSlots.size())) continue;   // cleared slot (type 0)
+    for (int i = 0; i < 4 && i < static_cast<int>(ins.modSlots.size()); ++i) {
         const ModSlot& slot = ins.modSlots[i];
-        const int dest = mod_dest_code(slot.dest);
-
-        // An unrouted dest clears the slot; NONE and TRACKING clear it too.
-        if (dest == 0 || slot.type == ModType::NONE || slot.type == ModType::TRACKING) continue;
-
-        p.dest   = dest;
-        p.amount = slot.amount / 255.0f;
+        if (slot.dest == ModDest::NONE) continue;
+        EngineModSlot& p = out.slots[i];
 
         switch (slot.type) {
             case ModType::AHD:
-            case ModType::DRUM:   // AHD semantics; its own type 4 so the engine can tell them apart
-                p.type          = (slot.type == ModType::AHD) ? 1 : 4;
-                p.attackSamples = tics_to_frames(slot.attack, framesPerTic);
-                p.holdSamples   = tics_to_frames(slot.hold,   framesPerTic);
-                p.decaySamples  = tics_to_frames(slot.decay,  framesPerTic);
-                out.anyActive   = true;
+            case ModType::DRUM:
+                p.attackSamples = tics(slot.attack);
+                p.holdSamples   = tics(slot.hold);
+                p.decaySamples  = tics(slot.decay);
                 break;
-
             case ModType::ADSR:
-            case ModType::TRIG:   // TRIG = ADSR semantics; type 5
-                p.type           = (slot.type == ModType::ADSR) ? 2 : 5;
-                p.attackSamples  = tics_to_frames(slot.attack,  framesPerTic);
-                p.holdSamples    = 0;
-                p.decaySamples   = tics_to_frames(slot.decay,   framesPerTic);
-                p.releaseSamples = tics_to_frames(slot.release, framesPerTic);
+            case ModType::TRIG:
+                p.attackSamples  = tics(slot.attack);
+                p.decaySamples   = tics(slot.decay);
+                p.releaseSamples = tics(slot.release);
                 p.sustainLevel   = slot.sustain / 255.0f;
-                out.anyActive    = true;
                 break;
-
             case ModType::LFO:
-                p.type        = 3;
                 p.lfoHz       = lfo_hz(slot.lfoFreq);
                 p.oscShape    = slot.oscShape;
                 p.lfoTrigMode = slot.lfoTrigMode;
-                out.anyActive = true;
                 break;
-
-            case ModType::SCALAR:   // amount is the fixed output value; no time params
-                p.type        = 6;
-                out.anyActive = true;
+            case ModType::SCALAR:   // its AMT is the output
                 break;
-
             default:
-                p = ModPush{};            // unreachable; keep the cleared shape
-                p.sampleId = sampleId;
-                p.slotIndex = i;
-                break;
+                continue;
         }
+        p.type   = slot.type;
+        p.dest   = slot.dest;
+        p.amount = slot.amount / 255.0f;
+        out.anyActive = true;
     }
     return out;
 }
@@ -202,12 +145,7 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
 template <typename Engine>
 void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
     const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
-    for (const ModPush& p : m.slots) {
-        engine.setInstrumentModulation(p.sampleId, p.slotIndex, p.type, p.dest, p.amount,
-                                       p.attackSamples, p.holdSamples, p.decaySamples,
-                                       p.sustainLevel, p.lfoHz, p.oscShape,
-                                       p.releaseSamples, p.lfoTrigMode);
-    }
+    for (int i = 0; i < 4; ++i) engine.setInstrumentModulation(ins.id, i, m.slots[i]);
     if (!m.anyActive) engine.clearInstrumentModulation(ins.id);
     engine.setInstrumentEqSlot(ins.id, ins.eqSlot);
     engine.setInstrumentSendLevels(ins.id, ins.reverbSend, ins.delaySend);

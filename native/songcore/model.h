@@ -16,6 +16,7 @@
 
 // For the CC-slot ids `resolve_cc_param` translates; event.h is a leaf, so no cycle.
 #include "event.h"
+#include "voice_codes.h"
 #include "program.h"   // PROGRAM_SLOTS — the engine's program table is one row per instrument
 #include "send_cells.h"
 
@@ -55,12 +56,7 @@ inline std::string default_table_name(int id)      { return "TBL"  + hex2(id); }
 
 // ─── enums (serialised by NAME) ─────────────────────────────────────────────────────────────────
 
-enum class ModType { NONE, AHD, ADSR, LFO, DRUM, TRIG, TRACKING, SCALAR };
-enum class ModDest {
-    NONE, VOLUME, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES,
-    SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH,
-    TIMBRE, COLOR   // a MACRO instrument's two controls; nothing on any other type
-};
+// ModType and ModDest: voice_codes.h, which the engine shares.
 // SAMPLER and SOUNDFONT play in the engine; EXTERNAL leaves as MIDI (midi_out.h); MACRO is the vendored
 // macro-oscillator (vendor/braids), one of MACRO_MODEL_NAMES.
 // ⚠️ Append only. The TYPE cell steps in `INSTRUMENT_TYPE_CYCLE` order, not this one.
@@ -278,7 +274,7 @@ struct ModSlot {
     int attack = 0x00, hold = 0x00, decay = 0x00;
     int sustain = 0x80;
     int release = 0x00;
-    int oscShape = 0x00, lfoTrigMode = 0x00;
+    int oscShape = 0x00, lfoTrigMode = LFO_FREE;
     int lfoFreq = 0x40;
 };
 

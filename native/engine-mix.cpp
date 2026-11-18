@@ -916,15 +916,14 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
         voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, voice.chain.filter.drive, sampleRate);
     }
 
-    // A sustaining voice ends when its volume envelopes have: AHD/DRUM at stage 4, ADSR/TRIG at 5.
+    // A sustaining voice ends when its volume envelopes have.
     if (voice.sustains()) {
         bool hasVolMod = false, allDone = true;
         for (int m = 0; m < 4; m++) {
             const VoiceModSlot& mod = voice.voiceMods[m];
-            if (mod.dest == 1 && (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5)) {
+            if (mod.dest == ModDest::VOLUME && mod_is_envelope(mod.type)) {
                 hasVolMod = true;
-                int doneStage = (mod.type == 2 || mod.type == 5) ? 5 : 4;
-                if (mod.stage < doneStage) allDone = false;
+                if (!env_done(mod)) allDone = false;
             }
         }
         if (hasVolMod && allDone) voice.isActive = false;
@@ -980,8 +979,8 @@ static int collectVolMods(const Voice& voice, VolMod (&out)[4]) {
     int n = 0;
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voice.voiceMods[m];
-        if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
-        out[n++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == 3};
+        if (!mod_running(mod) || mod.dest != ModDest::VOLUME) continue;
+        out[n++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == ModType::LFO};
     }
     return n;
 }
@@ -1376,7 +1375,7 @@ void AudioEngine::mixSoundfontVoices(BlockMix& b) {
             bool adsrReleasing = false;
             for (int m = 0; m < 4; m++) {
                 const VoiceModSlot& mod = sv.voiceMods[m];
-                if (mod.dest == 1 && (mod.type == 2 || mod.type == 5) && mod.stage == 4) {
+                if (mod.dest == ModDest::VOLUME && env_releasing(mod)) {
                     adsrReleasing = true; break;
                 }
             }
@@ -1401,14 +1400,14 @@ void AudioEngine::prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int
     bool  hasVolEnv = false, volEnvDone = true;
     for (int m = 0; m < 4; m++) {
         VoiceModSlot& mod = sv.voiceMods[m];
-        if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
-        if (mod.type == 3) {  // LFO: bipolar tremolo
+        if (!mod_running(mod) || mod.dest != ModDest::VOLUME) continue;
+        if (mod.type == ModType::LFO) {  // bipolar tremolo
             noteVol  = fmaxf(0.0f, noteVol  * (1.0f + mod.envValue * mod.effectiveAmt));
             onsetVol = fmaxf(0.0f, onsetVol * (1.0f + mod.envValue * mod.effectiveAmt));
-        } else if (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5) {
-            // Unipolar gain reduction. AHD/DRUM are done at stage 4, ADSR/TRIG at stage 5.
+        } else if (mod_is_envelope(mod.type)) {
+            // Unipolar gain reduction.
             hasVolEnv = true;
-            if (mod.stage < ((mod.type == 2 || mod.type == 5) ? 5 : 4)) volEnvDone = false;
+            if (!env_done(mod)) volEnvDone = false;
             const float onsetEnv = mod.attackSamples > 0 ? 0.0f : 1.0f;
             noteVol  = fmaxf(0.0f, noteVol  + (mod.envValue - 1.0f) * mod.effectiveAmt);
             onsetVol = fmaxf(0.0f, onsetVol + (onsetEnv     - 1.0f) * mod.effectiveAmt);

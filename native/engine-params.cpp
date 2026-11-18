@@ -49,7 +49,7 @@ void AudioEngine::setInstrumentEqSlot(int instrId, int slot) {
         bool any = false;
         for (int i = 0; i < 3; i++) {
             ip.eqBands[i] = preset.bands[i];
-            if (preset.bands[i].type != 0) any = true;
+            if (preset.bands[i].type != EQ_OFF) any = true;
         }
         ip.eqActive = any;
     }

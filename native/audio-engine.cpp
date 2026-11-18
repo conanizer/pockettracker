@@ -586,46 +586,21 @@ void AudioEngine::scheduleVoiceWheel(int64_t targetFrame, int trackId, float sem
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, semitones, PARAM_UPDATE_WHEEL, 0.0f });
 }
 
-void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
-                                          int type, int dest, float amount,
-                                          int attackSamples, int holdSamples, int decaySamples,
-                                          float sustainLevel, float lfoHz, int oscShape,
-                                          int releaseSamples, int lfoTrigMode) {
+void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex, const songcore::EngineModSlot& slot) {
     if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
-    InstrumentModSlot& slot = instrumentModSlots.edit(sampleId)[slotIndex];
-    slot.type = type;
-    slot.dest = dest;
-    slot.amount = amount;
-    slot.attackSamples = attackSamples;
-    slot.holdSamples = holdSamples;
-    slot.decaySamples = decaySamples;
-    slot.sustainLevel = sustainLevel;
-    slot.lfoHz = lfoHz;
-    slot.oscShape = oscShape;
-    slot.lfoTrigMode = lfoTrigMode;
-    slot.releaseSamples = releaseSamples;
+    instrumentModSlots.edit(sampleId)[slotIndex] = slot;
     instrumentModSlots.publish(sampleId);
 }
 
 void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate) {
     for (int m = 0; m < 4; m++) {
-        const InstrumentModSlot& src = instrumentModSlots[sampleId][m];
+        const songcore::EngineModSlot& src = instrumentModSlots[sampleId][m];
         VoiceModSlot& dst = voice.voiceMods[m];
-        dst.type = src.type;
-        dst.dest = src.dest;
-        dst.amount = src.amount;
-        dst.attackSamples = src.attackSamples;
-        dst.holdSamples = src.holdSamples;
-        dst.decaySamples = src.decaySamples;
-        dst.sustainLevel = src.sustainLevel;
-        dst.lfoHz = src.lfoHz;
-        dst.oscShape = src.oscShape;
-        dst.lfoTrigMode = src.lfoTrigMode;
-        dst.releaseSamples = src.releaseSamples;
+        static_cast<songcore::EngineModSlot&>(dst) = src;
         dst.effectiveAmt = src.amount;
         dst.effectiveRateMult = 1.0f;
         dst.prevEnvValue = 0.0f;
-        dst.stage = (src.type != 0) ? 1 : 0;
+        dst.stage = (src.type != ModType::NONE) ? 1 : 0;
         dst.envValue = 0.0f;
         dst.stageCounter = 0;
 
@@ -633,17 +608,18 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
         dst.lfoRngState  = (((uint32_t)(uint64_t)currentFrame) * 747796405u
                             ^ (uint32_t)(m + 1) * 2891336453u
                             ^ noteSeedEntropy) | 1u;
-        dst.lfoRandValue = (src.type == 3 && src.oscShape >= 8)
+        dst.lfoRandValue = (src.type == ModType::LFO && src.oscShape >= songcore::LFO_RND)
                            ? xorshift32Bipolar(dst.lfoRngState) : 0.0f;
 
         // RETG/ONCE restart the cycle at note-on; FREE and HOLD follow the global clock, and HOLD
         // freezes that value for the note.
         dst.lfoPhase = 0.0f;
-        if (src.type == 3 && (src.lfoTrigMode == 0 || src.lfoTrigMode == 2)) {
+        const bool held = src.lfoTrigMode == songcore::LFO_HOLD;
+        if (src.type == ModType::LFO && (held || src.lfoTrigMode == songcore::LFO_FREE)) {
             double cycles = (double)currentFrame * (double)src.lfoHz / (double)sampleRate;
             dst.lfoPhase = (float)(fmod(cycles, 1.0) * 2.0 * M_PI);
-            if (src.lfoTrigMode == 2) {
-                dst.envValue = (src.oscShape >= 8) ? dst.lfoRandValue
+            if (held) {
+                dst.envValue = (src.oscShape >= songcore::LFO_RND) ? dst.lfoRandValue
                                                    : lfoShape(dst.lfoPhase, src.oscShape);
             }
         }
@@ -653,7 +629,7 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
 void AudioEngine::clearInstrumentModulation(int sampleId) {
     if (sampleId < 0 || sampleId >= 256) return;
     for (int m = 0; m < 4; m++) {
-        instrumentModSlots.edit(sampleId)[m] = InstrumentModSlot();
+        instrumentModSlots.edit(sampleId)[m] = songcore::EngineModSlot{};
     }
     instrumentModSlots.publish(sampleId);
 }

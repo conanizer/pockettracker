@@ -277,7 +277,7 @@ struct Voice : public IAudioVoice {
     bool holdsNote() const {
         if (!isActive || isFadingOut || loopReleasing) return false;
         for (const VoiceModSlot& m : voiceMods)
-            if (m.dest == 1 && has_release_stage(m) && m.stage == 4) return false;
+            if (m.dest == ModDest::VOLUME && env_releasing(m)) return false;
         return true;
     }
 
@@ -604,11 +604,11 @@ struct Voice : public IAudioVoice {
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
-            if (vmod.dest == 1 && has_release_stage(vmod)) {
-                if (vmod.stage >= 1 && vmod.stage <= 3 && vmod.releaseSamples > 0) {
+            if (vmod.dest == ModDest::VOLUME && mod_has_release(vmod.type)) {
+                if (env_before_release(vmod) && vmod.releaseSamples > 0) {
                     enter_release(vmod);
                     hasRelease = true;
-                } else if (vmod.stage == 4) {
+                } else if (env_releasing(vmod)) {
                     hasRelease = true;
                 }
             }
@@ -629,7 +629,7 @@ struct Voice : public IAudioVoice {
     // An AHD or DRUM on VOL: an envelope that runs out by itself and takes a sustaining voice with it.
     bool volEnvelopeEndsNote() const {
         for (const VoiceModSlot& m : voiceMods)
-            if (m.dest == 1 && (m.type == 1 || m.type == 4)) return true;
+            if (m.dest == ModDest::VOLUME && (m.type == ModType::AHD || m.type == ModType::DRUM)) return true;
         return false;
     }
 

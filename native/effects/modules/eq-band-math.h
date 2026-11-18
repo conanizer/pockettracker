@@ -9,8 +9,11 @@ inline float eqFreqHzFromHex(int hex) { return cutoff_hz(hex); }
 inline float eqGainDbFromHex(int hex) { return hex / 10.0f - 12.0f; }   // 0..240 = −12.0..+12.0 dB
 inline float eqQFromHex(int hex)      { return 0.1f * powf(100.0f, hex / 255.0f); }
 
-// pareq's mode for a shelf or bell band type: 0 bell, 1 low shelf, 2 high shelf.
-inline int eqPareqMode(int type) { return (type == 1) ? 1 : (type == 4) ? 2 : 0; }
+// A band's type. ⚠️ Saved in projects as the number: append, never insert.
+enum EqBandType : int { EQ_OFF, EQ_LOW_SHELF, EQ_LOW_CUT, EQ_BELL, EQ_HIGH_SHELF, EQ_HIGH_CUT };
+
+// pareq's mode for a shelf or bell band: 0 bell, 1 low shelf, 2 high shelf.
+inline int eqPareqMode(int type) { return type == EQ_LOW_SHELF ? 1 : type == EQ_HIGH_SHELF ? 2 : 0; }
 
 // A shelf or bell band's gain at `atHz`, in dB, from the coefficients `sp_pareq_compute` derives —
 // the ones the engine then runs.

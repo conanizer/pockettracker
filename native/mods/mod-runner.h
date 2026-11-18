@@ -9,9 +9,11 @@
 // One voice's modulation for one block. ⚠️ Runs after tickPitchSlide and tickVibrato, which write
 // their sources first.
 inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
+    using namespace songcore;
     // LFO and SCALAR slots feed the LFO sources, envelopes the ENV ones.
     auto sourceOf = [](const VoiceModSlot& mod, int m) {
-        return (ModSourceId)((mod.type == 3 || mod.type == 6) ? MOD_SRC_LFO0 + m : MOD_SRC_ENV0 + m);
+        const bool lfo = mod.type == ModType::LFO || mod.type == ModType::SCALAR;
+        return (ModSourceId)(lfo ? MOD_SRC_LFO0 + m : MOD_SRC_ENV0 + m);
     };
     memcpy(voice.prevModDestValues, voice.modDestValues, sizeof(float) * PARAM_COUNT);
 
@@ -30,14 +32,16 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
         float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
         for (int m = 0; m < 4; m++) {
             const VoiceModSlot& src = voice.voiceMods[m];
-            if (src.type == 0 || src.stage == 0) continue;
-            if (src.dest != 8 && src.dest != 9 && src.dest != 10) continue;
+            if (!mod_running(src)) continue;
+            const bool toAmt  = src.dest == ModDest::MOD_AMT  || src.dest == ModDest::MOD_BOTH;
+            const bool toRate = src.dest == ModDest::MOD_RATE || src.dest == ModDest::MOD_BOTH;
+            if (!toAmt && !toRate) continue;
             int target = (m + 1) % 4;
-            float norm = (src.type == 3) ? (src.envValue * 0.5f + 0.5f)
-                                          : fmaxf(0.0f, src.envValue);
-            if (src.dest == 8 || src.dest == 10) amtOffset[target] += norm * src.amount;
-            if (src.dest == 9 || src.dest == 10) {
-                const float swing = (src.type == 3) ? src.envValue : fmaxf(0.0f, src.envValue);
+            const bool lfo = src.type == ModType::LFO;
+            float norm = lfo ? (src.envValue * 0.5f + 0.5f) : fmaxf(0.0f, src.envValue);
+            if (toAmt) amtOffset[target] += norm * src.amount;
+            if (toRate) {
+                const float swing = lfo ? src.envValue : fmaxf(0.0f, src.envValue);
                 rateMult[target] *= fmaxf(0.05f, 1.0f + swing * src.amount);
             }
         }
@@ -49,47 +53,53 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
 
     for (int m = 0; m < 4; m++) {
         VoiceModSlot& mod = voice.voiceMods[m];
-        if (mod.type == 0 || mod.stage == 0) continue;
+        if (!mod_running(mod)) continue;
 
         float rMult = fmaxf(0.01f, mod.effectiveRateMult);
 
-        if (mod.type == 1 || mod.type == 4) {
-            tickAHD(mod, numFrames, rMult);
-        } else if (mod.type == 2 || mod.type == 5) {
-            tickADSR(mod, numFrames, rMult);
-        } else if (mod.type == 3) {
-            tickLFO(mod, numFrames, sr, rMult);
-        } else if (mod.type == 6) {
-            mod.envValue = mod.amount;   // SCALAR: a constant
+        switch (mod.type) {
+            case ModType::AHD:
+            case ModType::DRUM:
+                tickAHD(mod, numFrames, rMult);
+                break;
+            case ModType::ADSR:
+            case ModType::TRIG:
+                tickADSR(mod, numFrames, rMult);
+                break;
+            case ModType::LFO:
+                tickLFO(mod, numFrames, sr, rMult);
+                break;
+            case ModType::SCALAR:   // a constant
+                mod.envValue = mod.amount;
+                break;
+            default:
+                break;
         }
 
         voice.modSourceValues[sourceOf(mod, m)] = mod.envValue;
     }
 
     // Up to 4 slot routes, rebuilt every block (mod-to-mod moves the amounts), plus 4 fixed ones.
-    // VOL is applied per sample in the mix loop; dest ≥ 7 is mod-to-mod.
     ModRoute routes[8];
     int routeCount = 0;
 
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voice.voiceMods[m];
-        if (mod.type == 0) continue;
-        if (mod.dest == 0 || mod.dest == 1) continue;
-        if (mod.dest >= 7 && mod.dest <= 10) continue;
+        if (mod.type == ModType::NONE) continue;
 
         const ModSourceId srcId = sourceOf(mod, m);
         ParamId destId;
         float   scale;
         switch (mod.dest) {
-            case 2: destId = PARAM_PAN;        scale = mod.effectiveAmt * 0.5f;   break;
-            case 3: destId = PARAM_PITCH;      scale = mod.effectiveAmt * 12.0f;  break;
-            case 4: destId = PARAM_PITCH;      scale = mod.effectiveAmt * 1.0f;   break;
-            case 5: destId = PARAM_FILTER_CUT; scale = mod.effectiveAmt * 255.0f; break;
-            case 6: destId = PARAM_FILTER_RES; scale = mod.effectiveAmt * 255.0f; break;
+            case ModDest::PAN:           destId = PARAM_PAN;        scale = mod.effectiveAmt * 0.5f;   break;
+            case ModDest::PITCH:         destId = PARAM_PITCH;      scale = mod.effectiveAmt * 12.0f;  break;
+            case ModDest::FINE_PITCH:    destId = PARAM_PITCH;      scale = mod.effectiveAmt * 1.0f;   break;
+            case ModDest::FILTER_CUTOFF: destId = PARAM_FILTER_CUT; scale = mod.effectiveAmt * 255.0f; break;
+            case ModDest::FILTER_RES:    destId = PARAM_FILTER_RES; scale = mod.effectiveAmt * 255.0f; break;
             // A MACRO voice's two controls; read by no other voice.
-            case 11: destId = PARAM_MACRO_TIMBRE; scale = mod.effectiveAmt * 255.0f; break;
-            case 12: destId = PARAM_MACRO_COLOR;  scale = mod.effectiveAmt * 255.0f; break;
-            default: continue;
+            case ModDest::TIMBRE:        destId = PARAM_MACRO_TIMBRE; scale = mod.effectiveAmt * 255.0f; break;
+            case ModDest::COLOR:         destId = PARAM_MACRO_COLOR;  scale = mod.effectiveAmt * 255.0f; break;
+            default: continue;   // VOL is the mix loop's; STA is unread; the MOD ones are above
         }
         routes[routeCount++] = { srcId, destId, scale, MOD_SRC_NONE, 0.0f };
     }

@@ -28,6 +28,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "voice_codes.h"   // FilterType
+
 namespace songcore {
 
 constexpr int SCHEMA_VERSION = 2;
@@ -114,13 +116,14 @@ constexpr uint8_t CC_MASTER_VOL = 133;  // scheduleMasterVolume (authored byte /
 
 // The filter switched ON (LPF / HPF / BPF): the id carries the TYPE, the value the cutoff, so both
 // land on the same frame — split, the filter would open a block before changing shape (a click).
-constexpr uint8_t CC_FILTER_LP  = 134;  // scheduleVoiceFilterMode(type 1) (authored byte /255)
-constexpr uint8_t CC_FILTER_HP  = 135;  // scheduleVoiceFilterMode(type 2)
-constexpr uint8_t CC_FILTER_BP  = 136;  // scheduleVoiceFilterMode(type 3)
+constexpr uint8_t CC_FILTER_LP  = 134;  // scheduleVoiceFilterMode(FILTER_LP) (authored byte /255)
+constexpr uint8_t CC_FILTER_HP  = 135;  // scheduleVoiceFilterMode(FILTER_HP)
+constexpr uint8_t CC_FILTER_BP  = 136;  // scheduleVoiceFilterMode(FILTER_BP)
 
-/** The FilterModule type a CC_FILTER_LP/HP/BP id turns on (1 lp | 2 hp | 3 bp), or 0 for any other. */
-constexpr int cc_filter_mode(int param) {
-    return param == CC_FILTER_LP ? 1 : param == CC_FILTER_HP ? 2 : param == CC_FILTER_BP ? 3 : 0;
+/** The filter a CC_FILTER_LP/HP/BP id turns on, or OFF for any other. */
+constexpr FilterType cc_filter_mode(int param) {
+    return param == CC_FILTER_LP ? FILTER_LP : param == CC_FILTER_HP ? FILTER_HP
+         : param == CC_FILTER_BP ? FILTER_BP : FILTER_OFF;
 }
 
 // The dirt commands. ⚠️ 137 is retired and stays unused; CC_CRUSH is two nibbles — never interpolate.

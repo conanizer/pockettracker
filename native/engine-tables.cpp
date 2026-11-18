@@ -550,9 +550,9 @@ void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, flo
             break;
 
         // A filter on every note the instrument plays — CUT and RES are inert without one.
-        case FX_LPF: voiceSetFilterMode(voice, 1, fxValue, sampleRate); break;
-        case FX_HPF: voiceSetFilterMode(voice, 2, fxValue, sampleRate); break;
-        case FX_BPF: voiceSetFilterMode(voice, 3, fxValue, sampleRate); break;
+        case FX_LPF: voiceSetFilterMode(voice, songcore::FILTER_LP, fxValue, sampleRate); break;
+        case FX_HPF: voiceSetFilterMode(voice, songcore::FILTER_HP, fxValue, sampleRate); break;
+        case FX_BPF: voiceSetFilterMode(voice, songcore::FILTER_BP, fxValue, sampleRate); break;
 
         case FX_DRV: voiceSetDrive(voice, fxValue);     break;
         case FX_CRU: voiceSetCrush(voice, fxValue);     break;
@@ -653,9 +653,9 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
             case FX_RES: voiceSetFilterRes(voice, value, sampleRate); break;
             case FX_PAN: voiceGlidePan(voice, static_cast<float>(value) / 255.0f); break;
             // Moves the cutoff and re-asserts the type each block.
-            case FX_LPF: voiceSetFilterMode(voice, 1, value, sampleRate); break;
-            case FX_HPF: voiceSetFilterMode(voice, 2, value, sampleRate); break;
-            case FX_BPF: voiceSetFilterMode(voice, 3, value, sampleRate); break;
+            case FX_LPF: voiceSetFilterMode(voice, songcore::FILTER_LP, value, sampleRate); break;
+            case FX_HPF: voiceSetFilterMode(voice, songcore::FILTER_HP, value, sampleRate); break;
+            case FX_BPF: voiceSetFilterMode(voice, songcore::FILTER_BP, value, sampleRate); break;
             case FX_DRV: voiceSetDrive(voice, value);     break;
             // A glide: two semitones end to end.
             case FX_FIN: voiceSetFineTune(voice, value);  break;

@@ -5,9 +5,7 @@
 #include "eq-band-math.h"
 #include "../glide.h"
 
-// The 3-band parametric EQ. Band types — the number is stored in projects, append only:
-// 0 off, 1 low shelf, 2 low cut, 3 bell, 4 high shelf, 5 high cut.
-// Frequency 20 Hz–20 kHz, gain ±12 dB (not for the cuts), Q 0.1–10.
+// The 3-band parametric EQ; band types are `EqBandType`. Frequency 20 Hz–20 kHz, gain ±12 dB (not for the cuts), Q 0.1–10.
 
 // One sample through a shelf/bell band: `sp_pareq_compute` derives the coefficients once after a
 // change, then the same biquad runs inline.
@@ -33,8 +31,8 @@ struct EqBandFilter {
     // Coefficients owed, per side (a mono voice never runs pR). Set wherever fc, v or q change.
     bool deriveL = true, deriveR = true;
     bool bypass   = true;
-    bool useHpLp  = false;  // types 2 and 5
-    int  hpLpType = 0;      // 2 = HP, 5 = LP
+    bool useHpLp  = false;  // the cuts
+    int  hpLpType = 0;      // EQ_LOW_CUT runs the high-pass, EQ_HIGH_CUT the low-pass
     daisysp::Svf svfL, svfR;
 
     void reset(float sr) {
@@ -50,10 +48,10 @@ struct EqBandFilter {
     // A filter coming back after the other kind ran starts from silence, not from its stale state.
     void set(int type, float freqHz, float gainDb, float q) {
         const bool wasOn = !bypass, wasHpLp = useHpLp;
-        bypass  = (type == 0);
+        bypass  = (type == EQ_OFF);
         if (bypass) return;
 
-        useHpLp  = (type == 2 || type == 5);
+        useHpLp  = (type == EQ_LOW_CUT || type == EQ_HIGH_CUT);
         hpLpType = type;
         const bool cold = !wasOn || wasHpLp != useHpLp;
 
@@ -80,7 +78,7 @@ struct EqBandFilter {
         if (bypass) return in;
         if (useHpLp) {
             svfL.Process(in);
-            return (hpLpType == 2) ? svfL.High() : svfL.Low();
+            return (hpLpType == EQ_LOW_CUT) ? svfL.High() : svfL.Low();
         }
         return pareq_tick(sp, pL, deriveL, in);
     }
@@ -90,7 +88,7 @@ struct EqBandFilter {
         if (useHpLp) {
             svfL.Process(L);
             svfR.Process(R);
-            if (hpLpType == 2) { L = svfL.High(); R = svfR.High(); }
+            if (hpLpType == EQ_LOW_CUT) { L = svfL.High(); R = svfR.High(); }
             else               { L = svfL.Low();  R = svfR.Low();  }
             return;
         }
@@ -105,20 +103,20 @@ struct EqBandModule {
     EqBandFilter now;
     EqBandFilter was;      // the settings fading out
     Ramp  oldShare;        // was's share of the output, 1 to 0
-    int   type   = 0;
+    int   type   = EQ_OFF;
     float freqHz = 0.f, gainDb = 0.f, q = 0.f;
 
     void reset(float sr) {
         now.reset(sr);
         oldShare = Ramp{};
-        type = 0;
+        type = EQ_OFF;
     }
 
     // Filtering, or fading out.
-    bool on() const { return type != 0 || oldShare.moving(); }
+    bool on() const { return type != EQ_OFF || oldShare.moving(); }
 
     void setParams(int t, float hz, float db, float qq, bool sounding) {
-        if (t == type && (t == 0 || (hz == freqHz && db == gainDb && qq == q))) return;
+        if (t == type && (t == EQ_OFF || (hz == freqHz && db == gainDb && qq == q))) return;
         if (sounding) {
             was = now;
             oldShare.start(1.0f, 0.0f, GLIDE_SAMPLES);

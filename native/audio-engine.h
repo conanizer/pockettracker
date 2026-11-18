@@ -442,11 +442,7 @@ public:
     // A MIDI-in pitch wheel on the track's voices, in semitones; the next trigger starts from 0.
     void scheduleVoiceWheel(int64_t targetFrame, int trackId, float semitones);
 
-    void setInstrumentModulation(int sampleId, int slotIndex,
-                                 int type, int dest, float amount,
-                                 int attackSamples, int holdSamples, int decaySamples,
-                                 float sustainLevel, float lfoHz, int oscShape,
-                                 int releaseSamples = 0, int lfoTrigMode = 1);
+    void setInstrumentModulation(int sampleId, int slotIndex, const songcore::EngineModSlot& slot);
     void clearInstrumentModulation(int sampleId);
 
     // ===================================
@@ -837,7 +833,7 @@ private:
     // ⚠️ Every per-instrument table below is a StagedTable: a setter edits its copy and publishes;
     // the audio thread takes it in syncInstrumentData. An unpublished edit is never heard.
     StagedTable<InstrumentParams, 256>                        instrumentParams;
-    StagedTable<std::array<InstrumentModSlot, 4>, 256>        instrumentModSlots;   // [sampleId][slot]
+    StagedTable<std::array<songcore::EngineModSlot, 4>, 256>  instrumentModSlots;   // [sampleId][slot]
     // Keyed by instrument id, not sampleId (two instruments can share a sample).
     struct ProgramRow {
         songcore::Program program;
