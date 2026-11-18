@@ -15,17 +15,16 @@ void ChainEditorModule::draw(Canvas& c, int x, int y, const ChainEditorState& s)
     const int tspX  = colX;
 
     int rowY = y + TEXT_PADDING;
-    c.draw_text("CHAIN " + hex2(s.chain.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text("CHAIN " + hex2(s.chain.id), x + 10, rowY, t.textTitle);
     // The song cell in the title's dim colour: context, not a second title.
     if (s.songRow >= 0 && s.songTrack >= 0) {
-        c.draw_text("S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1), x + 170, rowY,
-                    t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text("S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1), x + 170, rowY, t.textParam);
     }
 
     // The header lights for the cursor's column; the row number lights for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    c.draw_text("PH",  phX,  rowY, header_color(s.cursorColumn, 1, 1, t), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("TSP", tspX, rowY, header_color(s.cursorColumn, 2, 2, t), CHAR_SPACING, FONT_SCALE);
+    c.label("PH", phX, rowY, header_color(s.cursorColumn, 1, 1, t));
+    c.label("TSP", tspX, rowY, header_color(s.cursorColumn, 2, 2, t));
 
     for (int index = 0; index < 16; ++index) draw_row(c, x, y, index, s, stepX, phX, tspX);
 }

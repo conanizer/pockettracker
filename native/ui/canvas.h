@@ -18,6 +18,8 @@ inline constexpr int DESIGN_H = 480;
 // The modal dim; the shell blends the same value over the letterbox bars.
 inline constexpr Argb MODAL_BACKDROP = 0xCC000000;
 
+enum class TextSize { NORMAL, SMALL, LARGE, BUTTON };
+
 class Canvas {
 public:
     Canvas() : px_(static_cast<size_t>(DESIGN_W) * DESIGN_H, 0xFF000000) { reset_clip(); }
@@ -39,14 +41,29 @@ public:
     // An outline inside the bounds.
     void stroke_rect(int x, int y, int w, int h, Argb color, int thickness = 1);
 
-    // `font_scale` multiplies the 5×5 cell (3 → the standard 15×15 text).
-    void draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale);
+    // UTF-8, top-left at (x, y): values, names, help text. A code point the font lacks draws blank
+    // and still advances.
+    void text(const std::string& text, int x, int y, Argb color, TextSize size = TextSize::NORMAL);
 
-    // UTF-8; each code point advances `5 * font_scale + spacing`.
-    void draw_text(const std::string& text, int x, int y, Argb color, int spacing, int font_scale);
+    // `text`, for what is being typed and the keys that type it.
+    void text_as_typed(const std::string& text, int x, int y, Argb color, TextSize size = TextSize::NORMAL) {
+        this->text(text, x, y, color, size);
+    }
+
+    // A UI word: a label, title, button, or a value that is a word (ON, SAMPLER).
+    void label(const std::string& text, int x, int y, Argb color, TextSize size = TextSize::NORMAL) {
+        this->text(text, x, y, color, size);
+    }
+
+    // A UI word inside a line that also holds a value: cased("PHRASE ") + hex2(id).
+    std::string cased(const std::string& text) const { return text; }
 
     // No trailing gap.
-    static int text_width(const std::string& text, int spacing, int font_scale);
+    static int text_width(const std::string& text, TextSize size = TextSize::NORMAL);
+
+    // A letter's box and its pen step, for fields that put each character in a cursor cell.
+    static int glyph_width(TextSize size = TextSize::NORMAL);
+    static int char_step(TextSize size = TextSize::NORMAL);
 
     static int glyph_count(const std::string& text);   // code points
 
@@ -81,6 +98,9 @@ public:
     };
 
 private:
+    // `font_scale` multiplies the 5×5 cell.
+    void draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale);
+
     std::vector<uint32_t> px_;
     int                   clipX_ = 0, clipY_ = 0, clipW_ = DESIGN_W, clipH_ = DESIGN_H;
 };

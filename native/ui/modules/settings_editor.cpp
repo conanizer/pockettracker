@@ -146,12 +146,12 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const int subX   = x + SUBLABEL_X;
     const int val2X  = x + VAL2_X;
 
-    c.draw_text("SETTINGS", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("SETTINGS", labelX, y + TEXT_PADDING, t.textTitle);
     // The running build, right-aligned: what a bug report asks for.
     if (!s.appVersion.empty()) {
         const std::string version = "V" + s.appVersion;
-        c.draw_text(version, x + WIDTH - NAME_X - Canvas::text_width(version, CHAR_SPACING, FONT_SCALE),
-                    y + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+        c.text(version, x + WIDTH - NAME_X - c.text_width(version),
+               y + TEXT_PADDING, t.textEmpty);
     }
 
     const int firstRowY = y + ROW_HEIGHT + 14;
@@ -175,8 +175,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const auto param_row = [&](SettingsRow row, const char* name, const std::string& value) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        c.draw_text(name, labelX, ry + TEXT_PADDING,
-                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(name, labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
@@ -185,10 +184,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                               const char* sublabel, const std::string& value2) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        c.draw_text(name, labelX, ry + TEXT_PADDING,
-                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(name, labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
-        c.draw_text(sublabel, subX, ry + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label(sublabel, subX, ry + TEXT_PADDING, t.textParam);
         draw_cursor_cell(c, value2, val2X, ry + TEXT_PADDING, on_cell(row, 2), t.textValue, t);
     };
 
@@ -246,8 +244,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     if (settings_row_visible(SettingsRow::TEMPLATE, s.caps)) {
         const SettingsRow row = SettingsRow::TEMPLATE;
         const int ry = rowY(row);
-        c.draw_text("TEMPLATE", labelX, ry + TEXT_PADDING,
-                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("TEMPLATE", labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
         const char* options[2] = {"SAVE", "CLEAR"};
         for (int i = 0; i < 2; ++i) {
             draw_cursor_cell(c, options[i], val1X + i * 80, ry + TEXT_PADDING,

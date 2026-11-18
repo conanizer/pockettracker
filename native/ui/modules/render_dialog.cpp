@@ -54,13 +54,12 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
 
     const std::string title = (s.output == RenderDialogState::Output::STEMS) ? "RENDER STEMS"
                                                                              : "RENDER MIX";
-    const int titleW = Canvas::text_width(title, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + CONTENT_PAD + TEXT_PADDING, t.textTitle,
-                CHAR_SPACING, FONT_SCALE);
+    const int titleW = Canvas::text_width(title);
+    c.text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + CONTENT_PAD + TEXT_PADDING, t.textTitle);
 
     const auto label = [&](RenderRow row, const char* text) {
-        c.draw_text(text, LABEL_X, row_y(static_cast<int>(row)) + TEXT_PADDING,
-                    s.is_on(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(text, LABEL_X, row_y(static_cast<int>(row)) + TEXT_PADDING,
+               s.is_on(row) ? cursor_mark_ink(t) : t.textParam);
     };
     const auto value = [&](RenderRow row, const std::string& text) {
         draw_cursor_cell(c, text, VALUE_X, row_y(static_cast<int>(row)) + TEXT_PADDING, s.is_on(row),
@@ -75,9 +74,8 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
 
     // ⚠️ AUTO shows the row it resolves to, beside itself and dimmed.
     if (s.endRow < 0) {
-        c.draw_text(hex2(render_dialog_end_row(s, project)), VALUE_X + 5 * CHAR_W,
-                    row_y(static_cast<int>(RenderRow::SONG_END)) + TEXT_PADDING, t.textEmpty,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(hex2(render_dialog_end_row(s, project)), VALUE_X + 5 * CHAR_W,
+               row_y(static_cast<int>(RenderRow::SONG_END)) + TEXT_PADDING, t.textEmpty);
     }
 
     label(RenderRow::REPEAT, "REPEAT");
@@ -87,9 +85,8 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     value(RenderRow::RENDER, "RENDER");
     if (isRendering) {
         const int pct = static_cast<int>(progress * 100.0f + 0.5f);
-        c.draw_text(std::to_string(pct < 0 ? 0 : (pct > 100 ? 100 : pct)) + "%", PROGRESS_X,
-                    row_y(static_cast<int>(RenderRow::RENDER)) + TEXT_PADDING, t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(std::to_string(pct < 0 ? 0 : (pct > 100 ? 100 : pct)) + "%", PROGRESS_X,
+               row_y(static_cast<int>(RenderRow::RENDER)) + TEXT_PADDING, t.textValue);
     }
 }
 

@@ -29,8 +29,7 @@ static_assert(box_h(MAX_STACK_ROWS) + 2 * (MODAL_BORDER - 1) <= DESIGN_H,
 constexpr int run_advance(int chars) { return chars * CHAR_W; }
 
 void centred(Canvas& c, const std::string& text, int x, int width, int y, Argb color) {
-    c.draw_text(text, x + (width - run_advance(static_cast<int>(text.size()))) / 2, y + TEXT_PADDING,
-                color, CHAR_SPACING, FONT_SCALE);
+    c.label(text, x + (width - run_advance(static_cast<int>(text.size()))) / 2, y + TEXT_PADDING, color);
 }
 
 // Left-aligned: names of three to nine glyphs centred read as a ragged cloud.
@@ -64,8 +63,8 @@ void draw_map_picker(Canvas& c, const MapPickerState& s, const Theme& t) {
         const bool open    = (si == s.section);
 
         // ⚠️ Raw UTF-8 arrows: MSVC without /utf-8 would convert an escape to the codepage.
-        c.draw_text(std::string(map_section_name(section)) + (open ? " ↓" : " →"), gridX,
-                    gridY + row * ROW_HEIGHT + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+        c.label(std::string(map_section_name(section)) + (open ? " ↓" : " →"), gridX,
+                gridY + row * ROW_HEIGHT + TEXT_PADDING, t.textTitle);
         ++row;
         if (!open) continue;
 
@@ -78,9 +77,8 @@ void draw_map_picker(Canvas& c, const MapPickerState& s, const Theme& t) {
                 const bool isCursor = (s.cursorRow == cellRow && s.cursorCol == cellCol);
 
                 if (isCursor) c.fill_rect(cellX, cellY, CELL_W, ROW_HEIGHT, t.rowCursor);
-                c.draw_text(cells[static_cast<size_t>(cellCol)]->name, cellX + CELL_PAD,
-                            cellY + TEXT_PADDING, isCursor ? cursor_cell_ink(t) : t.textValue,
-                            CHAR_SPACING, FONT_SCALE);
+                c.label(cells[static_cast<size_t>(cellCol)]->name, cellX + CELL_PAD, cellY + TEXT_PADDING,
+                        isCursor ? cursor_cell_ink(t) : t.textValue);
             }
         }
         row += map_section_rows(section);

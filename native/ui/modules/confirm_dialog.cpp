@@ -16,7 +16,6 @@ constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;
 
 // A bigger font than the editors.
 constexpr int DLG_FONT_SCALE   = 3;
-constexpr int DLG_CHAR_SPACING = 2;
 
 // Two lines a fixed distance apart, the pair centred.
 constexpr int DLG_LINE_PITCH = 22;
@@ -47,14 +46,12 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
 
     draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
 
-    const int titleW = Canvas::text_width(title, DLG_CHAR_SPACING, DLG_FONT_SCALE);
-    const int instrW = Canvas::text_width(instruction, DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    const int titleW = Canvas::text_width(title);
+    const int instrW = Canvas::text_width(instruction);
 
-    c.draw_text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle,
-                DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    c.text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle);
     // ⚠️ The YES line takes TXT VALUE, the one ink role bright in every palette.
-    c.draw_text(instruction, BOX_X + (BOX_W - instrW) / 2, BOX_Y + DLG_INSTR_Y, t.textValue,
-                DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    c.text(instruction, BOX_X + (BOX_W - instrW) / 2, BOX_Y + DLG_INSTR_Y, t.textValue);
 }
 
 std::vector<const char*> confirm_dialog_note(ConfirmDialogState::Kind kind) {
@@ -79,7 +76,7 @@ void draw_choice_box(Canvas& c, const std::string& question, const std::vector<c
     constexpr int PAD = 24;   // either side of the widest line
 
     const auto width_of = [](const std::string& s) {
-        return Canvas::text_width(s, DLG_CHAR_SPACING, DLG_FONT_SCALE);
+        return Canvas::text_width(s);
     };
 
     int width = -GAP;
@@ -96,12 +93,10 @@ void draw_choice_box(Canvas& c, const std::string& question, const std::vector<c
     const int boxY = (DESIGN_H - boxH) / 2;
     draw_modal_box(c, boxX, boxY, boxW, boxH, t);
 
-    c.draw_text(question, boxX + (boxW - width_of(question)) / 2, boxY + DLG_TITLE_Y, t.textTitle,
-                DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    c.text(question, boxX + (boxW - width_of(question)) / 2, boxY + DLG_TITLE_Y, t.textTitle);
     int y = boxY + DLG_TITLE_Y + DLG_LINE_PITCH;
     for (const char* line : note) {
-        c.draw_text(line, boxX + (boxW - width_of(line)) / 2, y, t.textParam, DLG_CHAR_SPACING,
-                    DLG_FONT_SCALE);
+        c.text(line, boxX + (boxW - width_of(line)) / 2, y, t.textParam);
         y += DLG_LINE_PITCH;
     }
 

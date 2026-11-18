@@ -199,7 +199,7 @@ void EqModule::draw_header(Canvas& c, int x, int y, const EqState& s) const {
     const Theme& t  = s.theme;
     const int    hY = y + 3;
 
-    c.draw_text("EQ " + songcore::hex2(s.slotIndex), x + 10, hY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text("EQ " + songcore::hex2(s.slotIndex), x + 10, hY, t.textTitle);
 
     std::string caller;
     switch (s.caller.kind) {
@@ -209,7 +209,7 @@ void EqModule::draw_header(Canvas& c, int x, int y, const EqState& s) const {
         case EqCallerContext::Kind::INSTRUMENT:       caller = "INST " + songcore::hex2(s.caller.instrId); break;
         case EqCallerContext::Kind::SAMPLE_EDITOR_FX: caller = "SAMPLE"; break;
     }
-    c.draw_text(caller, x + 10 + 8 * CHAR_W, hY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.text(caller, x + 10 + 8 * CHAR_W, hY, t.textParam);
 }
 
 void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
@@ -264,9 +264,9 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         const int fx = freq_to_pixel(m.hz);
         // A guide, not ink: not held to a contrast floor.
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
-        const int w  = Canvas::text_width(m.label, CHAR_SPACING, 2);
+        const int w  = Canvas::text_width(m.label, TextSize::SMALL);
         const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;
-        c.draw_text(m.label, tx, vy + 3, t.eqTxt, CHAR_SPACING, 2);
+        c.text(m.label, tx, vy + 3, t.eqTxt, TextSize::SMALL);
     }
 
     // ── The response curve ───────────────────────────────────────────────────────────────────────
@@ -310,8 +310,7 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
     // The band under the cursor heads as a title, the others empty-toned.
     for (int bi = 0; bi < 3; ++bi) {
         const Argb col = (bi == curBand) ? t.textTitle : t.textEmpty;
-        c.draw_text("BAND " + std::to_string(bi + 1), bandX[bi] + 6, edY + 3, col, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label("BAND " + std::to_string(bi + 1), bandX[bi] + 6, edY + 3, col);
     }
 
     static const char* kParamLabels[4] = {"TYPE", "FREQ", "GAIN", "Q"};
@@ -321,8 +320,7 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
         const bool isParSel = (pi == curParam);
 
         // The parameter label says the row, the band header the column.
-        c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? cursor_mark_ink(t) : t.textEmpty,
-                    CHAR_SPACING, FONT_SCALE);
+        c.label(kParamLabels[pi], x + 6, rowY + 3, isParSel ? cursor_mark_ink(t) : t.textEmpty);
 
         for (int bi = 0; bi < 3; ++bi) {
             const bool isCursor = (bi == curBand && isParSel);

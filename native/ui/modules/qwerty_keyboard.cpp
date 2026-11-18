@@ -219,7 +219,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
 
     // ── The header ──────────────────────────────────────────────────────────────────────────────
     const int labelW = static_cast<int>(s.fieldLabel.size()) * CHARW;
-    c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, CS, FS);
+    c.text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, TextSize::LARGE);
 
     // ── The text row: a scroll window that keeps the cursor visible ─────────────────────────────
     // Short text is centred; overflowing, it left-aligns and scrolls with a "…" on the hidden side.
@@ -239,7 +239,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const int  textX   = startX + leftPad * CHARW;
 
     const Argb markerColor = darken(t.textValue, 0.5f);
-    if (win.clipLeft) c.draw_text(ELLIPSIS, startX, textRowY + 3, markerColor, CS, FS);
+    if (win.clipLeft) c.text(ELLIPSIS, startX, textRowY + 3, markerColor, TextSize::LARGE);
 
     size_t at = Canvas::glyph_offset(s.text, win.first);
     for (int k = 0; k < win.cols; ++k) {
@@ -249,13 +249,13 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
         if (idx < textLen) {
             const size_t next = Canvas::glyph_offset(s.text, idx + 1);
-            c.draw_text(s.text.substr(at, next - at), px, textRowY + 3,
-                        isCursor ? cursor_cell_ink(t) : t.textValue, CS, FS);
+            c.text_as_typed(s.text.substr(at, next - at), px, textRowY + 3,
+                            isCursor ? cursor_cell_ink(t) : t.textValue, TextSize::LARGE);
             at = next;
         }
     }
 
-    if (win.clipRight) c.draw_text(ELLIPSIS, textX + win.cols * CHARW, textRowY + 3, markerColor, CS, FS);
+    if (win.clipRight) c.text(ELLIPSIS, textX + win.cols * CHARW, textRowY + 3, markerColor, TextSize::LARGE);
 
     // ── The key rows ────────────────────────────────────────────────────────────────────────────
     const auto& rows     = qwerty_rows(s.layout);
@@ -276,8 +276,8 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
                 const bool cursor = (s.keyCursorRow == r && s.keyCursorCol == col);
                 const int  textW  = static_cast<int>(labels[col].size()) * CHARW - CS;
                 c.fill_rect(keyX, rowY, keyW, CELLH, cursor ? t.rowCursor : t.background);
-                c.draw_text(labels[col], keyX + (keyW - textW) / 2, rowY + 3,
-                            cursor ? cursor_cell_ink(t) : t.textParam, CS, FS);
+                c.text_as_typed(labels[col], keyX + (keyW - textW) / 2, rowY + 3,
+                                cursor ? cursor_cell_ink(t) : t.textParam, TextSize::LARGE);
                 keyX += spans[col] * CELLW;
             }
             continue;
@@ -291,9 +291,8 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             c.fill_rect(cellX, rowY, CELLW - 1, CELLH,
                         cursor ? t.rowCursor : t.background);
 
-            c.draw_text(std::string(1, row[static_cast<size_t>(col)]),
-                        cellX + (CELLW - 1 - 5 * FS) / 2, rowY + 3,
-                        cursor ? cursor_cell_ink(t) : t.textValue, CS, FS);
+            c.text(std::string(1, row[static_cast<size_t>(col)]), cellX + (CELLW - 1 - 5 * FS) / 2, rowY + 3,
+                   cursor ? cursor_cell_ink(t) : t.textValue, TextSize::LARGE);
         }
     }
 
@@ -316,8 +315,8 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
 
         const std::string label = labels[col];
         const int         lw    = static_cast<int>(label.size()) * ACHARW;
-        c.draw_text(label, btnX + (ABTNW - lw) / 2, actionRowY + (CELLH - 5 * AFS) / 2,
-                    cursor ? cursor_cell_ink(t) : t.textParam, CS, AFS);
+        c.text(label, btnX + (ABTNW - lw) / 2, actionRowY + (CELLH - 5 * AFS) / 2,
+               cursor ? cursor_cell_ink(t) : t.textParam, TextSize::BUTTON);
     }
 }
 

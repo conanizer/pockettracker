@@ -59,20 +59,18 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
 
     const auto colX = [&](int column) { return x + NAME_X + column * CHAR_W; };
 
-    c.draw_text("MIDI MAPPING", colX(COL_CC), y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("MIDI MAPPING", colX(COL_CC), y + TEXT_PADDING, t.textTitle);
 
     // The column headers carry the cursor mark for its column.
     const int headerY = y + ROW_HEIGHT + 14;
     const int cursorCol = s.cursorColumn;
     const auto header = [&](const char* text, int column, MapCol lo, MapCol hi) {
-        c.draw_text(text, colX(column), headerY + TEXT_PADDING,
-                    header_color(cursorCol, static_cast<int>(lo), static_cast<int>(hi), t),
-                    CHAR_SPACING, FONT_SCALE);
+        c.label(text, colX(column), headerY + TEXT_PADDING,
+                header_color(cursorCol, static_cast<int>(lo), static_cast<int>(hi), t));
     };
     header("CC",   COL_CC,    MapCol::CC,    MapCol::CC);
     // VAL is never marked: it is read from the song.
-    c.draw_text("VAL", colX(COL_VAL), headerY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.label("VAL", colX(COL_VAL), headerY + TEXT_PADDING, t.textParam);
     header("MIN",  COL_MIN,   MapCol::MIN,   MapCol::MIN);
     header("MAX",  COL_MAX,   MapCol::MAX,   MapCol::MAX);
     header("DEST", COL_GROUP, MapCol::GROUP, MapCol::PARAM);
@@ -114,8 +112,8 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
 
             draw_cursor_cell(c, hex2(m->controller), colX(COL_CC), rowY + TEXT_PADDING,
                              onCell(MapCol::CC), ink, t);
-            c.draw_text(live < 0 ? "--" : hex2(live), colX(COL_VAL), rowY + TEXT_PADDING,
-                        present ? t.textValue : t.textEmpty, CHAR_SPACING, FONT_SCALE);
+            c.text(live < 0 ? "--" : hex2(live), colX(COL_VAL), rowY + TEXT_PADDING,
+                   present ? t.textValue : t.textEmpty);
             draw_cursor_cell(c, hex2(m->rangeMin), colX(COL_MIN), rowY + TEXT_PADDING,
                              onCell(MapCol::MIN), ink, t);
             draw_cursor_cell(c, hex2(m->rangeMax), colX(COL_MAX), rowY + TEXT_PADDING,
@@ -142,8 +140,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
     // Follows the last row, until the rows reach the panel's bottom.
     if (!footer.empty()) {
         const int noteY = std::min(footerY, firstRowY + rows * ROW_HEIGHT - scrollY);
-        c.draw_text(footer, colX(COL_CC), noteY + TEXT_PADDING, t.textEmpty, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label(footer, colX(COL_CC), noteY + TEXT_PADDING, t.textEmpty);
     }
 }
 

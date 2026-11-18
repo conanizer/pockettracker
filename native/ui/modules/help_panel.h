@@ -24,10 +24,10 @@ inline int draw_control_word(Canvas& c, const char* word, int bytes, int x, int 
     const int keyBytes = help_key_bytes(word, bytes);
     const int keyCols  = columns(0, keyBytes);
     if (keyBytes > 0)
-        c.draw_text(std::string(word, static_cast<size_t>(keyBytes)), x, y, keyInk, CHAR_SPACING, FONT_SCALE);
+        c.text(std::string(word, static_cast<size_t>(keyBytes)), x, y, keyInk);
     if (keyBytes < bytes)
-        c.draw_text(std::string(word + keyBytes, static_cast<size_t>(bytes - keyBytes)), x + keyCols * CHAR_W,
-                    y, ink, CHAR_SPACING, FONT_SCALE);
+        c.text(std::string(word + keyBytes, static_cast<size_t>(bytes - keyBytes)), x + keyCols * CHAR_W, y,
+               ink);
     return keyCols + columns(keyBytes, bytes);
 }
 

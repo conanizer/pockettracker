@@ -205,8 +205,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     const int nameX  = x + 10;
     const int valueX = x + 150;
 
-    c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.text("INSTRUMENT " + hex2(ins.id), nameX, y + TEXT_PADDING, t.textTitle);
 
     // Row tops, level with the side panel's.
     int rowY = y + ROW_HEIGHT + 14;
@@ -235,7 +234,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
                 pair(0, nameX, valueX);
                 // A MACRO cell says what it is in this model, in the labels' ink: it is not a value.
                 if (const char* note = macro_note(r.cells[0], ins))
-                    c.draw_text(note, valueX + MACRO_NOTE_X, textY, t.textParam, CHAR_SPACING, FONT_SCALE);
+                    c.text(note, valueX + MACRO_NOTE_X, textY, t.textParam);
                 break;
             case InstrumentRowKind::DUAL:
                 pair(0, nameX, valueX);
@@ -263,8 +262,7 @@ void InstrumentEditorModule::draw_cell(Canvas& c, int label_x, int value_x, int 
                                        int cc_slot_index, bool is_cursor,
                                        const InstrumentEditorState& s) const {
     const Theme& t = s.theme;
-    c.draw_text(cell_label(cell, cc_slot_index), label_x, text_y,
-                is_cursor ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.text(cell_label(cell, cc_slot_index), label_x, text_y, is_cursor ? cursor_mark_ink(t) : t.textParam);
     // The shared EQ-cell painter: "--" when unassigned, ">" for "opens the editor".
     if (cell == Cell::EQ) {
         draw_eq_cell(c, value_x, text_y, s.instrument.eqSlot, is_cursor, t);
@@ -296,7 +294,7 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     }
 
     // LOAD and EDIT are buttons: `textValue` even unselected, so they do not read as labels.
-    c.draw_text("TYPE", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.label("TYPE", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam);
     draw_cursor_cell(c, typeText, x + TYPE_VALUE, textY, c1, t.textValue, t);
 
     // Drawn only where the type has them, which is also where the cursor stops.
@@ -315,8 +313,7 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
     const bool onRow = (cursor_row == this_row);
 
     // INST PRESET: SAVE / LOAD a .pti, under TYPE's LOAD / EDIT.
-    c.draw_text("INST PRESET", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("INST PRESET", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam);
     draw_cursor_cell(c, "SAVE", x + BTN_COL2, textY, onRow && cursor_column == 2, t.textValue, t);
     draw_cursor_cell(c, "LOAD", x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
 }

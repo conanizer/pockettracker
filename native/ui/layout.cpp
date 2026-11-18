@@ -418,7 +418,7 @@ void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
 
     const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
-    c.draw_text(text, SIDE_SPACER + 10, STRIP_ROW_1, color, CHAR_SPACING, FONT_SCALE);
+    c.text(text, SIDE_SPACER + 10, STRIP_ROW_1, color);
 }
 
 // A held on a value whose cell names a unit: what it means, in two lines. False when there is none.
@@ -426,10 +426,8 @@ bool TrackerLayout::draw_value_hint(Canvas& c, const AppState& s) const {
     const ValueHint h = held_value_hint(s);
     if (h.head.empty()) return false;
     const int x = SIDE_SPACER + 10;
-    c.draw_text(Canvas::clip_text(h.head, STATUS_MAX_CHARS), x, STRIP_ROW_1, s.theme.vizWave, CHAR_SPACING,
-                FONT_SCALE);
-    c.draw_text(Canvas::clip_text(h.detail, STATUS_MAX_CHARS), x, STRIP_ROW_2, s.theme.textTitle,
-                CHAR_SPACING, FONT_SCALE);
+    c.text(Canvas::clip_text(h.head, STATUS_MAX_CHARS), x, STRIP_ROW_1, s.theme.vizWave);
+    c.text(Canvas::clip_text(h.detail, STATUS_MAX_CHARS), x, STRIP_ROW_2, s.theme.textTitle);
     return true;
 }
 
@@ -441,10 +439,9 @@ void TrackerLayout::draw_selection_clipboard(Canvas& c, const AppState& s) const
 
     const int x = SIDE_SPACER + OscilloscopeModule::WIDTH - 150;
     if (!sel.empty())
-        c.draw_text(sel, x, STRIP_ROW_1, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+        c.label(sel, x, STRIP_ROW_1, s.theme.vizWave);
     if (!clip.empty())
-        c.draw_text(clip, x, sel.empty() ? STRIP_ROW_1 : STRIP_ROW_2, s.theme.textTitle, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label(clip, x, sel.empty() ? STRIP_ROW_1 : STRIP_ROW_2, s.theme.textTitle);
 }
 
 // ─── ONE HAND: the locked buttons, boxed; one about to lock, plain ──────────────────────────────
@@ -469,9 +466,9 @@ void TrackerLayout::draw_button_locks(Canvas& c, const AppState& s) const {
         const int      x   = x0 + i * SLOT_W + 3;
         if (s.buttonsLocked & bit) {
             c.fill_rect(x - 2, y, CHAR_W + 2, ROW_HEIGHT, s.theme.vizWave);
-            c.draw_text(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.background, CHAR_SPACING, FONT_SCALE);
+            c.label(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.background);
         } else if (s.buttonsLocking & bit) {
-            c.draw_text(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+            c.label(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.vizWave);
         }
     }
 }
@@ -484,10 +481,9 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     const int bpmRowY  = EDITOR_Y + ROW_HEIGHT + 14;  // 117
     const int bpmTextY = bpmRowY + TEXT_PADDING;      // 120
 
-    c.draw_text("T>", RIGHT_BAR_X + 2, bpmTextY, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+    c.label("T>", RIGHT_BAR_X + 2, bpmTextY, t.textEmpty);
     // What plays: a leading clock's tempo, else the song's.
-    c.draw_text(std::to_string(songcore::tempo_in_force(p)), RIGHT_BAR_X + 2 + 34, bpmTextY, t.textValue,
-                CHAR_SPACING, FONT_SCALE);
+    c.text(std::to_string(songcore::tempo_in_force(p)), RIGHT_BAR_X + 2 + 34, bpmTextY, t.textValue);
 
     // The note monitor: a blank row, then "1  C-4" per track.
     const int trackRowsStartY = bpmRowY + ROW_HEIGHT + ROW_HEIGHT;  // 159
@@ -496,10 +492,8 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
         const songcore::Note note  = s.trackNotes[i];
         const bool           empty = (note == songcore::Note::EMPTY());
 
-        c.draw_text(std::to_string(i + 1), RIGHT_BAR_X + 2, textY, t.textParam, CHAR_SPACING,
-                    FONT_SCALE);
-        c.draw_text(note_name(note), RIGHT_BAR_X + 2 + 34, textY, empty ? t.textEmpty : t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(std::to_string(i + 1), RIGHT_BAR_X + 2, textY, t.textParam);
+        c.text(note_name(note), RIGHT_BAR_X + 2 + 34, textY, empty ? t.textEmpty : t.textValue);
     }
 
     NavigationMapState ns;
@@ -515,13 +509,11 @@ void TrackerLayout::draw_placeholder(Canvas& c, int x, int y, ScreenType screen,
                                      const Theme& t) const {
     c.fill_rect(x, y, OscilloscopeModule::WIDTH, 392, t.background);
 
-    c.draw_text(screen_label(screen), x + 20, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.label(screen_label(screen), x + 20, y + TEXT_PADDING, t.textTitle);
 
     const std::string message = "COMING SOON";
-    const int         msgW    = Canvas::text_width(message, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(message, x + (OscilloscopeModule::WIDTH - msgW) / 2, y + 180, t.textEmpty,
-                CHAR_SPACING, FONT_SCALE);
+    const int         msgW    = Canvas::text_width(message);
+    c.text(message, x + (OscilloscopeModule::WIDTH - msgW) / 2, y + 180, t.textEmpty);
 }
 
 }  // namespace pt::ui

@@ -29,24 +29,23 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    c.draw_text("INST.POOL", x + ID_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("INST.POOL", x + ID_X, y + TEXT_PADDING, t.textTitle);
 
     // ── USED RAM, in the gap the title leaves — PROJECT's total, behind the same flag ────────────
     if (s.caps.debug) {
-        c.draw_text("RAM", x + RAM_LABEL_X, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(megabytes_str(s.sampleRamBytes), x + RAM_VALUE_X, y + TEXT_PADDING, t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        c.label("RAM", x + RAM_LABEL_X, y + TEXT_PADDING, t.textParam);
+        c.text(megabytes_str(s.sampleRamBytes), x + RAM_VALUE_X, y + TEXT_PADDING, t.textValue);
     }
 
     // The headers say which column: the cursor is one cell, and four columns look alike.
     const int  headerY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const auto head    = [&](int col) { return header_color(s.cursorColumn, col, col, t); };
-    c.draw_text("# ",   x + ID_X,   headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("NAME", x + NAME_X, headerY, head(0), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("V",    x + VOL_X,  headerY, head(1), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("RV",   x + REV_X,  headerY, head(2), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("DE",   x + DEL_X,  headerY, head(3), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("EQ",   x + EQ_X,   headerY, head(4), CHAR_SPACING, FONT_SCALE);
+    c.text("# ", x + ID_X, headerY, t.textParam);
+    c.label("NAME", x + NAME_X, headerY, head(0));
+    c.label("V", x + VOL_X, headerY, head(1));
+    c.label("RV", x + REV_X, headerY, head(2));
+    c.label("DE", x + DEL_X, headerY, head(3));
+    c.label("EQ", x + EQ_X, headerY, head(4));
 
     // The selected row is kept centred; no scroll state.
     const int maxScroll = (count - VISIBLE_ROWS) < 0 ? 0 : (count - VISIBLE_ROWS);
@@ -69,8 +68,7 @@ void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const 
     const auto on_col = [&](int col) { return selected && s.cursorColumn == col; };
 
     // The slot number lights across the selected row.
-    c.draw_text(hex2(slot), x + ID_X, textY, selected ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.text(hex2(slot), x + ID_X, textY, selected ? cursor_mark_ink(t) : t.textParam);
 
     // An unnamed slot draws a dim underscore run, so an empty pool reads as blanks, not 128 "INSTxx".
     const bool        unnamed = songcore::instrument_has_default_name(ins);

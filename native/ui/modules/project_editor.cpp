@@ -32,7 +32,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     const int labelX = x + NAME_X;
     const int valueX = x + VALUE_X;
 
-    c.draw_text("PROJECT", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("PROJECT", labelX, y + TEXT_PADDING, t.textTitle);
 
     // The first row sits below the title and its 14px of air, level with the side panel's rows.
     const int firstRowY = y + ROW_HEIGHT + 14;
@@ -51,8 +51,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     };
 
     const auto label = [&](ProjectRow row, const char* text) {
-        c.draw_text(text, labelX, rowY(row) + TEXT_PADDING,
-                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(text, labelX, rowY(row) + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
     };
 
     // ── A single-value row: TEMPO, TRANSPOSE, SYSTEM, EXIT ───────────────────────────────────────
@@ -102,8 +101,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // A live percentage beside a row while its job runs.
     const auto progress = [&](ProjectRow row, float done) {
         const int percent = clamp(static_cast<int>(done * 100.0f), 0, 100);
-        c.draw_text(std::to_string(percent) + "%", valueX + 170, rowY(row) + TEXT_PADDING, t.textTitle,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(std::to_string(percent) + "%", valueX + 170, rowY(row) + TEXT_PADDING, t.textTitle);
     };
 
     // ── COLLECT — under PROJECT's buttons, as one of them ────────────────────────────────────────
@@ -132,16 +130,14 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         const int ramY = firstRowY +
                          project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
                          ROW_HEIGHT * 2;
-        c.draw_text("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(megabytes_str(s.sampleRamBytes),
-                    valueX, ramY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
+        c.label("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam);
+        c.text(megabytes_str(s.sampleRamBytes), valueX, ramY + TEXT_PADDING, t.textValue);
 
         // Skipped when the platform cannot answer: "0.0 MB" would say the opposite of unknown.
         if (s.freeRamBytes > 0) {
             const int freeY = ramY + ROW_HEIGHT;
-            c.draw_text("FREE RAM", labelX, freeY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-            c.draw_text(megabytes_str(s.freeRamBytes),
-                        valueX, freeY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
+            c.label("FREE RAM", labelX, freeY + TEXT_PADDING, t.textParam);
+            c.text(megabytes_str(s.freeRamBytes), valueX, freeY + TEXT_PADDING, t.textValue);
         }
     }
 

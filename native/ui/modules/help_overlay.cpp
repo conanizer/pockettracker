@@ -39,9 +39,8 @@ void draw_prose_word(Canvas& c, const char* word, int bytes, int x, int y, bool 
     for (int i = 0; i <= bytes; ++i) {
         if (i < bytes && word[i] != detail::HELP_MARK) continue;
         if (i > from)
-            c.draw_text(std::string(word + from, static_cast<size_t>(i - from)),
-                        x + detail::help_columns(word, 0, from) * CHAR_W, y, marked ? markInk : ink,
-                        CHAR_SPACING, FONT_SCALE);
+            c.text(std::string(word + from, static_cast<size_t>(i - from)),
+                   x + detail::help_columns(word, 0, from) * CHAR_W, y, marked ? markInk : ink);
         marked = !marked;
         from   = i + 1;
     }
@@ -63,8 +62,7 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
     draw_large_mascot(c, MASCOT_X, boxY + MASCOT_DY, mascot_ink(t, t.meterBackground));
 
     const std::string title(e.line1, static_cast<size_t>(help_title_length(e.line1)));
-    c.draw_text(title, row_x(0), boxY + row_dy(0) + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.text(title, row_x(0), boxY + row_dy(0) + TEXT_PADDING, t.textTitle);
 
     help_overlay_flow(e, [&](int row, int col, const char* word, int bytes, bool isKey, bool marked) {
         const int wx = row_x(row) + col * CHAR_W;
@@ -75,8 +73,7 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
 
     constexpr const char* HINT = "ANY BUTTON CLOSES";
     const int hintW = static_cast<int>(std::char_traits<char>::length(HINT)) * CHAR_W - CHAR_SPACING;
-    c.draw_text(HINT, BOX_X + (BOX_W - hintW) / 2, boxY + hint_dy(boxH) + TEXT_PADDING, t.textEmpty,
-                CHAR_SPACING, FONT_SCALE);
+    c.text(HINT, BOX_X + (BOX_W - hintW) / 2, boxY + hint_dy(boxH) + TEXT_PADDING, t.textEmpty);
 }
 
 }  // namespace pt::ui

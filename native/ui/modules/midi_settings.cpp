@@ -94,7 +94,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     const int labelX = x + NAME_X;
     const int valueX = x + VALUE_X;
 
-    c.draw_text("MIDI", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("MIDI", labelX, y + TEXT_PADDING, t.textTitle);
 
     const int firstRowY = y + ROW_HEIGHT + 14;
     const auto rowY = [&](MidiRow row) { return firstRowY + midi_row_offset_y(row, ROW_HEIGHT); };
@@ -102,8 +102,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     const auto on_row = [&](MidiRow row) { return s.cursorRow == static_cast<int>(row); };
 
     const auto row_of = [&](MidiRow row, const char* name, const std::string& value) {
-        c.draw_text(name, labelX, rowY(row) + TEXT_PADDING,
-                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(name, labelX, rowY(row) + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_row(row), t.textValue, t);
     };
 
@@ -133,16 +132,14 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     // ── Status: PANIC and TEST succeed silently, so the press says it happened (or NO PORT) ──────
     if (!s.statusText.empty()) {
         const int statusY = firstRowY + midi_row_offset_y(MidiRow::TEST, ROW_HEIGHT) + ROW_HEIGHT * 2;
-        c.draw_text(s.statusText, labelX, statusY + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label(s.statusText, labelX, statusY + TEXT_PADDING, t.textTitle);
     }
 
     // Debug: the device buffer's length and the callback's average and worst share of it over the
     // last second. At 100 % the device runs dry.
     if (s.caps.debug) {
         const int lineY = firstRowY + midi_row_offset_y(MidiRow::TEST, ROW_HEIGHT) + ROW_HEIGHT * 3;
-        c.draw_text(audio_load_text(s.audioLoad), labelX, lineY + TEXT_PADDING, t.textParam,
-                    CHAR_SPACING, FONT_SCALE);
+        c.label(audio_load_text(s.audioLoad), labelX, lineY + TEXT_PADDING, t.textParam);
     }
 }
 

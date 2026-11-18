@@ -321,11 +321,11 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         hint      = "SEL+A=RENAME SEL+B=DEL SEL+R=NEW";
         hintColor = t.textParam;
     }
-    c.draw_text(hint, x + 10, barY1 + TEXT_PADDING, hintColor, CHAR_SPACING, FONT_SCALE);
+    c.text(hint, x + 10, barY1 + TEXT_PADDING, hintColor);
 
     // Head-clipped: the end of the path says where you are.
     const std::string path = Canvas::clip_text_head(s.currentDirectory, PATH_COLS);
-    c.draw_text(path, x + 10, barY2 + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+    c.text(path, x + 10, barY2 + TEXT_PADDING, t.textEmpty);
 
     // ── The list ────────────────────────────────────────────────────────────────────────────────
     int rowY = barY2 + ROW_HEIGHT + 5;
@@ -366,15 +366,15 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
             }
         }
 
-        if (isCursor) c.draw_text(">", x + 10, rowY + TEXT_PADDING, cursor_cell_ink(t), CHAR_SPACING, FONT_SCALE);
+        if (isCursor) c.text(">", x + 10, rowY + TEXT_PADDING, cursor_cell_ink(t));
 
         // 20 fits before the size column; a granted tree has none, so its marker gets more room.
-        c.draw_text(Canvas::clip_text(item.displayName, item.isRoot ? ROOT_COLS : NAME_COLS),
-                    x + 30, rowY + TEXT_PADDING, textColor, CHAR_SPACING, FONT_SCALE);
+        c.text(Canvas::clip_text(item.displayName, item.isRoot ? ROOT_COLS : NAME_COLS), x + 30,
+               rowY + TEXT_PADDING, textColor);
 
         if (item.kind == BrowserItem::Kind::FILE) {
-            c.draw_text(item.sizeText, x + 370, rowY + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
-            c.draw_text(item.dateText, x + 480, rowY + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+            c.text(item.sizeText, x + 370, rowY + TEXT_PADDING, t.textEmpty);
+            c.text(item.dateText, x + 480, rowY + TEXT_PADDING, t.textEmpty);
         }
 
         rowY += ROW_HEIGHT;
@@ -386,22 +386,21 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
 
     // Right-aligned, so the count grows leftward; `text_width` because the trailing gap is not ink.
     const std::string count  = total > 0 ? std::to_string(s.cursor + 1) + "/" + std::to_string(total) : "";
-    const int         countW = Canvas::text_width(count, CHAR_SPACING, FONT_SCALE);
+    const int         countW = Canvas::text_width(count);
 
     // A status message takes what the count leaves, a glyph of air between.
     if (!s.statusMessage.empty()) {
         const int cols = (WIDTH - 20 - countW - CHAR_W + CHAR_SPACING) / CHAR_W;
-        c.draw_text(Canvas::clip_text(s.statusMessage, cols), x + 10, bottomY + TEXT_PADDING,
-                    s.statusSuccess ? t.textTitle : 0xFFFF4444, CHAR_SPACING, FONT_SCALE);
+        c.text(Canvas::clip_text(s.statusMessage, cols), x + 10, bottomY + TEXT_PADDING,
+               s.statusSuccess ? t.textTitle : 0xFFFF4444);
     } else {
         // Real arrows (the font has them; '^' draws blank). 28 code points leave the counter room.
-        c.draw_text("A=OPN B=BCK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SRT", x + 10,
-                    bottomY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("A=OPN B=BCK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SRT", x + 10,
+                bottomY + TEXT_PADDING, t.textParam);
     }
 
     if (!count.empty())
-        c.draw_text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam);
 }
 
 }  // namespace pt::ui

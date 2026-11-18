@@ -21,6 +21,18 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
+// Each 5×5 font pixel a `scale` square, `gap` px after each glyph.
+struct TextMetrics { int scale, gap; };
+constexpr TextMetrics metrics(TextSize size) {
+    switch (size) {
+        case TextSize::SMALL:  return {2, 2};   // the EQ editor's frequency marks
+        case TextSize::LARGE:  return {4, 3};   // the on-screen keyboard's keys
+        case TextSize::BUTTON: return {3, 3};   // the keyboard's ABORT / APPLY
+        case TextSize::NORMAL: break;
+    }
+    return {3, 2};
+}
+
 // One UTF-8 code point at `i`, advancing past it. A malformed byte is consumed as U+FFFD (blank).
 inline uint32_t next_codepoint(const std::string& s, size_t& i) {
     const auto b0 = static_cast<unsigned char>(s[i]);
@@ -121,17 +133,25 @@ void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale
     }
 }
 
-void Canvas::draw_text(const std::string& text, int x, int y, Argb color, int spacing,
-                       int font_scale) {
+void Canvas::text(const std::string& text, int x, int y, Argb color, TextSize size) {
+    const TextMetrics m = metrics(size);
     int cx = x;
     for (size_t i = 0; i < text.size();) {
-        draw_glyph(glyph_for_codepoint(next_codepoint(text, i)), cx, y, color, font_scale);
-        cx += 5 * font_scale + spacing;
+        draw_glyph(glyph_for_codepoint(next_codepoint(text, i)), cx, y, color, m.scale);
+        cx += 5 * m.scale + m.gap;
     }
 }
 
-int Canvas::text_width(const std::string& text, int spacing, int font_scale) {
-    return glyph_count(text) * (5 * font_scale + spacing) - (text.empty() ? 0 : spacing);
+int Canvas::text_width(const std::string& text, TextSize size) {
+    const TextMetrics m = metrics(size);
+    return glyph_count(text) * (5 * m.scale + m.gap) - (text.empty() ? 0 : m.gap);
+}
+
+int Canvas::glyph_width(TextSize size) { return 5 * metrics(size).scale; }
+
+int Canvas::char_step(TextSize size) {
+    const TextMetrics m = metrics(size);
+    return 5 * m.scale + m.gap;
 }
 
 int Canvas::glyph_count(const std::string& text) {

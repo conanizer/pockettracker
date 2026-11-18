@@ -94,8 +94,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    c.draw_text("MOD " + hex2(ins.id), x + NAME_X1, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.text("MOD " + hex2(ins.id), x + NAME_X1, y + TEXT_PADDING, t.textTitle);
 
     // The second pair starts where the first ended: its depth depends on the types. ⚠️ Two ADSR
     // pairs fill the screen to its last pixel row.
@@ -111,10 +110,8 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
 
         // The pair's headers dim when the cursor is in the other pair.
         const Argb headerColor = (pair == s.cursorPair) ? t.textParam : t.textEmpty;
-        c.draw_text("MOD" + std::to_string(pair * 2 + 1), x + NAME_X1, pairTopY, headerColor,
-                    CHAR_SPACING, FONT_SCALE);
-        c.draw_text("MOD" + std::to_string(pair * 2 + 2), x + NAME_X2, pairTopY, headerColor,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text("MOD" + std::to_string(pair * 2 + 1), x + NAME_X1, pairTopY, headerColor);
+        c.text("MOD" + std::to_string(pair * 2 + 2), x + NAME_X2, pairTopY, headerColor);
 
         const int dataStartY = pairTopY + ROW_HEIGHT;
 
@@ -135,8 +132,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
                 // The cursor is the value cell alone; the label says which row and which slot.
                 const bool onCell = isCursorRow && activePair && (s.cursorSide == side);
 
-                c.draw_text(label, x + nameX, textY, onCell ? cursor_mark_ink(t) : t.textParam,
-                            CHAR_SPACING, FONT_SCALE);
+                c.text(label, x + nameX, textY, onCell ? cursor_mark_ink(t) : t.textParam);
                 draw_cursor_cell(c, value, x + valX, textY, onCell, t.textValue, t);
             };
 

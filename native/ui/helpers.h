@@ -116,7 +116,7 @@ inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
 
 // The playhead: a `>` ahead of the cell, one per track, in `textPlayhead` as set.
 inline void draw_playhead(Canvas& c, int x, int text_y, const Theme& t) {
-    c.draw_text(">", x, text_y, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+    c.text(">", x, text_y, t.textPlayhead);
 }
 
 // Is a LIVE queue marker lit this frame? Slow: waiting for the chain's end; fast: the next phrase.
@@ -138,7 +138,7 @@ class RowCells {
     void cell(const std::string& text, int x, bool is_cursor, bool is_selected, bool is_empty,
               Argb value_color) {
         const int left  = x - CHAR_SPACING;
-        const int right = x + Canvas::text_width(text, CHAR_SPACING, FONT_SCALE) + CHAR_SPACING;
+        const int right = x + Canvas::text_width(text) + CHAR_SPACING;
 
         if (is_cursor || is_selected) {
             // The gutter is claimed only between two selected cells.
@@ -153,7 +153,7 @@ class RowCells {
                            : is_selected ? selection_cell_ink(t_)
                            : is_empty    ? t_.textEmpty
                                          : value_color;
-        c_.draw_text(text, x, textY_, color, CHAR_SPACING, FONT_SCALE);
+        c_.text(text, x, textY_, color);
     }
 
   private:
@@ -183,17 +183,16 @@ inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool i
     // The cursor spans value and arrow, on the same edges as `RowCells`.
     if (is_cursor) {
         const std::string span = show_arrow ? eq_str + ">" : eq_str;
-        const int         w = Canvas::text_width(span, CHAR_SPACING, FONT_SCALE) + 2 * CHAR_SPACING;
+        const int         w = Canvas::text_width(span) + 2 * CHAR_SPACING;
         c.fill_rect(value_x - CHAR_SPACING, text_y - TEXT_PADDING, w, ROW_HEIGHT, t.rowCursor);
     }
 
     const Argb value_color   = is_cursor      ? cursor_cell_ink(t)
                                : (eq_slot < 0) ? t.textEmpty
                                                : t.textValue;
-    c.draw_text(eq_str, value_x, text_y, value_color, CHAR_SPACING, FONT_SCALE);
+    c.text(eq_str, value_x, text_y, value_color);
     if (show_arrow) {
-        c.draw_text(">", value_x + 2 * CHAR_W, text_y, is_cursor ? cursor_cell_ink(t) : t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(">", value_x + 2 * CHAR_W, text_y, is_cursor ? cursor_cell_ink(t) : t.textValue);
     }
 }
 

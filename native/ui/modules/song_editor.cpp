@@ -27,16 +27,14 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
 
     int rowY = y + TEXT_PADDING;
     // The title carries the transport mode — LIVE changes what START does. Both words are four glyphs.
-    c.draw_text(std::string(s.liveMode ? "LIVE: " : "SONG: ") +
-                    Canvas::clip_text(s.project.name, TITLE_MAX_CHARS),
-                x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text(std::string(s.liveMode ? "LIVE: " : "SONG: ") + Canvas::clip_text(s.project.name, TITLE_MAX_CHARS),
+           x + 10, rowY, t.textTitle);
 
     // `cursorTrack` is 1-based, so it is the header's column index.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     for (int trackId = 0; trackId < 8; ++trackId) {
-        c.draw_text(std::to_string(trackId + 1), trackColumns[trackId], rowY,
-                    header_color(s.cursorTrack, trackId + 1, trackId + 1, t), CHAR_SPACING,
-                    FONT_SCALE);
+        c.text(std::to_string(trackId + 1), trackColumns[trackId], rowY,
+               header_color(s.cursorTrack, trackId + 1, trackId + 1, t));
     }
 
     for (int rowIndex = 0; rowIndex < VISIBLE_ROWS; ++rowIndex) {
@@ -59,11 +57,8 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
     RowCells cells(c, textY, t);
 
     // Column 0 is a gutter the cursor cannot reach; its number still lights on the cursor row.
-    c.draw_text(hex2(absolute_row), stepX, textY,
-                (absolute_row == s.cursorRow) ? cursor_mark_ink(t)
-                : (absolute_row % 4 == 0)     ? t.textParam
-                                              : t.textEmpty,
-                CHAR_SPACING, FONT_SCALE);
+    c.text(hex2(absolute_row), stepX, textY,
+           (absolute_row == s.cursorRow) ? cursor_mark_ink(t) : (absolute_row % 4 == 0) ? t.textParam : t.textEmpty);
 
     for (int trackId = 0; trackId < 8; ++trackId) {
         const Track& track = s.project.tracks[static_cast<size_t>(trackId)];
@@ -82,7 +77,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
                    /*is_empty=*/chainId == -1, value_color);
 
         // This track's marker; a stopped track answers −1. ⚠️ One glyph chosen before drawing —
-        // `draw_text` does not erase. A LAUNCH draws on the row it will jump to; a STOP where the
+        // Text does not erase. A LAUNCH draws on the row it will jump to; a STOP where the
         // channel is now.
         const int  markerX     = trackColumns[trackId] - CHAR_W;
         const bool playingHere = s.playheads[trackId].songRow == absolute_row;
@@ -90,7 +85,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool queueLit    = s.liveMode && q.pending() && blink_on(s.blinkPhaseMs, q.immediate);
 
         if (queueLit && q.stop && playingHere)
-            c.draw_text("_", markerX, textY, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+            c.text("_", markerX, textY, t.textPlayhead);
         else if (playingHere || (queueLit && !q.stop && q.row == absolute_row))
             draw_playhead(c, markerX, textY, t);
     }

@@ -36,7 +36,7 @@ void draw_instrument_picker(Canvas& c, const InstrumentPickerState& s,
 
     const int x = BOX_X + TEXT_INSET;
     int       y = BOX_Y + BAR_INSET;
-    c.draw_text("INSTRUMENT", x, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label(c.cased("INSTRUMENT"), x, y + TEXT_PADDING, t.textTitle);
     y += ROW_HEIGHT + GAP;
 
     const int n = static_cast<int>(instruments.size());
@@ -48,13 +48,12 @@ void draw_instrument_picker(Canvas& c, const InstrumentPickerState& s,
         const bool                  dim      = name == "EMPTY";
         if (isCursor) c.fill_rect(BOX_X + BAR_INSET, ry, BOX_W - 2 * BAR_INSET, ROW_HEIGHT, t.rowCursor);
         const Argb ink = isCursor ? cursor_cell_ink(t) : dim ? t.textEmpty : t.textValue;
-        c.draw_text(hex2(i), x, ry + TEXT_PADDING, isCursor ? ink : t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(Canvas::clip_text(name, TEXT_COLS - 3), x + NAME_X, ry + TEXT_PADDING, ink, CHAR_SPACING,
-                    FONT_SCALE);
+        c.text(hex2(i), x, ry + TEXT_PADDING, isCursor ? ink : t.textParam);
+        c.text(Canvas::clip_text(name, TEXT_COLS - 3), x + NAME_X, ry + TEXT_PADDING, ink);
     }
     y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
 
-    c.draw_text("A=CHOOSE  B=CANCEL", x, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.label(c.cased("A=CHOOSE B=CANCEL"), x, y + TEXT_PADDING, t.textParam);
 }
 
 }  // namespace pt::ui

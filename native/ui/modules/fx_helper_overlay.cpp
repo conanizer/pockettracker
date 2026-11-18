@@ -50,8 +50,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     int textY = CONTENT_Y;
     for (int i = 0; i < 4; ++i) {
         if (i >= static_cast<int>(desc.size())) break;  // a short entry stops
-        c.draw_text(desc[static_cast<size_t>(i)], INNER_X, textY + TEXT_PADDING, t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        c.text(desc[static_cast<size_t>(i)], INNER_X, textY + TEXT_PADDING, t.textValue);
         textY += ROW_HEIGHT;
     }
 
@@ -59,7 +58,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     // At a fixed offset, so the grid never moves between effects.
     const int headerY = CONTENT_Y + 4 * ROW_HEIGHT + 8;
     const int headerX = BOX_X + (BOX_W - run_advance(6)) / 2;
-    c.draw_text("EFFECT", headerX, headerY + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("EFFECT", headerX, headerY + TEXT_PADDING, t.textTitle);
 
     // ── The groups — a heading each, and six columns of cells under the open one ─────────────────
     // Each heading lands where the group above ended; the box fits the tallest group.
@@ -72,8 +71,8 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
         const bool     open = (gi == s.group);
 
         // ⚠️ Raw UTF-8 arrows: MSVC without /utf-8 would convert an escape to the codepage.
-        c.draw_text(std::string(g.title) + (open ? " ↓" : " →"), gridX,
-                    gridY + row * ROW_HEIGHT + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+        c.label(std::string(g.title) + (open ? " ↓" : " →"), gridX, gridY + row * ROW_HEIGHT + TEXT_PADDING,
+                t.textTitle);
         ++row;
         if (!open) continue;
 
@@ -92,8 +91,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
                                : (code == songcore::FX_NONE) ? t.textEmpty
                                                              : t.textValue;
             const int nameX = cellX + (CELL_W - run_advance(3)) / 2;
-            c.draw_text(songcore::effect_name(code), nameX, cellY + TEXT_PADDING, color,
-                        CHAR_SPACING, FONT_SCALE);
+            c.text(songcore::effect_name(code), nameX, cellY + TEXT_PADDING, color);
         }
         row += g.rows();
     }

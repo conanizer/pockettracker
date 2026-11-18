@@ -41,18 +41,18 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     const int fx3ValueX  = colX;
 
     int rowY = y + TEXT_PADDING;
-    c.draw_text("TABLE " + hex2(s.table.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text("TABLE " + hex2(s.table.id), x + 10, rowY, t.textTitle);
     // The tic rate is the instrument's, not the table's; shown here because this is where it is felt.
-    c.draw_text(hex2(s.ticRate) + " TIC", x + WIDTH - 120, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.text(hex2(s.ticRate) + " TIC", x + WIDTH - 120, rowY, t.textParam);
 
     // The header lights for the cursor's column, the row number for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const int cc = s.cursorColumn;
-    c.draw_text("N",   transposeX, rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("V",   volX,       rowY, header_color(cc, 2, 2, t), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX1", fx1NameX,   rowY, header_color(cc, 3, 4, t), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX2", fx2NameX,   rowY, header_color(cc, 5, 6, t), CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX3", fx3NameX,   rowY, header_color(cc, 7, 8, t), CHAR_SPACING, FONT_SCALE);
+    c.label("N", transposeX, rowY, header_color(cc, 1, 1, t));
+    c.label("V", volX, rowY, header_color(cc, 2, 2, t));
+    c.label("FX1", fx1NameX, rowY, header_color(cc, 3, 4, t));
+    c.label("FX2", fx2NameX, rowY, header_color(cc, 5, 6, t));
+    c.label("FX3", fx3NameX, rowY, header_color(cc, 7, 8, t));
 
     // An AUS/AUF cell no ramp uses draws dimmed — the engine's own pairing walk over the rows as
     // played, asked once per draw.

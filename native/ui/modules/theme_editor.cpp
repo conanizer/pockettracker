@@ -33,7 +33,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    c.draw_text("THEME EDIT", x + NAME_COL_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("THEME EDIT", x + NAME_COL_X, y + TEXT_PADDING, t.textTitle);
 
     // ⚠️ The accent, never red (red means destruction). A failed roll outranks the cursor's reading.
     // Seventeen characters: "BLENDS " + the longest row label (BACKGROUND).
@@ -46,8 +46,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         if (partner != nullptr) message = std::string("BLENDS ") + partner;
     }
     if (!message.empty()) {
-        c.draw_text(Canvas::clip_text(message, MSG_COLS), x + MSG_X, y + TEXT_PADDING,
-                    cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
+        c.text(Canvas::clip_text(message, MSG_COLS), x + MSG_X, y + TEXT_PADDING, cursor_mark_ink(t));
     }
 
     // The rows below the title scroll to keep the cursor in view.
@@ -76,8 +75,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int  ry     = row_top(THEME_ROW_THEME);
         const int  ty     = ry + TEXT_PADDING;
 
-        c.draw_text("THEME", x + NAME_COL_X, ty,
-                    on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("THEME", x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
 
         // ⚠️ Clipped before SAVE, so a typed name cannot cover the cells.
         constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
@@ -95,8 +93,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int  ry     = row_top(THEME_ROW_RANDOM);
         const int  ty     = ry + TEXT_PADDING;
 
-        c.draw_text("RANDOMIZE", x + NAME_COL_X, ty,
-                    on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("RANDOMIZE", x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
 
         // The scheme is a cell, so the row says which hue relationship a roll will give.
         draw_cursor_cell(c, theme_scheme_label(es.scheme), x + SCHEME_LABEL_X, ty,
@@ -130,14 +127,13 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int            ry     = row_top(logical);
         const int            ty     = ry + TEXT_PADDING;
 
-        c.draw_text(row.label, x + NAME_COL_X, ty,
-                    on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(row.label, x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
 
         // One character, two facts; the lock wins — a locked colour's clash is not flagged.
         if (es.locks.locked(static_cast<int>(i))) {
-            c.draw_text("*", x + WARN_COL_X, ty, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
+            c.text("*", x + WARN_COL_X, ty, cursor_mark_ink(t));
         } else if (clash[i]) {
-            c.draw_text("!", x + WARN_COL_X, ty, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
+            c.text("!", x + WARN_COL_X, ty, cursor_mark_ink(t));
         }
 
         const int r = static_cast<int>((color >> 16) & 0xFF);

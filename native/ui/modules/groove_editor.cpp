@@ -36,17 +36,16 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     // The sequencer's own active length (timing.h), never re-derived here.
     const int activeLen = songcore::groove_active_length(groove);
 
-    c.draw_text("GROOVE " + hex2(groove.id), x + 10, headerY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text("GROOVE " + hex2(groove.id), x + 10, headerY, t.textTitle);
 
     std::string lenText = std::to_string(activeLen);
     if (lenText.size() < 2) lenText = " " + lenText;
-    c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
     // Lit for the cursor's column.
-    c.draw_text("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING,
-                header_color(s.cursorColumn, GROOVE_COL_TICK, GROOVE_COL_TICK, t), CHAR_SPACING,
-                FONT_SCALE);
+    c.label("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING,
+            header_color(s.cursorColumn, GROOVE_COL_TICK, GROOVE_COL_TICK, t));
 
     // ── 16 data rows ─────────────────────────────────────────────────────────────────────────────
     const int dataStartY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + TEXT_PADDING;
@@ -83,8 +82,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
 
     const bool marked = songcore::groove_differs_from_its_name(groove);
     if (marked)
-        c.draw_text("*", x + GROOVE_STAR_X, panelY(GROOVE_PANEL_NAME), t.textPlayhead, CHAR_SPACING,
-                    FONT_SCALE);
+        c.text("*", x + GROOVE_STAR_X, panelY(GROOVE_PANEL_NAME), t.textPlayhead);
 
     draw_cell(c, shown, x + GROOVE_PANEL_X + (marked ? CHAR_W : 0), panelY(GROOVE_PANEL_NAME),
               here(GROOVE_PANEL_NAME, 0), /*is_selected=*/false, /*is_empty=*/!named, t.textValue, t);
@@ -96,25 +94,19 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
 
     // QNT — the editing aid, not a stored setting.
     const int qntY = panelY(GROOVE_PANEL_QNT);
-    c.draw_text("QNT", x + GROOVE_PANEL_X, qntY,
-                here(GROOVE_PANEL_QNT, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("QNT", x + GROOVE_PANEL_X, qntY, here(GROOVE_PANEL_QNT, 0) ? cursor_mark_ink(t) : t.textParam);
     draw_cursor_cell(c, groove_quantize_label(s.quantize), x + GROOVE_VALUE_X, qntY,
                      here(GROOVE_PANEL_QNT, 0), t.textValue, t);
 
     // SWG — read-only, for the tick cursor's group.
     const int swgY = panelY(GROOVE_PANEL_SWG);
-    c.draw_text("SWG", x + GROOVE_PANEL_X, swgY,
-                here(GROOVE_PANEL_SWG, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("SWG", x + GROOVE_PANEL_X, swgY, here(GROOVE_PANEL_SWG, 0) ? cursor_mark_ink(t) : t.textParam);
     draw_cursor_cell(c, swing_text(groove_swing_tenths(groove, s.cursorRow, s.quantize)),
                      x + GROOVE_VALUE_X, swgY, here(GROOVE_PANEL_SWG, 0), t.textParam, t);
 
     // PPQ — tick column tics per quarter note.
     const int ppqY = panelY(GROOVE_PANEL_PPQ);
-    c.draw_text("PPQ", x + GROOVE_PANEL_X, ppqY,
-                here(GROOVE_PANEL_PPQ, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("PPQ", x + GROOVE_PANEL_X, ppqY, here(GROOVE_PANEL_PPQ, 0) ? cursor_mark_ink(t) : t.textParam);
     draw_cursor_cell(c, std::to_string(songcore::groove_ticks_per_step(groove) * 4),
                      x + GROOVE_VALUE_X, ppqY, here(GROOVE_PANEL_PPQ, 0), t.textValue, t);
 }

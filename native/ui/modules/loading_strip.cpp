@@ -32,14 +32,14 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
 
     // ── Row 1: what is being opened, and the way out ─────────────────────────────────────────────
     // "B=STOP" is measured first: it must never be clipped.
-    const int cancelW = Canvas::text_width(CANCEL, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(CANCEL, DESIGN_W - INSET - cancelW, TEXT_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
+    const int cancelW = Canvas::text_width(CANCEL);
+    c.text(CANCEL, DESIGN_W - INSET - cancelW, TEXT_Y, t.textParam);
 
     // The name's budget is what the rest of the row leaves.
     const int nameCols = (DESIGN_W - INSET * 2 - cancelW - GAP -
-                          Canvas::text_width(PREFIX, CHAR_SPACING, FONT_SCALE)) / CHAR_W;
+                          Canvas::text_width(PREFIX)) / CHAR_W;
     const std::string line = PREFIX + Canvas::clip_text(s.detail, nameCols > 0 ? nameCols : 0);
-    c.draw_text(line, INSET, TEXT_Y, t.textValue, CHAR_SPACING, FONT_SCALE);
+    c.text(line, INSET, TEXT_Y, t.textValue);
 
     // ── Row 2: the bar, and the percentage where there is one ────────────────────────────────────
     // ⚠️ A percentage only where the file states a total (below zero: none, e.g. an mp3 without Xing).
@@ -48,9 +48,8 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
     if (s.progress >= 0.0f) {
         const float       p   = s.progress > 1.0f ? 1.0f : s.progress;
         const std::string pct = std::to_string(static_cast<int>(p * 100.0f + 0.5f)) + "%";
-        const int         w   = Canvas::text_width(pct, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(pct, DESIGN_W - INSET - w, ROW2_Y + TEXT_PADDING, t.textValue, CHAR_SPACING,
-                    FONT_SCALE);
+        const int         w   = Canvas::text_width(pct);
+        c.text(pct, DESIGN_W - INSET - w, ROW2_Y + TEXT_PADDING, t.textValue);
         barW -= w + GAP;
     }
 

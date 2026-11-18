@@ -302,11 +302,11 @@ void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, con
     auto on          = [&](int col) { return is_cur_row && cur_col == col; };
     auto label_color = [&](int col) { return on(col) ? cursor_mark_ink(t) : t.textParam; };
 
-    c.draw_text(l1, x + 10,  ty, label_color(c1), CHAR_SPACING, FONT_SCALE);
+    c.label(l1, x + 10, ty, label_color(c1));
     draw_cursor_cell(c, v1, x + 110, ty, on(c1), t.textValue, t);
-    c.draw_text(l2, x + 180, ty, label_color(c2), CHAR_SPACING, FONT_SCALE);
+    c.label(l2, x + 180, ty, label_color(c2));
     draw_cursor_cell(c, v2, x + 335, ty, on(c2), t.textValue, t);
-    c.draw_text(l3, x + 445, ty, label_color(c3), CHAR_SPACING, FONT_SCALE);
+    c.label(l3, x + 445, ty, label_color(c3));
     draw_cursor_cell(c, v3, x + 535, ty, on(c3), t.textValue, t);
 }
 
@@ -330,11 +330,11 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     // ── Header, then rows 1 and 2, then the waveform ─────────────────────────────────────────────
     {
         const int ty = y + 5 + TEXT_PADDING;
-        c.draw_text("SAMPLE EDITOR", x + 10, ty, t.textTitle, CHAR_SPACING, FONT_SCALE);
+        c.label("SAMPLE EDITOR", x + 10, ty, t.textTitle);
         // BPM sits left of the rate and length it is derived from; six columns cap it at 999.
-        c.draw_text(s.bpm_display(), x + 245, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(std::to_string(s.sampleRate) + "Hz", x + 360, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(s.duration_display(), x + 492, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.text(s.bpm_display(), x + 245, ty, t.textParam);
+        c.text(std::to_string(s.sampleRate) + "Hz", x + 360, ty, t.textParam);
+        c.text(s.duration_display(), x + 492, ty, t.textParam);
     }
 
     {   // VIEW — ZOOM / SOURCE / RATE
@@ -364,8 +364,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::SELECTION);
         const bool cur = (s.cursorRow == SampleRow::SELECTION);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, hex_padded(s.selectionStart, 8), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
         draw_cursor_cell(c, hex_padded(s.selectionEnd, 8), x + 335, ty, cur && s.cursorCol == 1,
@@ -376,7 +375,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::SLICE);
         const bool cur = (s.cursorRow == SampleRow::SLICE);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SLICE", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("SLICE", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, at(slice_methods(), s.sliceMethod), x + 175, ty,
                          cur && s.cursorCol == 0, t.textValue, t);
         if (slice_has_parameter(s.sliceMethod)) {
@@ -384,7 +383,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
             const std::string lbl   = (s.sliceMethod == SLICE_TRANSIENT) ? "SENS" : "BY";
             const std::string val   = hex2(s.sliceMethod == SLICE_TRANSIENT ? s.sliceSensitivity
                                                                             : s.sliceDivisions);
-            c.draw_text(lbl, x + 335, ty, onVal ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+            c.text(lbl, x + 335, ty, onVal ? cursor_mark_ink(t) : t.textParam);
             draw_cursor_cell(c, val, x + 410, ty, onVal, t.textValue, t);
         }
     }
@@ -399,7 +398,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         if (s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_MANUAL) {
             // How many the index can reach. DIVIDE draws none: its BY cell above says it.
             const int total = s.slice_index_ceiling() + 1;
-            c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
+            c.text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam);
         }
         draw_cursor_cell(c, hex_padded(s.effective_slice_position(), 8), x + 335, ty, cur && s.cursorCol == 1,
                          t.textValue, t);
@@ -414,7 +413,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::FX);
         const bool cur = (s.cursorRow == SampleRow::FX);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("EFFECT", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("EFFECT", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, at(fx_types(), s.fxType), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
 
@@ -434,7 +433,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::NAME);
         const bool cur = (s.cursorRow == SampleRow::NAME);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("NAME", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("NAME", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
         draw_cursor_cell(c, s.sampleName, x + 120, ty, cur, t.textValue, t);
     }
 
@@ -498,7 +497,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
             v_line(c, cx, top, bot - top, inSel ? t.textValue : t.textEmpty);
         }
     } else {
-        c.draw_text("WAVEFORM", x + 265, midY - 6, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+        c.label("WAVEFORM", x + 265, midY - 6, t.textEmpty);
     }
 
     if (s.totalFrames <= 0) return;
@@ -511,12 +510,12 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
         if (sXf >= static_cast<float>(wfLeft) && sXf <= static_cast<float>(wfRight)) {
             const int sX = std::clamp(static_cast<int>(sXf), wfLeft, wfLast);
             v_line(c, sX, y, WAVEFORM_H, t.textTitle);
-            c.draw_text("S", sX + 2, y + 3, t.textTitle, CHAR_SPACING, FONT_SCALE);
+            c.text("S", sX + 2, y + 3, t.textTitle);
         }
         if (eXf >= static_cast<float>(wfLeft) && eXf <= static_cast<float>(wfRight)) {
             const int eX = std::clamp(static_cast<int>(eXf), wfLeft, wfLast);
             v_line(c, eX, y, WAVEFORM_H, t.textTitle);
-            c.draw_text("E", eX - 17, y + 3, t.textTitle, CHAR_SPACING, FONT_SCALE);
+            c.text("E", eX - 17, y + 3, t.textTitle);
         }
     }
 
@@ -861,8 +860,8 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
 
     const std::string title = "TIMESTRETCH";
     int ty = STRETCH_BOX_Y + STRETCH_PAD + TEXT_PADDING;
-    c.draw_text(title, STRETCH_BOX_X + (STRETCH_BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2,
-                ty, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text(title, STRETCH_BOX_X + (STRETCH_BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, ty,
+           t.textTitle);
     ty += ROW_HEIGHT + STRETCH_GAP;
 
     auto on = [&](StretchCell cell) { return s.stretchCursor == cell; };
@@ -872,16 +871,14 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
             const bool        isCell = (line.cell >= 0);
             const StretchCell cell   = static_cast<StretchCell>(std::max(line.cell, 0));
             const bool        cur    = isCell && on(cell);
-            c.draw_text(line.label, STRETCH_LABEL_X, ty, cur ? cursor_mark_ink(t) : t.textParam,
-                        CHAR_SPACING, FONT_SCALE);
+            c.text(line.label, STRETCH_LABEL_X, ty, cur ? cursor_mark_ink(t) : t.textParam);
             if (isCell) {
                 draw_cursor_cell(c, stretch_value(s, cell, song_tempo), STRETCH_VALUE_X, ty, cur,
                                  t.textValue, t);
             } else {
                 // The header's reading: the sample's tempo at this DURATION, the PITCH below counted in.
                 const int bpm = s.source_bpm();
-                c.draw_text(bpm > 0 ? pad3(bpm) : "---", STRETCH_VALUE_X, ty, t.textParam, CHAR_SPACING,
-                            FONT_SCALE);
+                c.text(bpm > 0 ? pad3(bpm) : "---", STRETCH_VALUE_X, ty, t.textParam);
             }
         }
         ty += ROW_HEIGHT;

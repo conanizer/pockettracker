@@ -39,7 +39,7 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, const GuideLines& lines, con
         if (line.text.empty()) continue;
         const int textY = y + TEXT_TOP + i * ROW_HEIGHT;
         if (line.keyInk == 0) {
-            c.draw_text(line.text, x + TEXT_X, textY, line.ink, CHAR_SPACING, FONT_SCALE);
+            c.text(line.text, x + TEXT_X, textY, line.ink);
             continue;
         }
         // Word by word, so the buttons stand out from what they do.

@@ -107,9 +107,8 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
 
     const auto header = [&](EffectsSection section) {
         if (only >= 0) return;   // alone, its name is the title
-        c.draw_text(SECTION_NAMES[static_cast<int>(section)], x + LABEL_X[0],
-                    rowY(lay.sectionHeaderLine[static_cast<int>(section)]), t.textTitle, CHAR_SPACING,
-                    FONT_SCALE);
+        c.label(SECTION_NAMES[static_cast<int>(section)], x + LABEL_X[0],
+                rowY(lay.sectionHeaderLine[static_cast<int>(section)]), t.textTitle);
     };
 
     // `unread` greys a cell the chosen algorithm ignores; it still edits.
@@ -117,8 +116,7 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx    = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel   = (s.cursorRow == row);
-        c.draw_text(name, lx, ry, sel ? cursor_mark_ink(t) : unread ? t.textEmpty : t.textParam,
-                    CHAR_SPACING, FONT_SCALE);
+        c.label(name, lx, ry, sel ? cursor_mark_ink(t) : unread ? t.textEmpty : t.textParam);
         draw_cursor_cell(c, text, lx + VALUE_GAP, ry, sel, unread ? t.textEmpty : t.textValue, t);
     };
 
@@ -127,7 +125,7 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         const int  ry  = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx  = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel = (s.cursorRow == row);
-        c.draw_text("INP EQ", lx, ry, sel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.label("INP EQ", lx, ry, sel ? cursor_mark_ink(t) : t.textParam);
         draw_eq_cell(c, lx + VALUE_GAP, ry, eq_slot, sel, t);
     };
 
@@ -138,7 +136,7 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(name_row)]);
         const bool named = !shown.empty();
         if (!named) shown = "----";
-        if (drifted) c.draw_text("*", x + LABEL_X[0], ry, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+        if (drifted) c.text("*", x + LABEL_X[0], ry, t.textPlayhead);
         draw_cell(c, shown, x + LABEL_X[0] + (drifted ? CHAR_W : 0), ry,
                   /*is_cursor=*/s.cursorRow == name_row, /*is_selected=*/false, /*is_empty=*/!named,
                   t.textValue, t);
@@ -220,7 +218,7 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     const EffectsLayout lay = effects_layout();
 
     // The lines scroll under the title, following the cursor row.
-    c.draw_text("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.label("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle);
 
     const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
     const int viewportH  = HEIGHT - (firstLineY - y);
@@ -262,8 +260,7 @@ void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Proje
     // `text_width` drops the trailing gap; the run's advance centres it.
     const std::string title = SECTION_NAMES[section];
     const int         textY = BOX_Y + CONTENT_PAD + TEXT_PADDING;
-    c.draw_text(title, BOX_X + (BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, textY,
-                t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text(title, BOX_X + (BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, textY, t.textTitle);
 
     EffectState es{project};
     es.cursorRow = s.cursorRow;

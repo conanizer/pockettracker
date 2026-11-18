@@ -39,12 +39,12 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
 
     // ── Header ───────────────────────────────────────────────────────────────────────────────────
     const int headerY = y + TEXT_PADDING;
-    c.draw_text("SCALE " + hex2(scale.id), labelX, headerY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    c.text("SCALE " + hex2(scale.id), labelX, headerY, t.textTitle);
 
     // How many notes the scale has (7 a mode, 5 a pentatonic) — derived, never stored.
     std::string lenText = std::to_string(songcore::scale_degree_count(scale));
     if (lenText.size() < 2) lenText = " " + lenText;
-    c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam);
 
     // ── Row 0: NAME / SAVE / LOAD ────────────────────────────────────────────────────────────────
     const int  nameY    = y + ROW_HEIGHT + 14 + TEXT_PADDING;
@@ -58,7 +58,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
 
     // The drift marker pushes the name off the grid column.
     const bool marked = songcore::scale_differs_from_its_name(scale);
-    if (marked) c.draw_text("*", x + SCALE_STAR_X, nameY, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+    if (marked) c.text("*", x + SCALE_STAR_X, nameY, t.textPlayhead);
 
     // A saved name can be any length: cut to the room before SAVE, a glyph of air kept.
     const int nameX = SCALE_NAME_X + (marked ? CHAR_W : 0);
@@ -76,8 +76,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     const int keyY = nameY + ROW_HEIGHT;
 
     const bool keyCursor = (s.cursorRow == SCALE_KEY_ROW);
-    c.draw_text("KEY", labelX, keyY, keyCursor ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    c.label("KEY", labelX, keyY, keyCursor ? cursor_mark_ink(t) : t.textParam);
     // Padded to two glyphs so the cursor box does not resize past the sharps.
     std::string keyName = pitch_class_name(s.key);
     if (keyName.size() < 2) keyName += " ";
@@ -85,7 +84,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
     const int columnHeaderY = keyY + 2 * ROW_HEIGHT;   // a blank row between, on the grid
-    c.draw_text("EN", valueX, columnHeaderY, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
+    c.label("EN", valueX, columnHeaderY, cursor_mark_ink(t));
 
     // ── The twelve degrees ───────────────────────────────────────────────────────────────────────
     const int dataStartY = columnHeaderY + ROW_HEIGHT;
@@ -106,8 +105,8 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
                          isCursor ? cursor_mark_ink(t) : t.textEmpty, t);
 
         // An out-of-scale note is dim on its own row too: the screen reads as the playable notes.
-        c.draw_text(pitch_class_name(degree_pitch_class(s.key, degree)), noteX, rowY,
-                    isOn ? t.textValue : t.textEmpty, CHAR_SPACING, FONT_SCALE);
+        c.text(pitch_class_name(degree_pitch_class(s.key, degree)), noteX, rowY,
+               isOn ? t.textValue : t.textEmpty);
 
         draw_cell(c, isOn ? "ON" : "--", valueX, rowY, isCursor, /*is_selected=*/false,
                   /*is_empty=*/!isOn, t.textValue, t);
