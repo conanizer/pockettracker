@@ -1245,7 +1245,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       HELP_NEW_ROW,
       "*EMPTY* shows nothing.",
       HELP_NEW_ROW,
-      "*GUIDE* names the cell you are on",
+      "*HINTS* names the cell you are on",
       "and tells what the buttons do."},
      {"A+D-PAD pick what it shows"}},
     /* SET_THEME */
@@ -1578,7 +1578,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"←/→ pick red, green, blue",
       "A+←/→ by 1, A+↑/↓ by 16"}},
     /* THEME_VIZ_BG */
-    {"TOP PANEL BACKGROUND", "The background of the top", "panel, the guide included.",
+    {"TOP PANEL BACKGROUND", "The background of the top", "panel, the hints included.",
      {},
      {"←/→ pick red, green, blue",
       "A+←/→ by 1, A+↑/↓ by 16"}},
@@ -1588,7 +1588,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"←/→ pick red, green, blue",
       "A+←/→ by 1, A+↑/↓ by 16"}},
     /* THEME_VIZ_WAVE */
-    {"TOP PANEL WAVEFORM", "The wave in the top panel, and", "the text of the guide.",
+    {"TOP PANEL WAVEFORM", "The wave in the top panel, and", "the text of the hints.",
      {},
      {"←/→ pick red, green, blue",
       "A+←/→ by 1, A+↑/↓ by 16"}},

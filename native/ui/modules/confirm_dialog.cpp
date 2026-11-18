@@ -57,6 +57,11 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
 }
 
+std::vector<const char*> confirm_dialog_note(ConfirmDialogState::Kind kind) {
+    if (kind == ConfirmDialogState::Kind::TOP_PANEL) return {"CHANGE IT LATER IN", "SETTINGS > TOP PANEL"};
+    return {};
+}
+
 std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind) {
     if (kind == ConfirmDialogState::Kind::COLLECT_EXISTS) return {"REPLACE", "NEW COPY", "CANCEL"};
     if (kind == ConfirmDialogState::Kind::CHANGE_TYPE)    return {"DISCARD", "KEEP", "CANCEL"};
@@ -66,8 +71,9 @@ std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind) {
 
 namespace {
 
-// The question, and its answers as cursor cells in place of "A=YES  B=NO". As wide as its text needs.
-void draw_choice_box(Canvas& c, const std::string& question,
+// The question, the note's lines under it, and the answers as cursor cells in place of
+// "A=YES  B=NO". As wide as its text needs; each note line makes it a line taller.
+void draw_choice_box(Canvas& c, const std::string& question, const std::vector<const char*>& note,
                      const std::vector<const char*>& answers, int chosen, const Theme& t) {
     constexpr int GAP = 24;   // between answers
     constexpr int PAD = 24;   // either side of the widest line
@@ -79,17 +85,31 @@ void draw_choice_box(Canvas& c, const std::string& question,
     int width = -GAP;
     for (const char* a : answers) width += width_of(a) + GAP;
 
-    const int boxW = std::max(BOX_W, std::max(width_of(question), width) + 2 * PAD);
+    int textW = std::max(width_of(question), width);
+    for (const char* line : note) textW = std::max(textW, width_of(line));
+
+    constexpr int NOTE_GAP = 8;   // sets the answers apart from the note above them
+    const int noteH = note.empty() ? 0 : static_cast<int>(note.size()) * DLG_LINE_PITCH + NOTE_GAP;
+    const int boxW = std::max(BOX_W, textW + 2 * PAD);
+    const int boxH = BOX_H + noteH;
     const int boxX = (DESIGN_W - boxW) / 2;
-    draw_modal_box(c, boxX, BOX_Y, boxW, BOX_H, t);
+    const int boxY = (DESIGN_H - boxH) / 2;
+    draw_modal_box(c, boxX, boxY, boxW, boxH, t);
 
-    c.draw_text(question, boxX + (boxW - width_of(question)) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle,
+    c.draw_text(question, boxX + (boxW - width_of(question)) / 2, boxY + DLG_TITLE_Y, t.textTitle,
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    int y = boxY + DLG_TITLE_Y + DLG_LINE_PITCH;
+    for (const char* line : note) {
+        c.draw_text(line, boxX + (boxW - width_of(line)) / 2, y, t.textParam, DLG_CHAR_SPACING,
+                    DLG_FONT_SCALE);
+        y += DLG_LINE_PITCH;
+    }
 
+    const int answersY = boxY + DLG_INSTR_Y + noteH;
     int x = boxX + (boxW - width) / 2;
     int i = 0;
     for (const char* a : answers) {
-        draw_cursor_cell(c, a, x, BOX_Y + DLG_INSTR_Y, i == chosen, t.textValue, t);
+        draw_cursor_cell(c, a, x, answersY, i == chosen, t.textValue, t);
         x += width_of(a) + GAP;
         ++i;
     }
@@ -102,7 +122,7 @@ void draw_confirm_dialog(Canvas& c, const ConfirmDialogState& s, const Theme& t)
     draw_modal_backdrop(c);
     const std::vector<const char*> answers = confirm_choices(s.kind);
     if (answers.empty()) draw_confirm_box(c, confirm_dialog_title(s.kind), t);
-    else                 draw_choice_box(c, confirm_dialog_title(s.kind), answers, s.arg, t);
+    else draw_choice_box(c, confirm_dialog_title(s.kind), confirm_dialog_note(s.kind), answers, s.arg, t);
 }
 
 }  // namespace pt::ui

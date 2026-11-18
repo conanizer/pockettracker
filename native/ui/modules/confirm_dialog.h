@@ -41,7 +41,7 @@ struct ConfirmDialogState {
     static constexpr int TYPE_KEEP    = 1;
     static constexpr int TYPE_CANCEL  = 2;
 
-    // TOP_PANEL's answers. YES sets SETTINGS > TOP PANEL to GUIDE; NO leaves it as it is.
+    // TOP_PANEL's answers. YES sets SETTINGS > TOP PANEL to HINTS; NO leaves it as it is.
     static constexpr int TOP_PANEL_YES = 0;
     static constexpr int TOP_PANEL_NO  = 1;
 
@@ -58,6 +58,9 @@ struct ConfirmDialogState {
 };
 
 std::string confirm_dialog_title(ConfirmDialogState::Kind kind);
+
+// Lines under the question, before the answers; empty for most.
+std::vector<const char*> confirm_dialog_note(ConfirmDialogState::Kind kind);
 
 // The answers a question offers in place of "A=YES  B=NO", left to right; empty for a yes/no one.
 std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind);

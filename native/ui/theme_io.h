@@ -16,6 +16,8 @@
 
 namespace pt::ui {
 
+// ⚠️ The words in settings.json, not the names on screen (FLAT is EMPTY, GUIDE is HINTS): renaming
+// one here resets every saved choice.
 inline const char* visualizer_serial_name(VisualizerType v) {
     switch (v) {
         case VisualizerType::SCOPE:          return "SCOPE";

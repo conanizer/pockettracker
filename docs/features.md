@@ -176,12 +176,12 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Theme editor: full RGB palette for every UI color; save and load themes as .ptt files
 - Several built-in themes to start from
-- The top panel shows an octascope (one scope per active track), a full octascope (all 8 track scopes forced on), a spectrum with peak hold, nothing — or the guide
+- The top panel shows an octascope (one scope per active track), a full octascope (all 8 track scopes forced on), a spectrum with peak hold, nothing — or hints
 
 ## Controls
 
 - Help on SELECT: a tap opens a page about the cell under the cursor and every control it has
-- The guide (SETTINGS → TOP PANEL): the top panel names the cell under the cursor and its controls, and while L, R or B is held, what that button does on this screen
+- Hints (SETTINGS → TOP PANEL → HINTS): the top panel names the cell under the cursor and its controls, and while L, R or B is held, what that button does on this screen
 - Hold A on a frequency or a time — a filter, an LFO, an envelope, the reverb and delay, TIC, a groove step — to read it in Hz or ms in the top panel
 - One-handed play (SETTINGS → ONE HAND): a button held alone stays down until pressed again, so every combination can be played one button at a time
 - Effect picker: hold A on an FX type to browse the commands grouped by what they act on, reading what each one does before you let go

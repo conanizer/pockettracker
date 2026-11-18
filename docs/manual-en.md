@@ -162,7 +162,7 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 | OCTA.F | All 8 track scopes at once (active or not) |
 | SPCT.P | FFT spectrum with peak-hold dots |
 | EMPTY | Blank bar (saves battery / CPU) |
-| GUIDE | What the cell under the cursor is, and its controls (see §5.2, *The guide*) |
+| HINTS | What the cell under the cursor is, and its controls (see §5.2, *Hints*) |
 
 **Main editor** — the active screen (PHRASE, CHAIN, SONG, etc.).
 
@@ -274,13 +274,13 @@ Both keyboard and gamepad work simultaneously.
 Tap **SELECT** for help on the cell the cursor is on: a page over the screen that says what the cell is and
 lists every control it has. Any button closes it, and that press does nothing else.
 
-#### The guide
+#### Hints
 
-With **SETTINGS → TOP PANEL** set to **GUIDE**, the top panel shows three lines that follow the cursor: what
+With **SETTINGS → TOP PANEL** set to **HINTS**, the top panel shows three lines that follow the cursor: what
 the cell is, then its two main controls. On an empty cell of SONG, CHAIN or PHRASE they say how to fill it.
 The two control lines change with what you hold:
 
-| Held | The guide shows |
+| Held | The hints show |
 |---|---|
 | R | The screens R + D-pad leads to from here, by name, and what else R does on this screen |
 | L | What the clipboard holds, and what L does on this screen |
@@ -289,9 +289,9 @@ The two control lines change with what you hold:
 | *(a selection is up)* | The size of the selection, and the buttons that work on it |
 
 On SONG in LIVE mode the lines say what START does there. A status message takes the first line while it
-lasts. The sample editor and the file browser have no top panel, so they have no guide.
+lasts. The sample editor and the file browser have no top panel, so they have no hints.
 
-The app asks once, when it starts, whether to turn the guide on.
+The app asks once, when it starts, whether to turn the hints on.
 
 ---
 
@@ -1715,7 +1715,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | ONE HAND | ON / OFF (+ MS) | For playing with one hand. With it on, **A**, **B**, **L**, **R** or **SELECT** held alone for a moment and let go stays down until you press it again, so a combination can be played one button at a time: lock R, then press B to mute. Its letter shows under the note monitor while it is held. A lock lets go by itself after a combination done in one go — delete, cut, paste, clone, a new selection — and when a question box opens; it stays for the ones you repeat, such as A + D-pad or a mute. **MS**, shown while it is on, sets how long the hold takes, from 150 to 1000 ms (300 by default). |
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 27). |
 | NOTE PREV | ON / OFF | On the PHRASE screen, play the note under the cursor for as long as you hold **A** — when you insert it, change it with A + D-pad, or just hold A on it. Not in selection mode, and not while playing. |
-| TOP PANEL | OCTA / OCTA.F / SPCT.P / EMPTY / GUIDE | What the strip across the top shows: a visualizer, nothing, or the guide (see §3 for descriptions). |
+| TOP PANEL | OCTA / OCTA.F / SPCT.P / EMPTY / HINTS | What the strip across the top shows: a visualizer, nothing, or hints (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 | ABXY | AUTO / XBOX / NINTENDO | Which face button your controller has **printed** A. Appears only while a controller is attached. **AUTO** trusts the controller and is right for a handheld's built-in pad and for a real Switch pad. Use **NINTENDO** if A is the right-hand button but the app reads it as B - common with 8BitDo pads in XInput mode, which report themselves as Xbox controllers. **XBOX** = A is the bottom button. Keyboard keys are never affected. |

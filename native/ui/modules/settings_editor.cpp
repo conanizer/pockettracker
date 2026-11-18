@@ -108,7 +108,7 @@ void cell_apply(const Cell& c, V& v, int value) {
 
 const std::vector<std::string>& SettingsModule::visualizer_names() {
     static const std::vector<std::string> names = {
-        "SCOPE", "EMPTY", "OCTA", "OCTA.F", "SPECT", "SPCT.P", "GUIDE",
+        "SCOPE", "EMPTY", "OCTA", "OCTA.F", "SPECT", "SPCT.P", "HINTS",
     };
     return names;
 }
