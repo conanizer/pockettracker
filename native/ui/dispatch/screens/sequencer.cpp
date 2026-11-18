@@ -177,6 +177,10 @@ GestureResult InputDispatcher::chain_screen(Gesture g) {
 GestureResult InputDispatcher::phrase_screen(Gesture g) {
     switch (g) {
         case Gesture::A:
+            if (on_phrase_instrument_cell()) {
+                open_instrument_picker();
+                return GestureResult::TAKEN;
+            }
             if (open_sub_screen_at_cursor(/*peek=*/false)) return GestureResult::TAKEN;
             if (fx_insert_last(/*peek=*/false)) return GestureResult::TAKEN;
             phrase_insert();

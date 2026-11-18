@@ -581,7 +581,7 @@ The phrase editor has 16 rows (steps 00–0F) and 5 columns:
 |---|---|
 | N | Note (`C-4`, `F#3`, etc.). `---` = no note. |
 | V | Velocity — how hard the note is played (`00`–`7F`). Always set — `7F` = full, applied on top of instrument VOL. |
-| I | Instrument ID (`00`–`7F`). Always set — no empty state. |
+| I | Instrument ID (`00`–`7F`). Always set — no empty state. Tap **A** to pick one from a list of every instrument by name: **UP/DOWN** move, **LEFT/RIGHT** page, **A** chooses, **B** cancels. |
 | FX1/FX2/FX3 | Effect type + value (e.g., `RPT 03`, `ARP 47`) |
 
 Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **C-0 to G-9**. Middle C = `C-4` (MIDI note 60).

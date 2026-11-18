@@ -540,6 +540,11 @@ class InputDispatcher {
     bool on_map_dest_cell() const;
     void apply_map_picker_choice();
 
+    // ── The instrument list over a phrase's instrument cell (ui/dispatch/layers/instrument_picker.cpp)
+    GestureResult instrument_picker_layer(Gesture g);
+    bool on_phrase_instrument_cell() const;
+    void open_instrument_picker();
+
     // ── The layer stack ──────────────────────────────────────────────────────────────────────────
     // A gesture a layer does not answer is swallowed, so a new layer is one row in `OVERLAYS` plus its
     // case here.

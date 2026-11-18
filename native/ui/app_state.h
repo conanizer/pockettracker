@@ -10,6 +10,7 @@
 #include "theme.h"
 #include "ui/folder_config.h"
 #include "ui/fx_helper.h"
+#include "ui/instrument_picker.h"
 #include "ui/map_picker.h"
 #include "ui/modules/confirm_dialog.h"
 #include "ui/modules/effects_editor.h"
@@ -170,6 +171,7 @@ struct AppState {
 
     FxHelperState fxHelper{};     // ui/fx_helper.h
     MapPickerState mapPicker{};   // ui/map_picker.h
+    InstrumentPickerState instrumentPicker{};   // ui/instrument_picker.h
 
     FileBrowserState fileBrowser{};
 

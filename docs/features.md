@@ -184,6 +184,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Hints (SETTINGS → TOP PANEL → HINTS): the top panel names the cell under the cursor and its controls, and while L, R or B is held, what that button does on this screen
 - Hold A on a frequency or a time — a filter, an LFO, an envelope, the reverb and delay, TIC, a groove step — to read it in Hz or ms in the top panel
 - One-handed play (SETTINGS → ONE HAND): a button held alone stays down until pressed again, so every combination can be played one button at a time
+- Instrument picker: tap A on a phrase step's instrument to choose from a list of every instrument by name
 - Effect picker: hold A on an FX type to browse the commands grouped by what they act on, reading what each one does before you let go
 - Song-relative navigation, on by default: B+D-pad walks the arrangement instead of the 00–FF pools, so the chain and phrase on screen are always the ones the song plays (SETTINGS → NAV = POOL restores the old behaviour)
 - Full physical button support (tested on Miyoo Flip and Ayaneo Pocket Air Mini)

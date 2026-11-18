@@ -12,6 +12,7 @@
 #include "ui/fx_columns.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
+#include "ui/modules/instrument_picker_overlay.h"
 #include "ui/modules/map_picker_overlay.h"
 #include "ui/modules/render_dialog.h"
 #include "ui/overlays.h"
@@ -368,6 +369,9 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
         if (!OVERLAYS[i].up(s)) continue;
         switch (OVERLAYS[i].id) {
             case Overlay::MAP_PICKER: draw_map_picker(c, s.mapPicker, t); break;
+            case Overlay::INSTRUMENT_PICKER:
+                if (s.project) draw_instrument_picker(c, s.instrumentPicker, s.project->instruments, t);
+                break;
             case Overlay::FX_HELPER:  draw_fx_helper(c, s.fxHelper, t); break;
             case Overlay::SEND:
                 draw_send_editor(c, s.sendEditor, *s.project, t);

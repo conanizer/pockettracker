@@ -355,6 +355,7 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/eq.cpp
         ui/dispatch/layers/fx_helper.cpp
         ui/dispatch/layers/map_picker.cpp
+        ui/dispatch/layers/instrument_picker.cpp
         ui/dispatch/layers/qwerty.cpp
         ui/dispatch/layers/render_dialog.cpp
         ui/dispatch/layers/send_editor.cpp
@@ -389,6 +390,7 @@ add_library(pt-ui STATIC
         ui/modules/file_browser.cpp
         ui/modules/fx_helper_overlay.cpp
         ui/modules/map_picker_overlay.cpp
+        ui/modules/instrument_picker_overlay.cpp
         ui/modules/groove_editor.cpp
         ui/modules/help_overlay.cpp
         ui/modules/help_panel.cpp

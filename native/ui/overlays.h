@@ -13,7 +13,7 @@ namespace pt::ui {
 
 enum class Overlay {
     LOADING, CONFIRM, SAMPLE_CLOSE, RENDER_DIALOG, HELP_FULL, QWERTY, THEME, EQ, SEND, STRETCH, FX_HELPER,
-    MAP_PICKER,
+    MAP_PICKER, INSTRUMENT_PICKER,
 };
 
 struct OverlayRow {
@@ -45,6 +45,7 @@ inline constexpr OverlayRow OVERLAYS[] = {
     // Not a modal, but it owns the buttons the same way.
     {Overlay::FX_HELPER,     [](const AppState& s) { return s.fxHelper.isOpen; },          true,  false, false},
     {Overlay::MAP_PICKER,    [](const AppState& s) { return s.mapPicker.isOpen; },         true,  false, false},
+    {Overlay::INSTRUMENT_PICKER, [](const AppState& s) { return s.instrumentPicker.isOpen; }, true, false, false},
 };
 
 // The one on top, or null.

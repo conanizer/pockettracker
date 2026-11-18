@@ -1,0 +1,60 @@
+#include "ui/modules/instrument_picker_overlay.h"
+
+#include <string>
+
+#include "ui/helpers.h"
+#include "ui/value_hint.h"
+
+namespace pt::ui {
+
+namespace {
+
+// As wide as the hint. A longer name is cut.
+constexpr int TEXT_COLS  = 18;
+constexpr int TEXT_INSET = 14;
+constexpr int BAR_INSET  = 8;   // the cursor bar
+constexpr int BOX_W      = 2 * TEXT_INSET + TEXT_COLS * CHAR_W - CHAR_SPACING;
+constexpr int BOX_X      = (DESIGN_W - BOX_W) / 2;
+constexpr int GAP        = 6;   // air above and below the list
+constexpr int NAME_X     = 3 * CHAR_W;   // after "0C "
+static_assert(BOX_W + 2 * (MODAL_BORDER - 1) <= DESIGN_W, "the instrument list is wider than the screen");
+
+// The title, air, the rows, air, the hint.
+constexpr int BOX_H = 2 * BAR_INSET + ROW_HEIGHT + GAP + INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP + ROW_HEIGHT;
+static_assert(BOX_H + 2 * (MODAL_BORDER - 1) <= DESIGN_H, "the instrument list is taller than the screen");
+
+}  // namespace
+
+void draw_instrument_picker(Canvas& c, const InstrumentPickerState& s,
+                            const std::vector<songcore::Instrument>& instruments, const Theme& t) {
+    if (!s.isOpen) return;
+    c.reset_clip();
+
+    const int BOX_Y = (DESIGN_H - BOX_H) / 2;
+    draw_modal_backdrop(c);
+    draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
+
+    const int x = BOX_X + TEXT_INSET;
+    int       y = BOX_Y + BAR_INSET;
+    c.draw_text("INSTRUMENT", x, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    y += ROW_HEIGHT + GAP;
+
+    const int n = static_cast<int>(instruments.size());
+    for (int i = s.top; i < n && i < s.count && i < s.top + INSTRUMENT_PICKER_ROWS; ++i) {
+        const songcore::Instrument& ins      = instruments[static_cast<size_t>(i)];
+        const int                   ry       = y + (i - s.top) * ROW_HEIGHT;
+        const bool                  isCursor = i == s.cursor;
+        const std::string           name     = instrument_label(ins);
+        const bool                  dim      = name == "EMPTY";
+        if (isCursor) c.fill_rect(BOX_X + BAR_INSET, ry, BOX_W - 2 * BAR_INSET, ROW_HEIGHT, t.rowCursor);
+        const Argb ink = isCursor ? cursor_cell_ink(t) : dim ? t.textEmpty : t.textValue;
+        c.draw_text(hex2(i), x, ry + TEXT_PADDING, isCursor ? ink : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(Canvas::clip_text(name, TEXT_COLS - 3), x + NAME_X, ry + TEXT_PADDING, ink, CHAR_SPACING,
+                    FONT_SCALE);
+    }
+    y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
+
+    c.draw_text("A=CHOOSE  B=CANCEL", x, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+}
+
+}  // namespace pt::ui

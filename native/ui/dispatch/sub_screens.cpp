@@ -40,6 +40,8 @@ bool InputDispatcher::defer_a_to_release() const {
             break;
         case ScreenType::PHRASE:
         case ScreenType::TABLE:
+            // The instrument cell's list opens on the release, so A+D-pad still steps the number.
+            if (on_phrase_instrument_cell()) return true;
             if (self.fx_insert_last(/*peek=*/true)) return true;
             break;
         default:
