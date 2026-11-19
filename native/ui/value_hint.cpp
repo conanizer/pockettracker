@@ -138,7 +138,7 @@ ValueHint instrument_hint(int value, const AppState& s) {
 
 }  // namespace
 
-ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
+ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactMs) {
     if (!s.project) return {};
     const songcore::Project& p     = *s.project;
     const int                tempo = p.tempo;
@@ -215,8 +215,8 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
             // Fixed in time; the tics are what it comes to at this tempo, to place it against the steps.
             const int scale = unit == ValueUnit::ENV_TIME ? songcore::ENV_SCALE_LOG
                             : static_cast<int>(unit) - static_cast<int>(ValueUnit::ENV_TIME_LINEAR);   // CURVE_*
-            const double ms = songcore::env_ms(value, scale);
-            if (ms <= 0.0) return {"INSTANT", ""};   // ENV only: the curves start at 1 ms
+            const double ms = exactMs >= 0.0 ? exactMs : songcore::env_ms(value, scale);
+            if (ms <= 0.0) return {"INSTANT", ""};
             char tics[48];
             std::snprintf(tics, sizeof(tics), "%.1f TICKS AT %d BPM", ms / songcore::tics_ms(1, tempo), tempo);
             return {format_ms(ms), tics};
@@ -232,7 +232,7 @@ ValueHint held_value_hint(const AppState& s) {
     if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return {};
     const CursorContext k = s.cellUnderCursor();
     if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return {};
-    return value_hint(k.unit, k.currentValue, s);
+    return value_hint(k.unit, k.currentValue, s, k.exactMs);
 }
 
 }  // namespace pt::ui

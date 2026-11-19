@@ -215,10 +215,12 @@ inline int env_value_from_tics(int tics, int tempo, int scale) {
 }
 
 // The other way, for a build that still counts tics: the nearest count, 1 at the least, FF at most.
-inline int env_tics_from_value(int v, int tempo, int scale) {
-    if (v <= 0) return 0;
-    const long t = std::lround(env_ms(v, scale) / tics_ms(1, std::max(1, tempo)));
+inline int env_tics_from_ms(double ms, int tempo) {
+    const long t = std::lround(ms / tics_ms(1, std::max(1, tempo)));
     return static_cast<int>(std::clamp(t, 1L, 255L));
+}
+inline int env_tics_from_value(int v, int tempo, int scale) {
+    return v <= 0 ? 0 : env_tics_from_ms(env_ms(v, scale), tempo);
 }
 
 // An LFO's FREQ: 0.08 Hz at 00 to 20 Hz at FF, in even steps.

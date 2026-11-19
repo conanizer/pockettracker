@@ -136,15 +136,23 @@ inline Table parse_table(const json& j, int index) {
     return t;
 }
 
-// An AHD/ADSR time onto `scale`. The value as shown is stored under `valueKey`; older files kept it
-// on the 1 ms..10 s log scale (`logKey`) or in tics (`ticsKey`), heard at `tempo` — both read as ms,
-// then re-picked.
+// An AHD/ADSR time onto `scale`. The value as shown is stored under `valueKey`. An older file kept it on
+// the 1 ms..10 s log scale (`logKey`) or in tics (`ticsKey`), heard at `tempo`: the row takes the nearest
+// value and keeps the exact time. In such a file a missing time is 0 tics, and also keeps it.
 inline int parse_env_time(const json& j, const char* valueKey, const char* logKey, const char* ticsKey,
-                          int tempo, int scale) {
+                          int tempo, int scale, bool older, KeptEnvTime& kept) {
     if (j.find(valueKey) != j.end()) return std::clamp(get_int(j, valueKey, 0), 0, 255);
-    if (j.find(logKey) != j.end())
-        return env_value_from_ms(env_ms(get_int(j, logKey, 0), ENV_SCALE_LOG), scale);
-    return env_value_from_tics(get_int(j, ticsKey, 0), tempo, scale);
+    double ms;
+    if (j.find(logKey) != j.end()) {
+        ms = env_ms(get_int(j, logKey, 0), ENV_SCALE_LOG);
+    } else {
+        const int tics = get_int(j, ticsKey, 0);
+        if (tics <= 0 && !older) return 0;
+        ms = tics_ms(std::max(tics, 0), std::max(1, tempo));
+    }
+    const int v = env_value_from_ms(ms, scale);
+    kept = {v, scale, static_cast<int>(std::lround(ms * 1000.0))};
+    return v;
 }
 
 inline ModSlot parse_mod_slot(const json& j, int tempo) {
@@ -157,10 +165,20 @@ inline ModSlot parse_mod_slot(const json& j, int tempo) {
     m.curve       = std::clamp(get_int(j, "curve", m.curve), 0, 2);   // before the times: their scale
     if (m.type == ModType::AHD || m.type == ModType::ADSR) {
         const int sc = m.curve;
-        m.attack  = parse_env_time(j, "attackValue",  "attackTime",  "attack",  tempo, sc);
-        m.hold    = parse_env_time(j, "holdValue",    "holdTime",    "hold",    tempo, sc);
-        m.decay   = parse_env_time(j, "decayValue",   "decayTime",   "decay",   tempo, sc);
-        m.release = parse_env_time(j, "releaseValue", "releaseTime", "release", tempo, sc);
+        bool older = j.find("exactUs") == j.end();
+        for (const char* k : {"attackValue", "holdValue", "decayValue", "releaseValue",
+                              "attackTime", "holdTime", "decayTime", "releaseTime"})
+            older = older && j.find(k) == j.end();
+        m.attack  = parse_env_time(j, "attackValue",  "attackTime",  "attack",  tempo, sc, older, m.kept[ENV_ATTACK]);
+        m.hold    = parse_env_time(j, "holdValue",    "holdTime",    "hold",    tempo, sc, older, m.kept[ENV_HOLD]);
+        m.decay   = parse_env_time(j, "decayValue",   "decayTime",   "decay",   tempo, sc, older, m.kept[ENV_DECAY]);
+        m.release = parse_env_time(j, "releaseValue", "releaseTime", "release", tempo, sc, older, m.kept[ENV_RELEASE]);
+        if (auto it = j.find("exactUs"); it != j.end() && it->is_array() && it->size() == ENV_TIME_ROWS)
+            for (int r = 0; r < ENV_TIME_ROWS; ++r) {
+                const json& e = (*it)[static_cast<size_t>(r)];
+                if (e.is_number_integer() && e.get<int>() >= 0)
+                    m.kept[r] = {env_row_value(m, static_cast<EnvTimeRow>(r)), sc, e.get<int>()};
+            }
     } else {   // ENV's were always times; nothing else uses them
         m.attack  = get_int(j, "attack",  m.attack);
         m.hold    = get_int(j, "hold",    m.hold);
@@ -666,28 +684,43 @@ inline void emit_table(JsonWriter& w, const Table& t) {
 }
 
 // AHD and ADSR times go under the `…Value` keys, and as tics at `tempo` under the old ones, for a
-// build that still counts tics. ⚠️ Such a build saves only the tics; they are read back as above.
+// build that still counts tics; `exactUs` holds the kept times, −1 where a row has none. A slot with
+// neither a time nor a kept one says so with `attackValue`, or it would read as an older file's.
 inline void emit_mod_slot(JsonWriter& w, const ModSlot& m, int tempo) {
     w.begin_object();
     if (m.type != ModType::NONE) w.field_string("type", mod_type_name(m.type));
     if (m.dest != ModDest::NONE) w.field_string("dest", mod_dest_name(m.dest));
     if (m.amount      != 0xFF) w.field_int("amount",      m.amount);
     const bool timed = m.type == ModType::AHD || m.type == ModType::ADSR;
-    const auto time  = [&](const char* key, const char* ticsKey, int v) {
-        if (v == 0x00) return;
+    bool anyKept = false;
+    for (int r = 0; r < ENV_TIME_ROWS; ++r) anyKept = anyKept || env_row_kept(m, static_cast<EnvTimeRow>(r));
+    if (timed && !anyKept && !(m.attack | m.hold | m.decay | m.release)) w.field_int("attackValue", 0);
+    const auto time = [&](const char* key, const char* ticsKey, EnvTimeRow r) {
+        const int  v    = env_row_value(m, r);
+        const bool kept = env_row_kept(m, r);
+        if (v == 0x00 && !(kept && m.kept[r].us > 0)) return;
         if (timed) w.field_int(key, v);
-        w.field_int(ticsKey, timed ? env_tics_from_value(v, tempo, m.curve) : v);
+        w.field_int(ticsKey, timed ? env_tics_from_ms(env_row_ms(m, r), tempo) : v);
     };
-    time("attackValue", "attack", m.attack);
-    time("holdValue",   "hold",   m.hold);
-    time("decayValue",  "decay",  m.decay);
+    time("attackValue", "attack", ENV_ATTACK);
+    time("holdValue",   "hold",   ENV_HOLD);
+    time("decayValue",  "decay",  ENV_DECAY);
     if (m.sustain     != 0x80) w.field_int("sustain",     m.sustain);
-    time("releaseValue", "release", m.release);
+    time("releaseValue", "release", ENV_RELEASE);
     if (m.oscShape    != 0x00) w.field_int("oscShape",    m.oscShape);
     if (m.lfoTrigMode != 0x00) w.field_int("lfoTrigMode", m.lfoTrigMode);
     if (m.lfoPolarity != 0)    w.field_int("lfoPolarity", m.lfoPolarity);
     if (m.lfoFreq     != 0x40) w.field_int("lfoFreq",     m.lfoFreq);
     if (m.curve       != 0)    w.field_int("curve",       m.curve);
+    if (anyKept) {
+        w.key("exactUs");
+        w.begin_array();
+        for (int r = 0; r < ENV_TIME_ROWS; ++r) {
+            w.element();
+            w.value_int(env_row_kept(m, static_cast<EnvTimeRow>(r)) ? m.kept[r].us : -1);
+        }
+        w.end_array();
+    }
     w.end_object();
 }
 

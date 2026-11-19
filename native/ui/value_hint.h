@@ -18,7 +18,7 @@ struct ValueHint {
     std::string detail;
 };
 
-ValueHint value_hint(ValueUnit unit, int value, const AppState& s);
+ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactMs = -1.0);
 
 // The hint for the cell under the cursor while A is held on it; empty with A up, in a selection, on an
 // empty cell and on one that names no unit.

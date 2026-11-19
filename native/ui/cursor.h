@@ -98,6 +98,7 @@ struct CursorContext {
     int                scaleKey  = 0;
 
     ValueUnit          unit = ValueUnit::NONE;
+    double             exactMs = -1.0;   // what an envelope row really plays, when not its value's time
 
     CursorContext as(ValueUnit u) const {
         CursorContext c = *this;

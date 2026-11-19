@@ -206,7 +206,13 @@ CursorContext ModulationModule::cursor_context(const ModulationState& s) const {
             const int scale = songcore::env_scale(slot);
             const ValueUnit unit = scale == songcore::ENV_SCALE_LOG ? ValueUnit::ENV_TIME
                 : static_cast<ValueUnit>(static_cast<int>(ValueUnit::ENV_TIME_LINEAR) + scale);
-            return cc::plain_byte(slot.*r.field, r.def).as(unit);
+            CursorContext k = cc::plain_byte(slot.*r.field, r.def).as(unit);
+            const songcore::EnvTimeRow time = r.field == &ModSlot::attack ? songcore::ENV_ATTACK
+                                            : r.field == &ModSlot::hold   ? songcore::ENV_HOLD
+                                            : r.field == &ModSlot::decay  ? songcore::ENV_DECAY
+                                                                          : songcore::ENV_RELEASE;
+            if (songcore::env_row_kept(slot, time)) k.exactMs = songcore::env_row_ms(slot, time);
+            return k;
         }
         case Kind::CHOICE:
             return cc::index_cycle(slot.*r.field, static_cast<int>(r.names().size()));

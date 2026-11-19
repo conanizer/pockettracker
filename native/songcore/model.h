@@ -286,6 +286,15 @@ struct Table {
     explicit Table(int id_) : id(id_), name(default_table_name(id_)) {}
 };
 
+// An envelope row's exact time from an older song, which counted tics: it plays while the row still
+// holds `value` on `curve`, so editing either hands the row back to its own scale.
+struct KeptEnvTime {
+    int value = -1;   // −1 = none
+    int curve = 0;
+    int us    = 0;
+};
+enum EnvTimeRow { ENV_ATTACK, ENV_HOLD, ENV_DECAY, ENV_RELEASE, ENV_TIME_ROWS };
+
 struct ModSlot {
     ModType type = ModType::NONE;
     ModDest dest = ModDest::NONE;
@@ -299,10 +308,27 @@ struct ModSlot {
     // ⚠️ LINEAR is what a file without the key means, so older songs keep their sound; a slot the user
     // turns into AHD/ADSR starts ANALOG.
     int curve = CURVE_LINEAR;
+    KeptEnvTime kept[ENV_TIME_ROWS];   // by EnvTimeRow
 };
 
 // Which scale the slot's ATK, HOLD, DEC and REL values are read on (`env_ms`).
 inline int env_scale(const ModSlot& m) { return m.type == ModType::ENV ? ENV_SCALE_LOG : m.curve; }
+
+inline int env_row_value(const ModSlot& m, EnvTimeRow r) {
+    return r == ENV_ATTACK ? m.attack : r == ENV_HOLD ? m.hold : r == ENV_DECAY ? m.decay : m.release;
+}
+
+// The row's kept time, if it still applies.
+inline bool env_row_kept(const ModSlot& m, EnvTimeRow r) {
+    const KeptEnvTime& k = m.kept[r];
+    return (m.type == ModType::AHD || m.type == ModType::ADSR) && k.value >= 0 &&
+           k.value == env_row_value(m, r) && k.curve == m.curve;
+}
+
+// What the row plays, in ms.
+inline double env_row_ms(const ModSlot& m, EnvTimeRow r) {
+    return env_row_kept(m, r) ? m.kept[r].us / 1000.0 : env_ms(env_row_value(m, r), env_scale(m));
+}
 
 // A new groove: two plain 12-tic steps — no groove, but the pair its swing bends is on screen.
 // 12 is `TICS_PER_STEP`, spelled out because timing.h includes this file (groove_bank.h asserts it).

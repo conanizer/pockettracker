@@ -81,9 +81,9 @@ struct ModPushes {
     bool anyActive = false;   // false → the caller instead issues clearInstrumentModulation(id)
 };
 
-// An envelope time in frames, on the slot's scale.
-inline int env_frames(int v, int scale, int sampleRate) {
-    return static_cast<int>(env_ms(v, scale) * 0.001 * sampleRate + 0.5);
+// An envelope row's time in frames.
+inline int env_frames(const ModSlot& slot, EnvTimeRow row, int sampleRate) {
+    return static_cast<int>(env_row_ms(slot, row) * 0.001 * sampleRate + 0.5);
 }
 
 // ⚠️ "off" is the answer for any name this does not know, so a newer build's project opens with the
@@ -109,21 +109,20 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int sampleRate) {
     for (int i = 0; i < 4 && i < static_cast<int>(ins.modSlots.size()); ++i) {
         const ModSlot& slot = ins.modSlots[i];
         if (slot.dest == ModDest::NONE) continue;
-        const int scale = env_scale(slot);
-        const auto time = [sampleRate, scale](int v) { return env_frames(v, scale, sampleRate); };
+        const auto time = [&](EnvTimeRow row) { return env_frames(slot, row, sampleRate); };
         EngineModSlot& p = out.slots[i];
 
         switch (slot.type) {
             case ModType::AHD:
-                p.attackSamples = time(slot.attack);
-                p.holdSamples   = time(slot.hold);
-                p.decaySamples  = time(slot.decay);
+                p.attackSamples = time(ENV_ATTACK);
+                p.holdSamples   = time(ENV_HOLD);
+                p.decaySamples  = time(ENV_DECAY);
                 break;
             case ModType::ADSR:
             case ModType::ENV:   // a curved ADSR on the same times
-                p.attackSamples  = time(slot.attack);
-                p.decaySamples   = time(slot.decay);
-                p.releaseSamples = time(slot.release);
+                p.attackSamples  = time(ENV_ATTACK);
+                p.decaySamples   = time(ENV_DECAY);
+                p.releaseSamples = time(ENV_RELEASE);
                 p.sustainLevel   = slot.sustain / 255.0f;
                 break;
             case ModType::LFO:
