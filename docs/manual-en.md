@@ -692,7 +692,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | LOOP END | 00–FF | Loop end point. `FF` = sample end. Loop region is [LOOP ST, LOOP END] — see below. |
 | REVERSE | OFF / ON | Reverse playback. |
 | SLICE | OFF / CUT / TRU | Slice playback mode (see below). |
-| FILTER | LP / HP / BP / OFF | Resonant SVF filter type. |
+| FILTER | OFF / LP / LD / K35 / BP / NT / HP | Filter type: low-pass, a soft, warm ladder low-pass, a raw low-pass that growls as its resonance rises, band-pass, notch and high-pass. |
 | CUT | 00–FF | Filter cutoff frequency. `FF` = open. |
 | RES | 00–FF | Filter resonance. `00` = none. |
 | DRIVE | 00–FF | Soft-clipping overdrive. `00` = off. |

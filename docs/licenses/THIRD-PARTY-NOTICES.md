@@ -115,8 +115,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## DaisySP — MIT **and** LGPL-2.1 (mixed; see the split below)
 
-Used for: SVF filter, overdrive, decimator/bitcrush, limiter, compressor, crossfade, balance,
-ReverbSc (`native/effects/primitives/daisysp/`).
+Used for: SVF filter, the Moog ladder filter, overdrive, decimator/bitcrush, limiter, compressor,
+crossfade, balance, ReverbSc (`native/effects/primitives/daisysp/`).
 
 ⚠️ **DaisySP is not uniformly MIT, and the files PocketTracker compiles land on both sides.**
 Three of the eight are LGPL-2.1 because they descend from Csound and Faust/GRAME rather than from
@@ -132,6 +132,7 @@ Electrosmith's own code. Verified by reading the banner of each compiled file:
 | **`compressor`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, GRAME, Centre National de Creation Musicale |
 | **`balance`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, Barry Vercoe, john ffitch, Gabriel Maldonado |
 | **`reverbsc`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, Sean Costello, Istvan Varga, Paul Batchelor |
+| **`moogladder`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, Victor Lazzarini, John ffitch (fast tanh), Bob Moog — from DaisySP-LGPL, changed (the file says how) |
 
 **On the LGPL-2.1 three:** PocketTracker as a whole is GPL-3.0-or-later. LGPL-2.1 **§3** expressly
 permits applying "the ordinary GNU General Public License" version 2 "or any later version" to a
@@ -164,6 +165,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## sst-filters — GPL-3.0-or-later, and Odin 2 — GPL-3.0
+
+Used for: the K35 filter type (`native/effects/primitives/k35-filter.h`), sst-filters' `K35Filter`, which
+it adapted from Odin 2's `Korg35Filter`. sst-filters: copyright 2019-2025 the Surge Synth Team
+(https://github.com/surge-synthesizer/sst-filters). Odin 2: copyright TheWaveWarden
+(https://github.com/TheWaveWarden/odin2). Both GPL-3.0, the same licence as PocketTracker; its text is `LICENSE`.
 
 ---
 

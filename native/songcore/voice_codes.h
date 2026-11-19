@@ -69,9 +69,11 @@ struct EngineModSlot {
     int   lfoPolarity    = LFO_BI;
 };
 
-// The engine's filter. The project stores the name ("lp"…), not the number. All are taps of one
-// state-variable filter; the app never offers PEAK, the tools' wave plugin does.
-enum FilterType : int { FILTER_OFF, FILTER_LP, FILTER_HP, FILTER_BP, FILTER_NOTCH, FILTER_PEAK };
+// The engine's filter. The project stores the name ("lp", "k35"…), not the number. LP to PEAK are taps
+// of one state-variable filter; the app never offers PEAK, the tools' wave plugin does.
+enum FilterType : int {
+    FILTER_OFF, FILTER_LP, FILTER_HP, FILTER_BP, FILTER_NOTCH, FILTER_PEAK, FILTER_K35, FILTER_LADDER
+};
 
 }  // namespace songcore
 

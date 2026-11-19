@@ -31,7 +31,7 @@ inline const std::vector<std::string>& slice_modes() {
     return v;
 }
 inline const std::vector<std::string>& filter_types() {
-    static const std::vector<std::string> v{"off", "lp", "hp", "bp"};
+    static const std::vector<std::string> v{"off", "lp", "ld", "k35", "bp", "nt", "hp"};
     return v;
 }
 inline const std::vector<std::string>& loop_modes() {

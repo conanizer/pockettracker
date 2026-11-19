@@ -1988,8 +1988,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+←/→ by 1, A+↑/↓ by 16",
       "A+B reset to 80",
       "A+START play instrument"}},
-    /* MOD_POLARITY */
-    {"LFO POLARITY", "BI swings both ways, UNI+ only", "up from the setting, UNI- down.",
+    /* MOD_POLARITY */    {"LFO POLARITY", "BI swings both ways, UNI+ only", "up from the setting, UNI- down.",
      {"*BI* is how a vibrato moves.",
       "",
       "*UNI+* goes up by AMT from the",
@@ -1999,8 +1998,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "*UNI-* goes down by AMT: on VOL it",
       "dips, on PITCH it bends down."},
      {"A+D-PAD pick BI, UNI+ or UNI-"}},
-    /* MOD_CURVE */
-    {"ENVELOPE CURVE", "Three shapes, from straight", "to the most curved.",
+    /* MOD_CURVE */    {"ENVELOPE CURVE", "Three shapes, from straight", "to the most curved.",
      {"*LINEAR* rises and falls in",
       "straight lines.",
       "",
@@ -2015,8 +2013,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "number is longest on LINEAR and",
       "shortest on FAST."},
      {"A+D-PAD switch"}},
-    /* MOD_TRK_AMOUNT */
-    {"KEY TRACKING AMOUNT", "How far a note one octave from", "C-4 moves the setting.",
+    /* MOD_TRK_AMOUNT */    {"KEY TRACKING AMOUNT", "How far a note one octave from", "C-4 moves the setting.",
      {"At FF the filter cutoff follows",
       "the note exactly: an octave up",
       "opens it an octave. Any other",

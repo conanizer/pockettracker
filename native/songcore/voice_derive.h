@@ -97,9 +97,12 @@ inline int loop_mode_code(const std::string& mode) {
 
 // The engine's filter for the stored name; any other name is OFF.
 inline FilterType filter_type_code(const std::string& type) {
-    if (type == "lp") return FILTER_LP;
-    if (type == "hp") return FILTER_HP;
-    if (type == "bp") return FILTER_BP;
+    if (type == "lp")  return FILTER_LP;
+    if (type == "hp")  return FILTER_HP;
+    if (type == "bp")  return FILTER_BP;
+    if (type == "nt")  return FILTER_NOTCH;
+    if (type == "k35") return FILTER_K35;
+    if (type == "ld")  return FILTER_LADDER;
     return FILTER_OFF;
 }
 

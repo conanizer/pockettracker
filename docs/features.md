@@ -89,7 +89,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
 - Non-destructive start and end point trimming
-- Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
+- Per-instrument real-time effects: low/high/band-pass and notch filter, a raw, growling low-pass and a soft ladder low-pass, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
 - 4 modulation slots per instrument: envelopes (AHD and ADSR, each linear, gently curved like an analog synth, or sharply curved), LFO (swinging both ways, only up or only down) key tracking and velocity, targeting volume, pitch, filter, pan and more — or the amount or speed of any other slot
 - Save and load instruments as preset files (.pti) — bundles all parameters, table, and modulation settings together
 
