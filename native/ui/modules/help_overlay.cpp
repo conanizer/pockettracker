@@ -71,9 +71,9 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
         else draw_prose_word(c, word, bytes, wx, wy, marked, t.textValue, t.vizWave);
     });
 
-    constexpr const char* HINT = "ANY BUTTON CLOSES";
-    const int hintW = static_cast<int>(std::char_traits<char>::length(HINT)) * CHAR_W - CHAR_SPACING;
-    c.text(HINT, BOX_X + (BOX_W - hintW) / 2, boxY + hint_dy(boxH) + TEXT_PADDING, t.textEmpty);
+    const std::string hint  = c.cased("ANY BUTTON CLOSES");
+    const int         hintW = static_cast<int>(hint.size()) * CHAR_W - CHAR_SPACING;
+    c.text(hint, BOX_X + (BOX_W - hintW) / 2, boxY + hint_dy(boxH) + TEXT_PADDING, t.textEmpty);
 }
 
 }  // namespace pt::ui

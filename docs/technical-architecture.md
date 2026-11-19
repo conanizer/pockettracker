@@ -273,11 +273,11 @@ the voices still pointing at it through a per-slot generation rather than a stop
 ### Signal path
 
 ```
-  voice ─► instrument chain (Crush → Drive → Filter) ─► instrument EQ ─┬─► track fader ─┐
-                                                                       ├─► reverb bus ─┤
-                                                                       └─► delay bus ──┤
-                                                                                       ▼
-                                    out ◄─ Limiter ◄─ OTT | DUST ◄─ master EQ ◄─ MASTER FADER
+  voice ─► instrument chain (Crush → Drive → Filter) ─► instrument EQ ─┬─► instrument VOL ─► track fader ─┐
+                                                                       ├─► reverb bus ──────────────────┤
+                                                                       └─► delay bus ───────────────────┤
+                                                                                                        ▼
+                                                     out ◄─ Limiter ◄─ OTT | DUST ◄─ master EQ ◄─ MASTER FADER
 ```
 
 Reverb and delay are **send buses**, not inserts: a per-note or per-instrument send amount feeds

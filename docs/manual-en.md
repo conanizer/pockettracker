@@ -818,7 +818,7 @@ Instrument VOL × Phrase V column × Track volume (Mixer) × Master volume (Mixe
 ```
 
 > [!NOTE]
-> If a note is unexpectedly silent, check all four stages of the volume chain: instrument VOL, phrase V column, track volume in MIXER, and master volume. Any one of them being `00` will silence the output.
+> If a note is unexpectedly silent, check all four stages of the volume chain: instrument VOL, phrase V column, track volume in MIXER, and master volume. Any one of them being `00` will silence the dry signal.
 
 **Where the reverb and delay sends sit in that chain.** A send is tapped after the phrase `V` column
 and any VOL modulation, but *before* instrument VOL and the track fader. So turning an instrument or a
