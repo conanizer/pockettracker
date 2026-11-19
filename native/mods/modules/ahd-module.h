@@ -2,7 +2,7 @@
 #include <cmath>
 #include "../mod-system.h"
 
-// One block of an AHD or DRUM slot. `rMult` is the mod-to-mod rate (1 = none).
+// One block of a straight AHD slot. `rMult` is the mod-to-mod rate (1 = none).
 // Stages: 1 attack, 2 hold, 3 decay, 4 done.
 inline void tickAHD(VoiceModSlot& mod, int numFrames, float rMult) {
     if (mod.stage == 4) return;

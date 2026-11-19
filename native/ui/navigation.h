@@ -227,8 +227,8 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                                   : 0;
     }
 
-    // INSTRUMENT: the layouts differ by type.
-    if (r.screen == ScreenType::INSTRUMENT) snap_instrument_cursor(s);
+    // INSTRUMENT and MODS: the layouts differ by type, the slots by depth.
+    if (r.screen == ScreenType::INSTRUMENT || r.screen == ScreenType::MODS) snap_instrument_cursor(s);
 
     if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.songCursor.row);
 

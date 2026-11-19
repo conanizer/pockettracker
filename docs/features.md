@@ -90,7 +90,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Reverse playback
 - Non-destructive start and end point trimming
 - Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
-- 4 modulation slots per instrument: envelope shapes (AHD, ADSR) and LFO targeting volume, pitch, filter, pan, and more
+- 4 modulation slots per instrument: envelopes (AHD and ADSR, each linear, gently curved like an analog synth, or sharply curved), LFO (swinging both ways, only up or only down) key tracking and velocity, targeting volume, pitch, filter, pan and more — or the amount or speed of any other slot
 - Save and load instruments as preset files (.pti) — bundles all parameters, table, and modulation settings together
 
 ## Sample Editor
@@ -123,7 +123,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - The same chord works on the REV and DEL return strips: mute a send to drop it out of the mix, or solo one to hear the reverb or delay on its own while the tracks go on feeding it
 - Switch a phrase or table command off without deleting it (R+B), held or latched like a mute; it is saved with the song
 - True dBFS peak meters per track
-- Two send effects: a reverb and a stereo delay
+- Two send effects: a reverb and a stereo delay, fed before the instrument's volume and the track fader, so a part can be heard through the reverb alone
 - Reverb room size and decay set separately — a small room can ring long, a big one die fast
 - Reverb character: pre-delay, stereo width and tail modulation — with built-in presets that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with built-in presets that set all three at once

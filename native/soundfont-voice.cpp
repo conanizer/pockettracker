@@ -219,7 +219,7 @@ void SoundfontVoice::noteOffAt(int atFrame) {
     // As in hardStop: an arm this block must not sound after the note-off that superseded it.
     dropArmedNote();
 
-    // With an ADSR/TRIG on VOL, TSF holds sustain while our envelope fades; hardStop() sends the
+    // With an ADSR on VOL, TSF holds sustain while our envelope fades; hardStop() sends the
     // note-off when they finish. Otherwise TSF's own release (SF REL) plays out — unless it is short.
     release_non_vol_envelopes(voiceMods);
     const auto volRelease = [](const VoiceModSlot& m) {

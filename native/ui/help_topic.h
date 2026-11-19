@@ -307,6 +307,9 @@ enum class HelpTopic {
     INST_MACRO_MODEL,
     INST_MACRO_TIMBRE,
     INST_MACRO_COLOR,
+    MOD_POLARITY,
+    MOD_CURVE,
+    MOD_TRK_AMOUNT,
 
     COUNT
 };

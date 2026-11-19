@@ -5,10 +5,12 @@
 // ⚠️ Keep this header POD and arithmetic only — model.h here would put it out of the engine's reach.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 #include "event.h"
 #include "note_tables.h"
+#include "voice_codes.h"   // CURVE_*
 
 namespace songcore {
 
@@ -166,10 +168,57 @@ inline float frames_per_tic_f(int tempo, int sampleRate) {
     return static_cast<float>(sampleRate) / (tempo / 60.0f * 4.0f * TICS_PER_STEP);
 }
 
-// How long `tics` last at `tempo`, in ms, on a step of `tics_per_step` — 12 for every effect and
-// envelope, a groove's own ruler for its steps. For the screens; the engine counts frames.
+// How long `tics` last at `tempo`, in ms, on a step of `tics_per_step` — 12 for every effect, a
+// groove's own ruler for its steps. For the screens; the engine counts frames.
 inline double tics_ms(int tics, int tempo, int tics_per_step = TICS_PER_STEP) {
     return tics * 60000.0 / (tempo * 4.0 * tics_per_step);
+}
+
+// FAST's bend: e^(k·v) − 1 scaled to the 1 ms..10 s span, k chosen so 80 lands on 250 ms.
+constexpr double ENV_FAST_BEND = 0.02888436996792483;
+
+// An envelope time (the ATK, HOLD, DEC and REL rows): 00 is 1 ms — never 0, which clicks — and FF is
+// 10 s, whatever the tempo. The slot's CRV decides how the values between spread, so 80 is about 5 s on
+// LINEAR, 2.5 s on ANALOG and 250 ms on FAST. ENV_SCALE_LOG (voice_codes.h) is the ENV type's: 00 is
+// instant, 01 = 1 ms, each step about 3.7% longer.
+// ⚠️ The digit's meaning depends on the scale — a file stores it beside its curve, never alone.
+inline double env_ms(int v, int scale) {
+    const double x = std::clamp(v, 0, 255) / 255.0;
+    switch (scale) {
+        case CURVE_LINEAR: return 1.0 + 9999.0 * x;
+        case CURVE_ANALOG: return 1.0 + 9999.0 * x * x;
+        case CURVE_FAST:   return 1.0 + 9999.0 * std::expm1(ENV_FAST_BEND * 255.0 * x) / std::expm1(ENV_FAST_BEND * 255.0);
+        default:           return v <= 0 ? 0.0 : std::pow(10000.0, (std::min(v, 255) - 1.0) / 254.0);
+    }
+}
+
+// The envelope time nearest `ms` on `scale`.
+inline int env_value_from_ms(double ms, int scale) {
+    const double f = std::max(0.0, (ms - 1.0) / 9999.0);   // 0..1 across the curves' span
+    double x;
+    switch (scale) {
+        case CURVE_LINEAR: x = f * 255.0; break;
+        case CURVE_ANALOG: x = std::sqrt(f) * 255.0; break;
+        case CURVE_FAST:   x = std::log1p(f * std::expm1(ENV_FAST_BEND * 255.0)) / ENV_FAST_BEND; break;
+        default:
+            if (ms <= 0.0) return 0;
+            return std::clamp(1 + static_cast<int>(std::lround(63.5 * std::log10(ms))), 1, 255);
+    }
+    // Of the two values either side, the one nearer in ms — rounding x would favour the longer one.
+    const int lo = std::clamp(static_cast<int>(std::floor(x)), 0, 254), hi = lo + 1;
+    return std::fabs(env_ms(hi, scale) - ms) < std::fabs(env_ms(lo, scale) - ms) ? hi : lo;
+}
+
+// An older file's envelope time, counted in tics, as it was heard at `tempo`.
+inline int env_value_from_tics(int tics, int tempo, int scale) {
+    return tics <= 0 ? 0 : env_value_from_ms(tics_ms(tics, std::max(1, tempo)), scale);   // a hand-edited 0
+}
+
+// The other way, for a build that still counts tics: the nearest count, 1 at the least, FF at most.
+inline int env_tics_from_value(int v, int tempo, int scale) {
+    if (v <= 0) return 0;
+    const long t = std::lround(env_ms(v, scale) / tics_ms(1, std::max(1, tempo)));
+    return static_cast<int>(std::clamp(t, 1L, 255L));
 }
 
 // An LFO's FREQ: 0.08 Hz at 00 to 20 Hz at FF, in even steps.

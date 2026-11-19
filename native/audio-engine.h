@@ -532,7 +532,7 @@ private:
     void storeTic00Cursor(int trackId, int tableId, const TableLane (&lanes)[TABLE_LANES]);
     void tableStartRows(const ScheduledNote& note, const TableLane* live, const int (&rates)[TABLE_LANES],
                         int (&out)[TABLE_LANES]);
-    void prepareSamplerPiece(Voice& voice, int frames, float sampleRate);
+    void prepareSamplerPiece(Voice& voice, int frames, float sampleRate, bool mixed);
     void mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to);
     // ⚠️ Compiled twice: a single note must not pay for a chord's playheads in its loop.
     template <bool Chord, bool Macro>
@@ -549,7 +549,7 @@ private:
     void mixBuses(const BlockMix& b);
     void mixMaster(const BlockMix& b);
     template <typename V>
-    float mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bool& stopFadeDone);
+    float mixTrackBuffer(V& v, int t, float* send, float* dry, const BlockMix& c, bool& stopFadeDone);
 
     // A track's voices, each passed as its own type so an overload decides. A new voice type adds its
     // pool here. Audio thread only.
@@ -596,8 +596,9 @@ private:
                                                float sampleRate);
 
 
-    // Once per block per voice.
-    void updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate = 44100.0f);
+    // Once per block per voice. With `volAtSample` the mix loop steps the VOL envelopes itself.
+    void updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate = 44100.0f,
+                               bool volAtSample = false);
 
     void updateVoicePitchMod(Voice& voice, int numFrames, float sampleRate);
 
@@ -1017,6 +1018,7 @@ private:
     float instrSpectrumTempL[PROCESS_SUBBLOCK];                           // the monitored instrument, mono
     float macroBuf[MacroBank::NOTES][PROCESS_SUBBLOCK];                   // a MACRO voice's notes for one piece
     float sfBuf[PROCESS_SUBBLOCK * 2];                                    // a track's SF render, interleaved
+    float sfDryBuf[PROCESS_SUBBLOCK * 2];                                 // sfBuf × instrument VOL × fader
     float sfNoteBuf[PROCESS_SUBBLOCK * 2];                                // a stealing note's own pass
     float trackWaveAccumL[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];
     float trackWaveAccumR[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];

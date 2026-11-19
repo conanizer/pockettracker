@@ -17,6 +17,7 @@
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/midi_map_editor.h"
+#include "ui/modules/modulation.h"
 #include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
 #include "ui/song_pointer.h"
@@ -121,7 +122,13 @@ inline int instrument_right_column(songcore::InstrumentType type, int row, int c
 inline int mod_slot_rows(const AppState& s, int pair, int side) {
     const songcore::Instrument& ins =
         s.project->instruments[static_cast<size_t>(s.currentInstrument)];
-    return songcore::mod_slot_row_count(ins.modSlots[static_cast<size_t>(pair * 2 + side)]);
+    return mod_row_count(ins.modSlots[static_cast<size_t>(pair * 2 + side)]);
+}
+
+// MODS: the row clamps to the depth of the slot under the cursor.
+inline void mod_clamp_row(AppState& s) {
+    const int max = std::max(0, mod_slot_rows(s, s.modCursorPair, s.modCursorSide) - 1);
+    if (s.modCursorRow > max) s.modCursorRow = max;
 }
 
 // INST.POOL: the row is the selected instrument; wraps 00↔7F.
@@ -133,12 +140,14 @@ inline void move_pool_selection(AppState& s, int delta) {
 
 }  // namespace detail
 
-// Put the INSTRUMENT cursor back on a cell after the instrument under it changed type.
+// Put the INSTRUMENT and MODS cursors back on a cell after the instrument under them changed: another
+// type lays out other cells, another slot may be shallower.
 inline void snap_instrument_cursor(AppState& s) {
     const InstrumentCursor c = instrument_nearest_cell(detail::instrument_type_of(s), s.instrumentCursor.row,
                                                        s.instrumentCursor.column);
     s.instrumentCursor.row    = c.row;
     s.instrumentCursor.column = c.column;
+    detail::mod_clamp_row(s);
 }
 
 
@@ -176,9 +185,7 @@ inline void instrument_step_row(AppState& s, int delta) {
 // MODS: the other slot of the pair; the row clamps to its depth.
 inline void mod_select_side(AppState& s, int side) {
     s.modCursorSide = side;
-    const int rows  = mod_slot_rows(s, s.modCursorPair, side);
-    const int max   = rows - 1 < 0 ? 0 : rows - 1;
-    if (s.modCursorRow > max) s.modCursorRow = max;
+    mod_clamp_row(s);
 }
 
 // PHRASE: the 16-row loop. Under NAV = SONG, off either end the pointer moves to the next filled

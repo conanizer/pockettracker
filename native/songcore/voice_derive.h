@@ -81,6 +81,11 @@ struct ModPushes {
     bool anyActive = false;   // false → the caller instead issues clearInstrumentModulation(id)
 };
 
+// An envelope time in frames, on the slot's scale.
+inline int env_frames(int v, int scale, int sampleRate) {
+    return static_cast<int>(env_ms(v, scale) * 0.001 * sampleRate + 0.5);
+}
+
 // ⚠️ "off" is the answer for any name this does not know, so a newer build's project opens with the
 // loop lost rather than mis-read. That failure is SILENT — know it before adding a mode.
 inline int loop_mode_code(const std::string& mode) {
@@ -98,43 +103,45 @@ inline FilterType filter_type_code(const std::string& type) {
     return FILTER_OFF;
 }
 
-// The modulation push. A slot with no destination is cleared, as are NONE and TRACKING.
-inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleRate) {
+// The modulation push. A slot with no destination is cleared, as is NONE.
+inline ModPushes derive_mod_pushes(const Instrument& ins, int sampleRate) {
     ModPushes out;
-    const float framesPerTic = frames_per_tic_f(tempo, sampleRate);
-    const auto  tics         = [framesPerTic](int v) { return tics_to_frames(v, framesPerTic); };
-
     for (int i = 0; i < 4 && i < static_cast<int>(ins.modSlots.size()); ++i) {
         const ModSlot& slot = ins.modSlots[i];
         if (slot.dest == ModDest::NONE) continue;
+        const int scale = env_scale(slot);
+        const auto time = [sampleRate, scale](int v) { return env_frames(v, scale, sampleRate); };
         EngineModSlot& p = out.slots[i];
 
         switch (slot.type) {
             case ModType::AHD:
-            case ModType::DRUM:
-                p.attackSamples = tics(slot.attack);
-                p.holdSamples   = tics(slot.hold);
-                p.decaySamples  = tics(slot.decay);
+                p.attackSamples = time(slot.attack);
+                p.holdSamples   = time(slot.hold);
+                p.decaySamples  = time(slot.decay);
                 break;
             case ModType::ADSR:
-            case ModType::TRIG:
-                p.attackSamples  = tics(slot.attack);
-                p.decaySamples   = tics(slot.decay);
-                p.releaseSamples = tics(slot.release);
+            case ModType::ENV:   // a curved ADSR on the same times
+                p.attackSamples  = time(slot.attack);
+                p.decaySamples   = time(slot.decay);
+                p.releaseSamples = time(slot.release);
                 p.sustainLevel   = slot.sustain / 255.0f;
                 break;
             case ModType::LFO:
                 p.lfoHz       = lfo_hz(slot.lfoFreq);
                 p.oscShape    = slot.oscShape;
                 p.lfoTrigMode = slot.lfoTrigMode;
+                p.lfoPolarity = slot.lfoPolarity;
                 break;
-            case ModType::SCALAR:   // its AMT is the output
+            case ModType::SCALAR:     // its AMT is the output
+            case ModType::TRACKING:   // the note's distance from C-4
+            case ModType::VELOCITY:   // the note's velocity
                 break;
-            default:
+            default:                  // NONE, and DRUM and TRIG, which load as AHD and ADSR
                 continue;
         }
         p.type   = slot.type;
         p.dest   = slot.dest;
+        p.curve  = slot.curve;
         p.amount = slot.amount / 255.0f;
         out.anyActive = true;
     }
@@ -143,8 +150,8 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
 
 // What must reach the engine BEFORE a voice triggers: the modulation slots and the EQ/send routing.
 template <typename Engine>
-void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
-    const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
+void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int sampleRate) {
+    const ModPushes m = derive_mod_pushes(ins, sampleRate);
     for (int i = 0; i < 4; ++i) engine.setInstrumentModulation(ins.id, i, m.slots[i]);
     if (!m.anyActive) engine.clearInstrumentModulation(ins.id);
     engine.setInstrumentEqSlot(ins.id, ins.eqSlot);
@@ -200,7 +207,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     engine.setTempo(tempo);
 
     // Modulation / EQ / sends must reach the engine BEFORE the note triggers.
-    auto push_instrument_state = [&]() { push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate); };
+    auto push_instrument_state = [&]() { push_instrument_mod_eq_sends(engine, ins, sampleRate); };
 
     // Lazy table push — ⚠️ and every table an `INS` cell can hand the hit to, since the engine follows
     // them from its own copies. The cache doubles as the visited set.

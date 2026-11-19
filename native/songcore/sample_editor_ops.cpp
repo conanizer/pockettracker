@@ -96,7 +96,7 @@ void SampleEditorOps::finish_sample_preview(int id) {
     // The push only reaches the instrument's own slot; a channel audition used the scratch slot.
     engine_->setInstrumentFrameWindow(SOURCE_PREVIEW_SLOT, -1, -1);
     // The three the DRY preview switched off.
-    push_instrument_mod_eq_sends(*engine_, ins, tempo_in_force(project_), engine_->getSampleRate());
+    push_instrument_mod_eq_sends(*engine_, ins, engine_->getSampleRate());
 }
 
 bool SampleEditorOps::save_sample_wav(int id, const std::string& path, const std::vector<int>& cuePoints,

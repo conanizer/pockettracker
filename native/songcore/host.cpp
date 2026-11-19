@@ -216,7 +216,7 @@ void SongcoreHost::push_params() {
 void SongcoreHost::push_instrument(int id, bool refreshSounding) {
     if (!engine_) return;
     if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
-    push_instrument_params(*engine_, project_.instruments[id], routing_, tempo_in_force(project_), sampleRate_);
+    push_instrument_params(*engine_, project_.instruments[id], routing_, sampleRate_);
     // ⚠️ Only for an EDIT: the refresh wipes what a table row or phrase command set on the voice.
     if (refreshSounding) engine_->refreshSoundingInstrument(id);
 }
@@ -393,7 +393,7 @@ bool SongcoreHost::load_instrument_preset(int id, const std::string& path) {
     json j = parse_repairing_utf8(blob);
     if (j.is_discarded() || !j.is_object()) return false;
 
-    const InstrumentPreset ip = parse_instrument_preset(j);
+    const InstrumentPreset ip = parse_instrument_preset(j, project_.tempo);
     const bool sourceOk = apply_instrument_preset(engine_, project_, id, ip, routing_, mediaRoots_);
     invalidate_tables();   // the preset may have brought a table with it
     push_instrument(id);

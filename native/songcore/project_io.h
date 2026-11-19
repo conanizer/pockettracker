@@ -10,6 +10,7 @@
 
 #include "midi_map.h"
 #include "model.h"
+#include "program.h"   // the envelope times
 #include "../vendor/nlohmann/json.hpp"
 
 #include <algorithm>
@@ -135,18 +136,41 @@ inline Table parse_table(const json& j, int index) {
     return t;
 }
 
-inline ModSlot parse_mod_slot(const json& j) {
+// An AHD/ADSR time onto `scale`. The value as shown is stored under `valueKey`; older files kept it
+// on the 1 ms..10 s log scale (`logKey`) or in tics (`ticsKey`), heard at `tempo` — both read as ms,
+// then re-picked.
+inline int parse_env_time(const json& j, const char* valueKey, const char* logKey, const char* ticsKey,
+                          int tempo, int scale) {
+    if (j.find(valueKey) != j.end()) return std::clamp(get_int(j, valueKey, 0), 0, 255);
+    if (j.find(logKey) != j.end())
+        return env_value_from_ms(env_ms(get_int(j, logKey, 0), ENV_SCALE_LOG), scale);
+    return env_value_from_tics(get_int(j, ticsKey, 0), tempo, scale);
+}
+
+inline ModSlot parse_mod_slot(const json& j, int tempo) {
     ModSlot m;
     { auto it = j.find("type"); if (it != j.end() && it->is_string()) mod_type_from_name(it->get<std::string>(), m.type); }
+    if (m.type == ModType::DRUM) m.type = ModType::AHD;    // they always played the same
+    if (m.type == ModType::TRIG) m.type = ModType::ADSR;
     { auto it = j.find("dest"); if (it != j.end() && it->is_string()) mod_dest_from_name(it->get<std::string>(), m.dest); }
     m.amount      = get_int(j, "amount",      m.amount);
-    m.attack      = get_int(j, "attack",      m.attack);
-    m.hold        = get_int(j, "hold",        m.hold);
-    m.decay       = get_int(j, "decay",       m.decay);
+    m.curve       = std::clamp(get_int(j, "curve", m.curve), 0, 2);   // before the times: their scale
+    if (m.type == ModType::AHD || m.type == ModType::ADSR) {
+        const int sc = m.curve;
+        m.attack  = parse_env_time(j, "attackValue",  "attackTime",  "attack",  tempo, sc);
+        m.hold    = parse_env_time(j, "holdValue",    "holdTime",    "hold",    tempo, sc);
+        m.decay   = parse_env_time(j, "decayValue",   "decayTime",   "decay",   tempo, sc);
+        m.release = parse_env_time(j, "releaseValue", "releaseTime", "release", tempo, sc);
+    } else {   // ENV's were always times; nothing else uses them
+        m.attack  = get_int(j, "attack",  m.attack);
+        m.hold    = get_int(j, "hold",    m.hold);
+        m.decay   = get_int(j, "decay",   m.decay);
+        m.release = get_int(j, "release", m.release);
+    }
     m.sustain     = get_int(j, "sustain",     m.sustain);
-    m.release     = get_int(j, "release",     m.release);
     m.oscShape    = get_int(j, "oscShape",    m.oscShape);
     m.lfoTrigMode = get_int(j, "lfoTrigMode", m.lfoTrigMode);
+    m.lfoPolarity = std::clamp(get_int(j, "lfoPolarity", m.lfoPolarity), 0, 2);
     m.lfoFreq     = get_int(j, "lfoFreq",     m.lfoFreq);
     return m;
 }
@@ -228,7 +252,7 @@ inline SFOverrides parse_sf_overrides(const json& j) {
     return s;
 }
 
-inline Instrument parse_instrument(const json& j, int index) {
+inline Instrument parse_instrument(const json& j, int index, int tempo) {
     Instrument i(get_int(j, "id", index));
     i.name           = get_str(j, "name", i.name);
     i.volume         = get_int(j, "volume", i.volume);
@@ -250,7 +274,15 @@ inline Instrument parse_instrument(const json& j, int index) {
     i.sampleFilePath = get_opt_str(j, "sampleFilePath");
     i.tableId        = get_int(j, "tableId", i.tableId);
     i.tableTicRate   = get_int(j, "tableTicRate", i.tableTicRate);
-    parse_fixed_array(j, "modSlots", i.modSlots, parse_mod_slot);
+    parse_fixed_array(j, "modSlots", i.modSlots, [tempo](const json& e) { return parse_mod_slot(e, tempo); });
+    // An older file's MOD_AMT/RATE/BOTH meant the next slot; it is saved as the slot it names.
+    for (int s = 0; s < static_cast<int>(i.modSlots.size()); ++s) {
+        ModDest& d = i.modSlots[static_cast<size_t>(s)].dest;
+        if (d == ModDest::MOD_AMT || d == ModDest::MOD_RATE || d == ModDest::MOD_BOTH) {
+            const ModTarget t = mod_target(d, s);
+            d = mod_target_dest(t.slot, t.part);
+        }
+    }
     { auto it = j.find("instrumentType"); if (it != j.end() && it->is_string()) instrument_type_from_name(it->get<std::string>(), i.instrumentType); }
     i.soundfontPath  = get_opt_str(j, "soundfontPath");
     i.sfBank         = get_int(j, "sfBank", i.sfBank);
@@ -362,7 +394,8 @@ inline Project parse_project(const json& j) {
     p.chains      = parse_pool<Chain>(j, "chains", parse_chain);
     p.tracks      = parse_pool<Track>(j, "tracks", parse_track);
     fold_legacy_solo(j, p);
-    p.instruments = parse_pool<Instrument>(j, "instruments", parse_instrument);
+    p.instruments = parse_pool<Instrument>(j, "instruments",
+                                           [&p](const json& e, int i) { return parse_instrument(e, i, p.tempo); });
     p.tables      = parse_pool<Table>(j, "tables", parse_table);
     p.grooves     = parse_pool<Groove>(j, "grooves", parse_groove);
     p.scales      = parse_pool<Scale>(j, "scales", parse_scale);
@@ -380,11 +413,12 @@ inline Project parse_project(const json& j) {
     return p;
 }
 
-inline InstrumentPreset parse_instrument_preset(const json& j) {
+// `tempo`: the song it goes into — an older preset's envelope tics are read as heard there.
+inline InstrumentPreset parse_instrument_preset(const json& j, int tempo = Project{}.tempo) {
     InstrumentPreset ip;
     ip.version = detail::get_int(j, "version", ip.version);
     auto it = j.find("instrument");
-    if (it != j.end() && it->is_object()) ip.instrument = detail::parse_instrument(*it, ip.instrument.id);
+    if (it != j.end() && it->is_object()) ip.instrument = detail::parse_instrument(*it, ip.instrument.id, tempo);
     auto tr = j.find("tableRows");
     if (tr != j.end() && tr->is_array()) {
         std::vector<TableRow> rows;
@@ -631,19 +665,29 @@ inline void emit_table(JsonWriter& w, const Table& t) {
     w.end_object();
 }
 
-inline void emit_mod_slot(JsonWriter& w, const ModSlot& m) {
+// AHD and ADSR times go under the `…Value` keys, and as tics at `tempo` under the old ones, for a
+// build that still counts tics. ⚠️ Such a build saves only the tics; they are read back as above.
+inline void emit_mod_slot(JsonWriter& w, const ModSlot& m, int tempo) {
     w.begin_object();
     if (m.type != ModType::NONE) w.field_string("type", mod_type_name(m.type));
     if (m.dest != ModDest::NONE) w.field_string("dest", mod_dest_name(m.dest));
     if (m.amount      != 0xFF) w.field_int("amount",      m.amount);
-    if (m.attack      != 0x00) w.field_int("attack",      m.attack);
-    if (m.hold        != 0x00) w.field_int("hold",        m.hold);
-    if (m.decay       != 0x00) w.field_int("decay",       m.decay);
+    const bool timed = m.type == ModType::AHD || m.type == ModType::ADSR;
+    const auto time  = [&](const char* key, const char* ticsKey, int v) {
+        if (v == 0x00) return;
+        if (timed) w.field_int(key, v);
+        w.field_int(ticsKey, timed ? env_tics_from_value(v, tempo, m.curve) : v);
+    };
+    time("attackValue", "attack", m.attack);
+    time("holdValue",   "hold",   m.hold);
+    time("decayValue",  "decay",  m.decay);
     if (m.sustain     != 0x80) w.field_int("sustain",     m.sustain);
-    if (m.release     != 0x00) w.field_int("release",     m.release);
+    time("releaseValue", "release", m.release);
     if (m.oscShape    != 0x00) w.field_int("oscShape",    m.oscShape);
     if (m.lfoTrigMode != 0x00) w.field_int("lfoTrigMode", m.lfoTrigMode);
+    if (m.lfoPolarity != 0)    w.field_int("lfoPolarity", m.lfoPolarity);
     if (m.lfoFreq     != 0x40) w.field_int("lfoFreq",     m.lfoFreq);
+    if (m.curve       != 0)    w.field_int("curve",       m.curve);
     w.end_object();
 }
 
@@ -710,7 +754,7 @@ inline void emit_sf_overrides(JsonWriter& w, const SFOverrides& s) {
     w.end_object();
 }
 
-inline void emit_instrument(JsonWriter& w, const Instrument& i) {
+inline void emit_instrument(JsonWriter& w, const Instrument& i, int tempo) {
     w.begin_object();
     w.field_int("id", i.id);
     if (i.name != default_instrument_name(i.id)) w.field_string("name", i.name);
@@ -736,7 +780,7 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
     if (i.tableTicRate != 0x06) w.field_int("tableTicRate", i.tableTicRate);
     w.key("modSlots");
     w.begin_array();
-    for (const auto& m : i.modSlots) { w.element(); emit_mod_slot(w, m); }
+    for (const auto& m : i.modSlots) { w.element(); emit_mod_slot(w, m, tempo); }
     w.end_array();
     if (i.instrumentType != InstrumentType::SAMPLER) w.field_string("instrumentType", instrument_type_name(i.instrumentType));
     if (i.soundfontPath)    w.field_string("soundfontPath", *i.soundfontPath);
@@ -832,7 +876,8 @@ inline std::string serialize_project(const Project& p) {
     emit_pool(w, "phrases",     p.phrases,     emit_phrase);
     emit_pool(w, "chains",      p.chains,      emit_chain);
     emit_pool(w, "tracks",      p.tracks,      emit_track);
-    emit_pool(w, "instruments", p.instruments, emit_instrument);
+    emit_pool(w, "instruments", p.instruments,
+              [&p](JsonWriter& o, const Instrument& i) { emit_instrument(o, i, p.tempo); });
     emit_pool(w, "tables",      p.tables,      emit_table);
     emit_pool(w, "grooves",     p.grooves,     emit_groove);
     // ⚠️ The scale pool is omitted WHOLE when nothing was authored (every other pool is always
@@ -869,13 +914,14 @@ inline std::string serialize_project(const Project& p) {
 }
 
 // Serialize an InstrumentPreset (.pti).
-inline std::string serialize_instrument_preset(const InstrumentPreset& ip) {
+// `tempo`: what an older build reading it hears the envelope times at.
+inline std::string serialize_instrument_preset(const InstrumentPreset& ip, int tempo = Project{}.tempo) {
     using namespace detail;
     JsonWriter w{JsonLayout::Minified};
     w.begin_object();
     if (ip.version != 1) w.field_int("version", ip.version);
     w.key("instrument");
-    emit_instrument(w, ip.instrument);
+    emit_instrument(w, ip.instrument, tempo);
     if (ip.tableRows) {
         w.key("tableRows");
         w.begin_array();

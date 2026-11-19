@@ -3,9 +3,10 @@
 // MODS: the four modulation slots of one instrument, as two pairs (MOD1|MOD2, MOD3|MOD4).
 // The cursor is (pair, side, row), not columns: LEFT/RIGHT cross to the other slot of the pair. The
 // depth and a row's meaning depend on the type, so crossing to a shallower slot clamps the row.
-// The TYPE cycle hides SCALAR (internal) and TRACKING (unimplemented); both stay in the enum so a
-// saved one still loads ("SCL", "TRK").
+// The TYPE cycle offers AHD, ADSR, LFO and TRK; a saved SCL or ENV still loads, plays and shows.
 
+#include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -28,24 +29,88 @@ inline const std::vector<std::string>& trig_modes() {
     return v;
 }
 
-// Every ModType except the two hidden ones.
+// The TYPE cycle.
 inline const std::vector<songcore::ModType>& user_mod_types() {
     static const std::vector<songcore::ModType> v{
-        songcore::ModType::NONE, songcore::ModType::AHD,  songcore::ModType::ADSR,
-        songcore::ModType::LFO,  songcore::ModType::DRUM, songcore::ModType::TRIG};
+        songcore::ModType::NONE, songcore::ModType::AHD, songcore::ModType::ADSR,
+        songcore::ModType::LFO,  songcore::ModType::TRACKING, songcore::ModType::VELOCITY};
     return v;
 }
 
-// The type lays its rows out as AHD (ATK, HOLD, DEC). ⚠️ For the screen: DRUM shares the layout.
-inline bool is_ahd_shaped(songcore::ModType t) {
-    return t == songcore::ModType::AHD || t == songcore::ModType::DRUM;
+// The DEST cycle of each instrument type: the DESTs it offers, in enum order.
+inline const std::vector<songcore::ModDest>& offered_mod_dests(songcore::InstrumentType t) {
+    using namespace songcore;
+    static const auto table = [] {
+        std::array<std::vector<ModDest>, std::size(INSTRUMENT_TYPE_NAMES)> a;
+        for (size_t ty = 0; ty < a.size(); ++ty)
+            for (int d = 0; d < MOD_DEST_COUNT; ++d)
+                if (mod_dest_offered(static_cast<InstrumentType>(ty), static_cast<ModDest>(d)))
+                    a[ty].push_back(static_cast<ModDest>(d));
+        return a;
+    }();
+    return table[std::min(static_cast<size_t>(t), table.size() - 1)];
 }
 
-// Sized `mod_slot_row_count`. A static, by reference: asked up to 28 times a frame.
-const std::vector<std::string>& mod_row_labels(songcore::ModType type);
+// The DEST cycle of slot `slot_index`: the instrument's, with the routes into the other slots where
+// MOD_AMT stands — from the next slot round, only the filled ones, RATE and BOTH only into an LFO. The
+// slot's own DEST stays, so emptying the slot it aims at does not make the first step jump.
+inline std::vector<songcore::ModDest> slot_mod_dests(const songcore::Instrument& ins, int slot_index) {
+    using namespace songcore;
+    const ModDest own = ins.modSlots[static_cast<size_t>(slot_index)].dest;
+    std::vector<ModDest> v;
+    for (ModDest d : offered_mod_dests(ins.instrumentType)) {
+        if (d == ModDest::MOD_AMT) {
+            if (own == ModDest::MOD_AMT || own == ModDest::MOD_RATE || own == ModDest::MOD_BOTH)
+                v.push_back(own);   // not from a file, which names the slot
+            for (int k = 1; k < 4; ++k) {
+                const int     to   = (slot_index + k) % 4;
+                const ModType type = ins.modSlots[static_cast<size_t>(to)].type;
+                const bool takesAmt  = type != ModType::NONE;
+                const bool takesRate = type == ModType::LFO;
+                for (ModTargetPart part : {ModTargetPart::AMT, ModTargetPart::RATE, ModTargetPart::BOTH}) {
+                    const ModDest r = mod_target_dest(to, part);
+                    if (r == own || (part == ModTargetPart::AMT ? takesAmt : takesRate)) v.push_back(r);
+                }
+            }
+            continue;
+        }
+        if (mod_target(d, slot_index).slot >= 0) continue;   // the routes are all placed above
+        v.push_back(d);
+    }
+    return v;
+}
 
-// The value a row displays. `slot_index` is only for "→M3 AMT": a slot modulating the next slot.
-std::string mod_row_value(const songcore::ModSlot& slot, int row_index, int slot_index);
+inline const std::vector<std::string>& lfo_polarities() {
+    static const std::vector<std::string> v{"BI", "UNI+", "UNI-"};
+    return v;
+}
+
+// The CRV row of AHD and ADSR, in the order it steps: gentle to steep.
+inline const std::vector<std::string>& env_curves() {
+    static const std::vector<std::string> v{"LINEAR", "ANALOG", "FAST"};
+    return v;
+}
+
+// `ModSlot::curve` ↔ its step in `env_curves`. ⚠️ The stored numbers are a file's (LINEAR 0, FAST 1,
+// ANALOG 2), not the step; the swap is its own inverse and serves both ways.
+inline int curve_step(int curve) { return curve == 1 ? 2 : curve == 2 ? 1 : 0; }
+
+// What a row of a slot is. Which rows a slot has, top to bottom, follows its type (`mod_rows`).
+enum class ModRow { TYPE, DEST, AMT, ATK, HOLD, DEC, SUS, REL, CRV, OSC, TRIG, FREQ, POL };
+
+const std::vector<ModRow>& mod_rows(songcore::ModType type);
+
+// The rows this slot takes on the MODS screen, TYPE included — read by cursor and renderer alike.
+inline int mod_row_count(const songcore::ModSlot& s) { return static_cast<int>(mod_rows(s.type).size()); }
+
+// Row `row_index` of a slot of `type`; TYPE past its last row (a backstop: the cursor stays inside).
+ModRow mod_row_at(songcore::ModType type, int row_index);
+
+const char* mod_row_label(ModRow row);
+
+// The value a row displays, its words in `c`'s case. `slot_index` is only for "→M3 AMT": a slot
+// modulating the next slot.
+std::string mod_row_value(const Canvas& c, const songcore::ModSlot& slot, int row_index, int slot_index);
 
 struct ModulationState {
     const songcore::Instrument& instrument;

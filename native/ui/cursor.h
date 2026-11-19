@@ -55,12 +55,14 @@ enum class ValueUnit {
     REVERB_DAMP,
     DELAY_TIME,    // the delay's free TIME, and TIM
     DELAY_TONE,
-    TICS,          // 12 to a step: envelope times, LAT, KIL, PSL, LEG
+    TICS,          // 12 to a step: LAT, KIL, PSL, LEG
     TABLE_TICS,    // TIC: tics per table row, with its four modes
     GROOVE_TICS,   // a groove step, on the groove's own ruler
     MIDI_LENGTH,   // EXTERNAL LEN: tics, 00 = until the next note
     CHORD,         // CHD
+    ENV_TIME,      // an envelope's ATK, HOLD, DEC, REL on the ENV type's log scale
     INSTRUMENT,    // a phrase step's instrument: its name, or EMPTY
+    ENV_TIME_LINEAR, ENV_TIME_FAST, ENV_TIME_ANALOG,   // the same on an AHD/ADSR slot's CRV scale, in CURVE_* order
 };
 
 // Which button combinations do anything here.

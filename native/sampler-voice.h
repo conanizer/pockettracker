@@ -310,8 +310,8 @@ struct Voice : public IAudioVoice {
         trackId = track;
         playbackRate = rate;
         basePlaybackRate = rate;
-        // Neutral: instrVol is PARAM_VOL's base and phraseVol a mod source — the fixed VOL route
-        // multiplies TABLE_VOL × phraseVol × instrVol.
+        // Neutral: instrVol (the velocity) is PARAM_VOL's base, phraseVol (the instrument's VOL) the
+        // source of PARAM_INSTR_VOL.
         volume = 1.0f;
 
         setPan(pan);
@@ -426,8 +426,10 @@ struct Voice : public IAudioVoice {
         memset(prevModDestValues, 0, sizeof(prevModDestValues));
 
         // Seeded, so the first piece ramps from the note's own level rather than from 0.
-        modDestValues[PARAM_VOL]     = instrVol * phraseVol;
-        prevModDestValues[PARAM_VOL] = instrVol * phraseVol;
+        modDestValues[PARAM_VOL]           = instrVol;
+        prevModDestValues[PARAM_VOL]       = instrVol;
+        modDestValues[PARAM_INSTR_VOL]     = phraseVol;
+        prevModDestValues[PARAM_INSTR_VOL] = phraseVol;
 
         noteOctave = std::max(0, std::min(octave, 9));
         notePitch  = std::max(0, std::min(pitch, 11));
@@ -598,19 +600,18 @@ struct Voice : public IAudioVoice {
 
     void hardStop() override { stop(); }
 
-    // Every live ADSR/TRIG to its release stage. True when a VOL one has a release to run.
+    // Every live ADSR or ENV mod to its release stage. True when a VOL one has a release to run.
     bool releaseVolMods() {
         release_non_vol_envelopes(voiceMods);
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
-            if (vmod.dest == ModDest::VOLUME && mod_has_release(vmod.type)) {
-                if (env_before_release(vmod) && vmod.releaseSamples > 0) {
-                    enter_release(vmod);
-                    hasRelease = true;
-                } else if (env_releasing(vmod)) {
-                    hasRelease = true;
-                }
+            if (vmod.dest != ModDest::VOLUME || !mod_has_release(vmod.type)) continue;
+            if (env_before_release(vmod) && vmod.releaseSamples > 0) {
+                enter_release(vmod);
+                hasRelease = true;
+            } else if (env_releasing(vmod)) {
+                hasRelease = true;
             }
         }
         // A looping voice abandons its loop and runs out into the tail.
@@ -620,16 +621,16 @@ struct Voice : public IAudioVoice {
 
     void noteOff() override { noteOffAt(0); }
 
-    // What an OFF note calls: ADSR/TRIG VOL mods with a release go to their release stage; with
+    // What an OFF note calls: ADSR and ENV VOL mods with a release go to their release stage; with
     // none, the declicked kill fade from `atFrame`. A release begins on a block edge.
     void noteOffAt(int atFrame) {
         if (!releaseVolMods()) startFadeOut(KILL_FADE_SAMPLES, atFrame);
     }
 
-    // An AHD or DRUM on VOL: an envelope that runs out by itself and takes a sustaining voice with it.
+    // An AHD on VOL: an envelope that runs out by itself and takes a sustaining voice with it.
     bool volEnvelopeEndsNote() const {
         for (const VoiceModSlot& m : voiceMods)
-            if (m.dest == ModDest::VOLUME && (m.type == ModType::AHD || m.type == ModType::DRUM)) return true;
+            if (m.dest == ModDest::VOLUME && m.type == ModType::AHD) return true;
         return false;
     }
 

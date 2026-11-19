@@ -22,6 +22,12 @@ inline constexpr int TEXT_PADDING = 3;
 // One character slot, 17 px.
 inline constexpr int CHAR_W = 5 * FONT_SCALE + CHAR_SPACING;
 
+// Every screen's rhythm, from its top: the title row, a gap, the header row (or the first form
+// row), then the rows.
+inline constexpr int SECTION_GAP = 14;
+inline constexpr int HEADER_Y    = ROW_HEIGHT + SECTION_GAP;
+inline constexpr int ROWS_Y      = HEADER_Y + ROW_HEIGHT;
+
 // The 620 px content column is centred in 640; modules are separated by 6 px.
 inline constexpr int SCREEN_SPACER = 6;
 inline constexpr int SIDE_SPACER   = 10;
@@ -110,6 +116,12 @@ inline MascotInk mascot_ink(const Theme& t, Argb panel) {
 // A column header, lit while the cursor is in `lo`..`hi` (an FX header spans two columns).
 inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
     return (cursor_column >= lo && cursor_column <= hi) ? cursor_mark_ink(t) : t.textParam;
+}
+
+// A label beside a cell: lit while the cursor is on what it labels.
+inline void draw_cell_label(Canvas& c, const std::string& text, int x, int text_y, bool lit,
+                            const Theme& t) {
+    c.label(text, x, text_y, lit ? cursor_mark_ink(t) : t.textParam);
 }
 
 // ─── The playback marker ─────────────────────────────────────────────────────────────────────────

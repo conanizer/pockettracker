@@ -385,7 +385,7 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
 bool save_instrument_preset(const songcore::SongcoreHost& host, FileSystem& fs, int id,
                             const std::string& path) {
     return fs.write_file(path, songcore::serialize_instrument_preset(
-                                   songcore::make_instrument_preset(host.project(), id)));
+                                   songcore::make_instrument_preset(host.project(), id), host.project().tempo));
 }
 
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {

@@ -820,10 +820,10 @@ Instrument VOL × Phrase V column × Track volume (Mixer) × Master volume (Mixe
 > [!NOTE]
 > If a note is unexpectedly silent, check all four stages of the volume chain: instrument VOL, phrase V column, track volume in MIXER, and master volume. Any one of them being `00` will silence the output.
 
-**Where the reverb and delay sends sit in that chain.** A send is tapped after the instrument's own
-volume — instrument VOL, the phrase `V` column and any VOL modulation — but *before* the track fader.
-So turning a track down in the MIXER thins the dry signal while leaving its reverb and delay tails
-where they were, which is the usual way to push a part back into the space rather than out of it.
+**Where the reverb and delay sends sit in that chain.** A send is tapped after the phrase `V` column
+and any VOL modulation, but *before* instrument VOL and the track fader. So turning an instrument or a
+track down thins the dry signal while leaving its reverb and delay where they were: at VOL `00` with
+REV at `FF`, a part is heard only through the reverb, still following how hard each note is played.
 
 The **master** fader is the exception, and works the way a master should: the send returns are summed
 into the mix before it, so master volume takes the reverb and delay down with everything else. Pulling
@@ -1376,9 +1376,9 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | `---` | Off |
 | AHD | One-shot envelope: Attack → Hold → Decay |
 | ADSR | Envelope: Attack → Decay → Sustain → Release |
-| DRUM | Percussive envelope: sharp peak → body hold → tail decay |
 | LFO | Cyclic oscillator |
-| TRIG | Envelope triggered by note, behaves like ADSR |
+| TRK | Follows the note: higher notes give more, lower ones less, C-4 none. On CUT at AMT `FF` the cutoff moves an octave for every octave of the note, so high notes stay as bright as low ones; on any other destination `FF` moves a quarter of the full swing per octave — on VOL high notes louder, low ones quieter |
+| VEL | Follows how hard the note is played: velocity `FF` gives the whole AMT, `00` none of it. Set for the note as it starts. On CUT, harder notes are brighter; on →M*n* AMT, harder notes get more of another mod |
 
 On VOL, an AHD or DRUM gives a note a definite length, and an ADSR or TRIG holds it until it is let
 go. See [How a note ends](#how-a-note-ends).
@@ -1393,10 +1393,9 @@ go. See [How a note ends](#how-a-note-ends).
 | FINE | Fine pitch (same range as PITCH) |
 | CUT | Filter cutoff |
 | RES | Filter resonance |
-| STA | Sample start point |
-| MOD A | Depth of the next mod slot |
-| MOD R | Speed of the next mod slot |
-| MOD B | Both depth and speed of the next mod slot |
+| →M1 AMT … →M4 AMT | Depth of that mod slot |
+| →M1 RATE … →M4 RATE | Speed of that mod slot, when it is an LFO |
+| →M1 BOTH … →M4 BOTH | Both depth and speed of that mod slot, when it is an LFO |
 | TIMB | A MACRO instrument's TIMBRE (nothing on other types) |
 | COLR | A MACRO instrument's COLOR (nothing on other types) |
 
@@ -1404,13 +1403,17 @@ go. See [How a note ends](#how-a-note-ends).
 
 The screen shows two mod slots side by side (MOD1+MOD2, then MOD3+MOD4).
 
-**AHD parameters:** TYPE, DEST, AMT, ATK, HOLD, DEC
+**AHD parameters:** TYPE, DEST, AMT, ATK, HOLD, DEC, CRV
 
-**ADSR / TRIG parameters:** TYPE, DEST, AMT, ATK, DEC, SUS, REL
+**ADSR parameters:** TYPE, DEST, AMT, ATK, DEC, SUS, REL, CRV
 
-**DRUM parameters:** TYPE, DEST, AMT, ATK (peak), HOLD (body), DEC
+**LFO parameters:** TYPE, DEST, AMT, OSC, TRIG (trigger mode), FREQ, POL (polarity)
 
-**LFO parameters:** TYPE, DEST, AMT, OSC, TRIG (trigger mode), FREQ
+**CRV:** how the envelope bends. LINEAR rises and falls in straight lines. ANALOG bends gently, as an analog synth does. FAST drops at once, then fades out in a long tail, like a drum.
+
+**LFO polarity:** BI swings below and above the setting, as a vibrato does; UNI+ moves only up from the setting, by AMT — on CUT it opens the filter and closes it again, on VOL it swells; UNI- moves only down, by AMT — on CUT it closes the filter, on VOL it dips, on PITCH it bends the note down.
+
+**AMT:** a mod adds AMT to its setting, which is the instrument's or, on that step, a phrase command's. A value pushed past `00` or `FF` waits there until the mod comes back. An AHD or ADSR on VOL is the exception: it builds the note up from silence to VOL × AMT (`FF` reaches VOL, `80` half of it, `00` is silent), and SUS is a share of that peak. An LFO or TRK on VOL moves VOL first, and the envelope shapes the result.
 
 **LFO trigger modes:**
 - FREE — runs on its own clock and never restarts
@@ -1422,9 +1425,9 @@ The screen shows two mod slots side by side (MOD1+MOD2, then MOD3+MOD4).
 
 ### Mod-to-mod routing
 
-When DEST is **MOD A**, **MOD R**, or **MOD B**, the slot modulates the next slot (circular: slot 4 → slot 1).
+When DEST is **→M*n* AMT**, **RATE** or **BOTH**, the slot modulates mod slot *n* — any of the other three. DEST offers only what each slot can take: nothing while it is empty, RATE and BOTH only when it is an LFO. RATE speeds the LFO up, up to twice as fast; an LFO's lower half slows it down, to a twentieth.
 
-Example: MOD1 (LFO) with DEST=MOD A targeting MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
+Example: MOD1 (LFO) with DEST=→M3 AMT, MOD3 an AHD — the LFO rhythmically swells the envelope depth.
 
 > [!TIP]
 > Mod-to-mod routing is **circular** — slot 4 targets slot 1. Plan your slot order before setting up complex chains: the modulator should always be a lower-numbered slot than its target, except for the wraparound case.
@@ -2737,7 +2740,7 @@ Beside a note, the command wins over the slot's own VAL for that note.
 
 ## 24. Modulation Reference
 
-See §15 for how to edit mod slots. Envelope times are in **tics**, so they track project BPM.
+See §15 for how to edit mod slots. Envelope times run up to 10 s at `FF`, at any tempo; `00` is 1 ms. CRV sets how the values between spread: `80` is about 5 s on LINEAR, 2.5 s on ANALOG and 250 ms on FAST.
 
 ### AHD Envelope
 
@@ -2751,7 +2754,7 @@ One-shot envelope triggered on each note. `AMT` controls how much the destinatio
 ─────┘            ─ (returns to base)
 ```
 
-- **ATK** — attack time in ticks (0 = instant)
+- **ATK** — attack time
 - **HOLD** — hold duration at peak
 - **DEC** — decay time to zero
 
@@ -2764,24 +2767,12 @@ Release is triggered by an **OFF** in the phrase's note column, or by letting go
 - **SUS** (`00`–`FF`) — sustain level
 - **REL** — release time after note off
 
-### DRUM Envelope
-
-Percussive shape: transient → body → tail. Identical stage machine to AHD; the name signals intent.
-
-- **ATK** — transient attack time (typically `00`)
-- **HOLD** — body duration ("thud")
-- **DEC** — tail decay
-
 ### LFO
 
 Cyclic modulation. Phase resets to 0 on each new note (RETRIG mode).
 
 - **OSC** — shape: TRI, SIN, RMP+, RMP−, EXP+, EXP−, SQU+, SQU−, RANDOM, DRUNK
 - **FREQ** (`00`–`FF`) — rate (~0.08 Hz at `00`, ~20 Hz at `FF`)
-
-### TRIG Envelope
-
-Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 
 ---
 

@@ -5,6 +5,7 @@
 #include "audio-defs.h"
 #include "songcore/voice_codes.h"
 #include "effects/glide.h"
+#include "mods/primitives/note-on-mod.h"
 
 // A voice's parameters: each slot is a base (set at trigger or by an effect) plus a mod accumulator
 // cleared every block. Value = base + mod, clamped where it is read.
@@ -25,14 +26,17 @@ enum ParamId {
     PARAM_SAMPLE_START = 8,  // Sample start point: 0–255 normalized
     PARAM_SAMPLE_END   = 9,  // Sample end point: 0–255 normalized
     PARAM_LOOP_START   = 10, // Loop start point: 0–255 normalized
-    PARAM_MACRO_TIMBRE = 11, // A MACRO voice's TIMBRE: 0–255
-    PARAM_MACRO_COLOR  = 12, // …and its COLOR: 0–255
-    PARAM_COUNT        = 13
+    // The instrument's VOL, or the V command standing in for it: the dry signal's own gain, applied
+    // after the sends are tapped — VOL 00 still feeds the reverb and delay.
+    PARAM_INSTR_VOL    = 11,
+    PARAM_MACRO_TIMBRE = 12, // A MACRO voice's TIMBRE: 0–255
+    PARAM_MACRO_COLOR  = 13, // …and its COLOR: 0–255
+    PARAM_COUNT        = 14
 };
 
 struct ParamBus {
     // In ParamId order: full volume, centred, cutoff 128, the whole sample, TIMBRE and COLOR midway.
-    float base[PARAM_COUNT] = {1.0f, 0.5f, 0.0f, 128.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255.0f, 0.0f,
+    float base[PARAM_COUNT] = {1.0f, 0.5f, 0.0f, 128.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255.0f, 0.0f, 0.0f,
                                128.0f, 128.0f};
     float mod[PARAM_COUNT]  = {};   // cleared every block, written by the modulation sources
 
@@ -48,11 +52,11 @@ enum ModSourceId {
     MOD_SRC_NONE = 0,  // always 0 — the "no via" placeholder
 
     // Advanced every block
-    MOD_SRC_ENV0, MOD_SRC_ENV1, MOD_SRC_ENV2, MOD_SRC_ENV3,  // AHD / ADSR / DRUM / TRIG
+    MOD_SRC_ENV0, MOD_SRC_ENV1, MOD_SRC_ENV2, MOD_SRC_ENV3,  // each slot's envelope
     MOD_SRC_LFO0, MOD_SRC_LFO1, MOD_SRC_LFO2, MOD_SRC_LFO3,
 
     // Fixed at note-on
-    MOD_SRC_VELOCITY,  // 0..1, the note's volume
+    MOD_SRC_VELOCITY,  // 0..1, the note's velocity: the V column, before its curve
     MOD_SRC_KEYTRACK,  // (midiNote − 60) / 12, bipolar
     MOD_SRC_RANDOM,    // 0..1
 
@@ -63,7 +67,7 @@ enum ModSourceId {
     MOD_SRC_VIBRATO,      // −1..+1, PVB / PVX
 
     // Fixed at note-on
-    MOD_SRC_PHRASE_VOL,   // 0..1, the step's volume (or a V command at trigger)
+    MOD_SRC_PHRASE_VOL,   // 0..1, the instrument's VOL (or a V command)
 
     MOD_SRC_COUNT  // = 17
 };
@@ -72,7 +76,7 @@ using songcore::ModType;
 using songcore::ModDest;
 
 // One instrument mod slot in a voice: its settings, copied at the trigger, and its running state.
-// An envelope's `stage`: AHD and DRUM 1 attack, 2 hold, 3 decay, 4 done; ADSR and TRIG 1 attack, 2 decay,
+// An envelope's `stage`: AHD 1 attack, 2 hold, 3 decay, 4 done; ADSR and ENV 1 attack, 2 decay,
 // 3 sustain, 4 release, 5 done. An LFO runs at 1 (ONCE holds at 4). 0 is a slot not running.
 struct VoiceModSlot : songcore::EngineModSlot {
     int stage = 0;
@@ -91,16 +95,33 @@ struct VoiceModSlot : songcore::EngineModSlot {
 };
 
 // Slot types by behaviour: every envelope, and those with a release.
-inline bool mod_is_envelope(ModType t) {
-    return t == ModType::AHD || t == ModType::ADSR || t == ModType::DRUM || t == ModType::TRIG;
-}
-inline bool mod_has_release(ModType t) { return t == ModType::ADSR || t == ModType::TRIG; }
+inline bool mod_is_envelope(ModType t) { return t == ModType::AHD || t == ModType::ADSR || t == ModType::ENV; }
+inline bool mod_has_release(ModType t) { return t == ModType::ADSR || t == ModType::ENV; }
 
 inline bool mod_running(const VoiceModSlot& m) { return m.type != ModType::NONE && m.stage != 0; }
 // An envelope still on its way to the sustain — the stages an OFF moves into the release.
 inline bool env_before_release(const VoiceModSlot& m) { return m.stage >= 1 && m.stage <= 3; }
 inline bool env_releasing(const VoiceModSlot& m) { return mod_has_release(m.type) && m.stage == 4; }
 inline bool env_done(const VoiceModSlot& m) { return m.stage >= (mod_has_release(m.type) ? 5 : 4); }
+
+// An LFO's shape value as it leaves the slot: as is, moved up into 0..1, or down into −1..0.
+inline float lfoOut(const VoiceModSlot& mod, float v) { return lfo_polarity_out(mod.lfoPolarity, v); }
+
+// The note's level after its VOL mods. LFO, TRK and SCL add to VOL (`add`, in VOL's 0..1); every
+// envelope then shapes that from silence up to VOL × its AMT (`shape`, the product of AMT × env).
+// `route` is VOL × table × velocity and `depth` the velocity, so the sum is held to 00..FF of VOL.
+inline float vol_after_mods(float route, float depth, float add, float shape) {
+    return fminf(depth, fmaxf(0.0f, route + add * depth)) * shape;
+}
+
+// The sends take the level with the instrument's VOL at FF; the dry signal is that times this. An LFO
+// or TRK adds to the instrument's VOL itself (`route` is table × velocity), so with one running this
+// is not simply `instrVol`. Never above 1; 0 where the send's level is 0, since then the dry's is too.
+inline float instr_vol_factor(float route, float depth, float add, float instrVol) {
+    const float send = fminf(depth, fmaxf(0.0f, route + add * depth));
+    const float dry  = fminf(depth, fmaxf(0.0f, route * instrVol + add * depth));
+    return send > 0.0f ? dry / send : 0.0f;
+}
 
 // An envelope's attack stage (stage 1, 0 → 1), shared by AHD and ADSR; then on to stage 2.
 inline void tickAttack(VoiceModSlot& mod, int effAttack) {

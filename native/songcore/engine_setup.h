@@ -28,10 +28,9 @@ namespace songcore {
 // One instrument's params.
 // ⚠️ THE "instrument N changed" seam: the program snapshot the engine plays notes from rides on it.
 template <typename Engine>
-void push_instrument_params(Engine& engine, const Instrument& ins, const Routing& routing,
-                            int tempo, int sampleRate) {
+void push_instrument_params(Engine& engine, const Instrument& ins, const Routing& routing, int sampleRate) {
     push_instrument_playback_params(engine, ins, ins.id);
-    push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
+    push_instrument_mod_eq_sends(engine, ins, sampleRate);
     // The SF ADSR override — a live key is scheduled with no push, so the engine's copy must be current.
     const SFOverrides& ov = ins.sfOverrides;
     engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
@@ -78,7 +77,7 @@ void push_used_instrument_params(Engine& engine, const Project& project, const R
 
     for (int id = 0; id < count && id < POOL_INSTRUMENTS; ++id) {
         if (!wanted[id]) continue;
-        push_instrument_params(engine, project.instruments[id], routing, tempo_in_force(project), sampleRate);
+        push_instrument_params(engine, project.instruments[id], routing, sampleRate);
     }
 }
 
@@ -87,7 +86,7 @@ template <typename Engine>
 void push_all_instrument_params(Engine& engine, const Project& project, const Routing& routing) {
     const int sampleRate = engine.getSampleRate();
     for (const Instrument& ins : project.instruments) {
-        push_instrument_params(engine, ins, routing, tempo_in_force(project), sampleRate);
+        push_instrument_params(engine, ins, routing, sampleRate);
     }
 }
 

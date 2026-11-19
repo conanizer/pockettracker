@@ -80,6 +80,10 @@ struct SoundfontVoice : public IAudioVoice {
     float volGain     = 1.0f;
     float volGainFrom = 1.0f;
     float volGainTo   = 1.0f;
+    // The instrument's VOL, ramped the same way but after the chain and the sends (PARAM_INSTR_VOL).
+    float instrGain     = 1.0f;
+    float instrGainFrom = 1.0f;
+    float instrGainTo   = 1.0f;
 
     // The stop ramp (STOP, KIL, a short release): 1 to 0 on the mute gate, moving while it runs. Ours,
     // not TSF's (it steps per 64 samples), and on the gate so the sends fade with it.

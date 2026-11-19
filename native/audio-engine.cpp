@@ -605,24 +605,16 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
         dst.stageCounter = 0;
 
         // RND/DRNK seed: per note, per slot, per render.
-        dst.lfoRngState  = (((uint32_t)(uint64_t)currentFrame) * 747796405u
-                            ^ (uint32_t)(m + 1) * 2891336453u
-                            ^ noteSeedEntropy) | 1u;
+        dst.lfoRngState  = lfo_seed_at_note_on(currentFrame, m, noteSeedEntropy);
         dst.lfoRandValue = (src.type == ModType::LFO && src.oscShape >= songcore::LFO_RND)
                            ? xorshift32Bipolar(dst.lfoRngState) : 0.0f;
 
         // RETG/ONCE restart the cycle at note-on; FREE and HOLD follow the global clock, and HOLD
         // freezes that value for the note.
-        dst.lfoPhase = 0.0f;
-        const bool held = src.lfoTrigMode == songcore::LFO_HOLD;
-        if (src.type == ModType::LFO && (held || src.lfoTrigMode == songcore::LFO_FREE)) {
-            double cycles = (double)currentFrame * (double)src.lfoHz / (double)sampleRate;
-            dst.lfoPhase = (float)(fmod(cycles, 1.0) * 2.0 * M_PI);
-            if (held) {
-                dst.envValue = (src.oscShape >= songcore::LFO_RND) ? dst.lfoRandValue
-                                                   : lfoShape(dst.lfoPhase, src.oscShape);
-            }
-        }
+        dst.lfoPhase = src.type == ModType::LFO ? lfo_phase_at_note_on(src, currentFrame, sampleRate) : 0.0f;
+        if (src.type == ModType::LFO && src.lfoTrigMode == songcore::LFO_HOLD)
+            dst.envValue = lfoOut(dst, (src.oscShape >= songcore::LFO_RND) ? dst.lfoRandValue
+                                                                          : lfoShape(dst.lfoPhase, src.oscShape));
     }
 }
 
@@ -634,8 +626,8 @@ void AudioEngine::clearInstrumentModulation(int sampleId) {
     instrumentModSlots.publish(sampleId);
 }
 
-void AudioEngine::updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate) {
-    runModMatrix(voice, numFrames, sampleRate);
+void AudioEngine::updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate, bool volAtSample) {
+    runModMatrix(voice, numFrames, sampleRate, volAtSample);
 }
 
 void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleRate) {

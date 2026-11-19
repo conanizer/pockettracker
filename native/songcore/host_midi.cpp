@@ -64,7 +64,7 @@ void SongcoreHost::arm_midi_in() {
         const float ratio = routing_.sampleRateRatio[id];
         if (routing_.sfSlot[id] == programRouting_.sfSlot[id] && ratio == programRouting_.sampleRateRatio[id])
             continue;
-        push_instrument_params(*engine_, ins, routing_, tempo_in_force(project_), sampleRate_);
+        push_instrument_params(*engine_, ins, routing_, sampleRate_);
         programRouting_.sfSlot[id]          = routing_.sfSlot[id];
         programRouting_.sampleRateRatio[id] = ratio;
     }

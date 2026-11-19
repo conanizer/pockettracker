@@ -167,24 +167,26 @@ HelpTopic scale_cell_topic(int row, int column) {
     return (scale_row_degree(row) >= 0) ? HelpTopic::SCALE_DEGREE : HelpTopic::NONE;
 }
 
-// MODS: a row's meaning follows the slot's type (row 4 is HOLD, DEC or TRIG), asked in the module's
-// order (`modulation.cpp`): LFO, then the AHD-shaped pair, then ADSR.
+// MODS: a row's meaning follows the slot's type (`mod_rows`).
 HelpTopic mod_cell_topic(songcore::ModType type, int row) {
-    const bool lfo = (type == songcore::ModType::LFO);
-    switch (row) {
-        case 0: return HelpTopic::MOD_TYPE;
-        case 1: return HelpTopic::MOD_DEST;
-        case 2: return HelpTopic::MOD_AMOUNT;
-        case 3: return lfo ? HelpTopic::MOD_OSC : HelpTopic::MOD_ATTACK;
-        case 4:
-            if (lfo) return HelpTopic::MOD_TRIG;
-            return is_ahd_shaped(type) ? HelpTopic::MOD_HOLD : HelpTopic::MOD_DECAY;
-        case 5:
-            if (lfo) return HelpTopic::MOD_FREQ;
-            return is_ahd_shaped(type) ? HelpTopic::MOD_DECAY : HelpTopic::MOD_SUSTAIN;
-        case 6: return HelpTopic::MOD_RELEASE;
-        default: return HelpTopic::NONE;
+    if (row < 0 || row >= static_cast<int>(mod_rows(type).size())) return HelpTopic::NONE;
+    switch (mod_row_at(type, row)) {
+        case ModRow::TYPE: return HelpTopic::MOD_TYPE;
+        case ModRow::DEST: return HelpTopic::MOD_DEST;
+        case ModRow::AMT:
+            return type == songcore::ModType::TRACKING ? HelpTopic::MOD_TRK_AMOUNT : HelpTopic::MOD_AMOUNT;
+        case ModRow::ATK:  return HelpTopic::MOD_ATTACK;
+        case ModRow::HOLD: return HelpTopic::MOD_HOLD;
+        case ModRow::DEC:  return HelpTopic::MOD_DECAY;
+        case ModRow::SUS:  return HelpTopic::MOD_SUSTAIN;
+        case ModRow::REL:  return HelpTopic::MOD_RELEASE;
+        case ModRow::CRV:  return HelpTopic::MOD_CURVE;
+        case ModRow::OSC:  return HelpTopic::MOD_OSC;
+        case ModRow::TRIG: return HelpTopic::MOD_TRIG;
+        case ModRow::FREQ: return HelpTopic::MOD_FREQ;
+        case ModRow::POL:  return HelpTopic::MOD_POLARITY;
     }
+    return HelpTopic::NONE;
 }
 
 // INST.POOL: the value columns are the instrument's own fields and take INSTRUMENT's entries; only the

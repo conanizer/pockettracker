@@ -208,6 +208,20 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s) {
         case ValueUnit::CHORD:
             return chord_hint(value, s);
 
+        case ValueUnit::ENV_TIME:
+        case ValueUnit::ENV_TIME_LINEAR:
+        case ValueUnit::ENV_TIME_FAST:
+        case ValueUnit::ENV_TIME_ANALOG: {
+            // Fixed in time; the tics are what it comes to at this tempo, to place it against the steps.
+            const int scale = unit == ValueUnit::ENV_TIME ? songcore::ENV_SCALE_LOG
+                            : static_cast<int>(unit) - static_cast<int>(ValueUnit::ENV_TIME_LINEAR);   // CURVE_*
+            const double ms = songcore::env_ms(value, scale);
+            if (ms <= 0.0) return {"INSTANT", ""};   // ENV only: the curves start at 1 ms
+            char tics[48];
+            std::snprintf(tics, sizeof(tics), "%.1f TICKS AT %d BPM", ms / songcore::tics_ms(1, tempo), tempo);
+            return {format_ms(ms), tics};
+        }
+
         case ValueUnit::INSTRUMENT:
             return instrument_hint(value, s);
     }

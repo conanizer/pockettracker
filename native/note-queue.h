@@ -16,7 +16,7 @@ struct ScheduledNote {
     float frequency;
     float baseFrequency;     // the sample's root
     float volume;            // instrument volume 0-1 → MOD_SRC_INSTR_VOL
-    float phraseVolume;      // step volume 0-1 → MOD_SRC_PHRASE_VOL
+    float phraseVolume;      // the instrument's VOL 0-1 → MOD_SRC_PHRASE_VOL
     float pan;               // 0 left, 0.5 centre, 1 right
     int startPointOverride;  // -1 = the instrument's
     int endPointOverride;    // CUT slice end; -1 = the instrument's

@@ -289,8 +289,10 @@ derived from DCAY and SIZE together** — a gain is a loss per pass, so the same
 is a longer tail. The lines are sized once for the largest room, so a SIZE edit is a glide of the read
 heads rather than a reallocation or a clear, and the default cell is exactly the room that shipped.
 
-Note where the two faders sit relative to that tap. A send is **pre-fader with respect to the track
-fader** and post-everything on the instrument, so pulling a track down leaves its tails alone. The
+Note where the two faders sit relative to that tap. A send is **pre-fader**: tapped after the velocity, the
+table's and the modulation's VOL and the instrument chain, but before the instrument's VOL and the track
+fader, so either can take the dry signal to nothing and leave the wet one. A SoundFont therefore runs
+its chain before those two gains, as the sampler does. The
 **master fader is downstream of the returns** — it multiplies the summed bus, dry and wet together,
 which is what makes it a master rather than a dry-mix gain. ⚠️ It is therefore one multiply over the
 whole block and not a per-voice gain: `VMV` and a `VTR`/`VMV` automation ramp both move it through the
@@ -316,8 +318,8 @@ oscillators run at twice the engine rate, the rate they were written for, and ar
 10 Hz high-pass ahead of the chain removes the DC several models carry. `mixSamplerPieceAs<…, Macro>`
 compiles the sample playhead out, so a sampler voice runs the same code as without MACRO.
 
-Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
-TRIG voice rings until something explicitly stops it.
+Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR
+voice rings until something explicitly stops it.
 
 **Everything sound passes through follows one rule** (`effects/glide.h`): a setter only says where a
 level or setting should go, and the place that touches the sound gets there over a few milliseconds.

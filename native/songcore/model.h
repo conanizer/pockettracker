@@ -64,10 +64,14 @@ enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL, MACRO };
 
 // Each enum's names, in enum order: index 0 also answers for an out-of-range value.
 inline constexpr const char* MOD_TYPE_NAMES[] = {"NONE", "AHD", "ADSR", "LFO", "DRUM", "TRIG",
-                                                 "TRACKING", "SCALAR"};
+                                                 "TRACKING", "SCALAR", "ENV", "VELOCITY"};
 inline constexpr const char* MOD_DEST_NAMES[] = {"NONE", "VOLUME", "PAN", "PITCH", "FINE_PITCH",
                                                  "FILTER_CUTOFF", "FILTER_RES", "SAMPLE_START",
-                                                 "MOD_AMT", "MOD_RATE", "MOD_BOTH", "TIMBRE", "COLOR"};
+                                                 "MOD_AMT", "MOD_RATE", "MOD_BOTH", "TIMBRE", "COLOR",
+                                                 "MOD1_AMT", "MOD1_RATE", "MOD1_BOTH",
+                                                 "MOD2_AMT", "MOD2_RATE", "MOD2_BOTH",
+                                                 "MOD3_AMT", "MOD3_RATE", "MOD3_BOTH",
+                                                 "MOD4_AMT", "MOD4_RATE", "MOD4_BOTH"};
 inline constexpr const char* INSTRUMENT_TYPE_NAMES[] = {"SAMPLER", "SOUNDFONT", "EXTERNAL", "MACRO"};
 
 // A MACRO instrument's models. A file stores the name; the index is the oscillator's own shape number
@@ -80,13 +84,18 @@ inline constexpr const char* MACRO_MODEL_NAMES[] = {
     "SNAR", "WTBL", "WMAP", "WLIN", "WTX4", "NOIS", "TWNQ", "CLKN", "CLOU", "PRTC", "QPSK"};
 
 // ⚠️ Display names, not the serialised ones above — swapping them widens the UI or breaks the file.
-// DRUM plays as AHD and TRIG as ADSR; TRK has no engine implementation yet; SCL's `amount` IS the
-// output.
+// DRUM and TRIG load as AHD and ADSR; TRK follows the note's pitch; SCL's `amount` IS the output;
+// ENV is a curved ADSR timed in seconds; VEL is the note's velocity. Only AHD, ADSR, LFO, TRK and VEL
+// are offered.
 inline constexpr const char* MOD_TYPE_DISPLAY_NAMES[] = {"---", "AHD", "ADSR", "LFO", "DRUM", "TRIG",
-                                                         "TRK", "SCL"};
+                                                         "TRK", "SCL", "ENV", "VEL"};
 inline constexpr const char* MOD_DEST_DISPLAY_NAMES[] = {"---", "VOL", "PAN", "PITCH", "FINE", "CUT",
-                                                         "RES", "STA", "MOD A", "MOD R", "MOD B",
-                                                         "TIMB", "COLR"};
+                                                         "RES", "STA", "MOD A", "MOD R", "MOD B", "TIMB",
+                                                         "COLR",
+                                                         "M1 AMT", "M1 RATE", "M1 BOTH",
+                                                         "M2 AMT", "M2 RATE", "M2 BOTH",
+                                                         "M3 AMT", "M3 RATE", "M3 BOTH",
+                                                         "M4 AMT", "M4 RATE", "M4 BOTH"};
 
 template <typename E, size_t N>
 inline const char* enum_name(E e, const char* const (&names)[N]) {
@@ -121,6 +130,16 @@ inline bool macro_model_from_name(const std::string& s, int& out) {
 inline constexpr int INSTRUMENT_TYPE_COUNT = static_cast<int>(std::size(INSTRUMENT_TYPE_NAMES));
 inline constexpr int MACRO_MODEL_COUNT     = static_cast<int>(std::size(MACRO_MODEL_NAMES));
 inline constexpr int MOD_DEST_COUNT        = static_cast<int>(std::size(MOD_DEST_NAMES));
+// Whether the MODS screen offers a DEST: TIMBRE and COLOR only on MACRO; STA nowhere, since nothing
+// reads it (a project that has it keeps it).
+inline bool mod_dest_offered(InstrumentType t, ModDest d) {
+    switch (d) {
+        case ModDest::SAMPLE_START: return false;
+        case ModDest::TIMBRE: case ModDest::COLOR:
+            return t == InstrumentType::MACRO;
+        default: return true;
+    }
+}
 static_assert(std::size(MOD_TYPE_DISPLAY_NAMES) == std::size(MOD_TYPE_NAMES) &&
               std::size(MOD_DEST_DISPLAY_NAMES) == std::size(MOD_DEST_NAMES), "a name per entry");
 
@@ -275,23 +294,15 @@ struct ModSlot {
     int sustain = 0x80;
     int release = 0x00;
     int oscShape = 0x00, lfoTrigMode = LFO_FREE;
+    int lfoPolarity = LFO_BI;   // the LFO_* and CURVE_* numbers: voice_codes.h
     int lfoFreq = 0x40;
+    // ⚠️ LINEAR is what a file without the key means, so older songs keep their sound; a slot the user
+    // turns into AHD/ADSR starts ANALOG.
+    int curve = CURVE_LINEAR;
 };
 
-// The rows this slot takes on the MODS screen, TYPE row included — read by cursor and renderer alike.
-inline int mod_slot_row_count(const ModSlot& s) {
-    switch (s.type) {
-        case ModType::NONE:     return 1;  // TYPE
-        case ModType::AHD:      return 6;  // TYPE, DEST, AMT, ATK, HOLD, DEC
-        case ModType::ADSR:     return 7;  // TYPE, DEST, AMT, ATK, DEC, SUS, REL
-        case ModType::LFO:      return 6;  // TYPE, DEST, AMT, OSC, TRIG, FREQ
-        case ModType::DRUM:     return 6;  // as AHD
-        case ModType::TRIG:     return 7;  // as ADSR
-        case ModType::TRACKING: return 5;
-        case ModType::SCALAR:   return 3;  // TYPE, DEST, AMT
-    }
-    return 1;
-}
+// Which scale the slot's ATK, HOLD, DEC and REL values are read on (`env_ms`).
+inline int env_scale(const ModSlot& m) { return m.type == ModType::ENV ? ENV_SCALE_LOG : m.curve; }
 
 // A new groove: two plain 12-tic steps — no groove, but the pair its swing bends is on screen.
 // 12 is `TICS_PER_STEP`, spelled out because timing.h includes this file (groove_bank.h asserts it).

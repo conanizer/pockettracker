@@ -28,13 +28,13 @@ inline void tickLFO(VoiceModSlot& mod, int numFrames, float sr, float rMult) {
                 if (mod.lfoRandValue < -1.0f) mod.lfoRandValue = -1.0f;
             }
         }
-        mod.envValue = mod.lfoRandValue;
+        mod.envValue = lfoOut(mod, mod.lfoRandValue);
     } else {
         // A finishing ONCE holds the cycle's end, not the wrapped start.
         float phase = (wrapped && mod.lfoTrigMode == LFO_ONCE)
             ? 2.0f * (float)M_PI - 1e-4f
             : mod.lfoPhase;
-        mod.envValue = lfoShape(phase, mod.oscShape);
+        mod.envValue = lfoOut(mod, lfoShape(phase, mod.oscShape));
     }
 
     if (wrapped && mod.lfoTrigMode == LFO_ONCE) mod.stage = 4;

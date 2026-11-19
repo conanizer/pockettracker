@@ -3,6 +3,7 @@
 #include "audio-engine.h"
 #include "engine-voice-ops.h"
 #include "effects/primitives/finite.h"
+#include "mods/mod-runner.h"
 #include "vendor/tsf/tsf.h"    // TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include <cstdint>
 #include <cstring>
@@ -146,6 +147,8 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
                    effectiveTicRates, sfStartRows);
     sv.resetTableState(note.tableId, effectiveTicRates,
                        note.noteOctave, note.notePitch, sfStartRows);
+    sv.modSourceValues[MOD_SRC_KEYTRACK] = (float)((note.noteOctave + 1) * 12 + note.notePitch - 60) / 12.0f;
+    sv.modSourceValues[MOD_SRC_VELOCITY] = note.midiVelocity / 127.0f;
 
     // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
     static const InstrumentParams kNoInstrument{};
@@ -193,9 +196,11 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     memset(sv.prevModDestValues,0, sizeof(sv.prevModDestValues));
     sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
     sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
-    float initVol = note.volume * chordGain * note.phraseVolume;
-    sv.modDestValues[PARAM_VOL]     = initVol;
-    sv.prevModDestValues[PARAM_VOL] = initVol;
+    const float initVol = note.volume * chordGain;
+    sv.modDestValues[PARAM_VOL]           = initVol;
+    sv.prevModDestValues[PARAM_VOL]       = initVol;
+    sv.modDestValues[PARAM_INSTR_VOL]     = note.phraseVolume;
+    sv.prevModDestValues[PARAM_INSTR_VOL] = note.phraseVolume;
     startNotePitchFx(sv, note);
     applyTableCarry(sv, note.carry, sampleRate);
     LOGT("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
@@ -329,6 +334,8 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
                               sampleRate, note.startPointOverride, note.endPointOverride,
                               note.sliceStartFrame, note.sliceEndFrame,
                               note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
+            // The mods' VELOCITY source: the V column, before its curve (`volume` is it squared).
+            voices[v].modSourceValues[MOD_SRC_VELOCITY] = std::sqrt(std::max(note.volume, 0.0f));
             voices[v].setChord(chordSemis, chordCount, strumWait);
             if (isMacro) startMacroVoice(v, note);
             voices[v].instrId = note.sampleId;
@@ -372,19 +379,8 @@ void AudioEngine::startMacroVoice(int v, const ScheduledNote& note) {
     macroBank->start(v, note.macroModel);
 }
 
-// Frames [from, to) of a rendered stereo buffer through a track fader and a chain: the fader ramps
-// across the whole block, the chain's filter across these frames.
-// ⚠️ The fader goes on the rendered samples, not on the TSF channel: a channel volume is one value per
-// render call, a staircase. Above the chain, so drive and filter hear the faded signal.
-static void faderThenChain(InstrumentChain& chain, float* buf, int from, int to,
-                           float fStart, float fEnd, int numFrames) {
-    if (fStart != 1.0f || fEnd != 1.0f) {
-        for (int i = from; i < to; i++) {
-            const float g = fStart + (fEnd - fStart) * (float)(i + 1) / (float)numFrames;
-            buf[i * 2]     *= g;
-            buf[i * 2 + 1] *= g;
-        }
-    }
+// Frames [from, to) of a rendered stereo buffer through a chain, its filter ramping across them.
+static void runChain(InstrumentChain& chain, float* buf, int from, int to) {
     const int frames = to - from;
     for (int i = from; i < to; i++) {
         chain.filter.setInterpolatedCoeffs((float)(i - from + 1) / (float)frames);
@@ -392,15 +388,31 @@ static void faderThenChain(InstrumentChain& chain, float* buf, int from, int to,
     }
 }
 
-// One track's chained stereo buffer onto the bus, once per block: the mute gate and the
-// transport-stop ramp, the send tap, the output, the meters and scopes. Returns the buffer's peak;
-// `stopFadeDone` is set when the stop ramp reached zero inside this block.
+// Frames [from, to) of what feeds the sends, added onto the dry buffer through the instrument's VOL
+// (ramped across these frames) and the track fader (across the whole block).
+// ⚠️ Both on the rendered samples, not on the TSF channel: a channel volume is one value per render
+// call, a staircase.
+static void addDry(const float* buf, float* dry, int from, int to, float gFrom, float gTo,
+                   float fStart, float fEnd, int numFrames) {
+    const int frames = to - from;
+    for (int i = from; i < to; i++) {
+        const float g = (gFrom + (gTo - gFrom) * (float)(i - from + 1) / (float)frames) *
+                        (fStart + (fEnd - fStart) * (float)(i + 1) / (float)numFrames);
+        dry[i * 2]     += buf[i * 2] * g;
+        dry[i * 2 + 1] += buf[i * 2 + 1] * g;
+    }
+}
+
+// One track's chained stereo buffers onto the bus, once per block: the mute gate and the
+// transport-stop ramp on both, the sends from `send` (before the instrument's VOL and the fader),
+// the output, meters and scopes from `dry`. Returns the louder of the two's peak, so a note heard
+// only through its sends is not taken for silent; `stopFadeDone` is set when the stop ramp reached
+// zero inside this block.
 template <typename V>
-float AudioEngine::mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bool& stopFadeDone) {
+float AudioEngine::mixTrackBuffer(V& v, int t, float* send, float* buf, const BlockMix& c, bool& stopFadeDone) {
     // ⚠️ The mute gate and the stop ramp ride here, per sample: below the chain, so a stop cannot
     // slam a filter still ringing, and above the send tap, so the sends are fed the faded signal
-    // and not a waveform cut mid-cycle. The fader is already in the buffer, which makes a SoundFont
-    // send post-fader where the sampler's is pre-fader.
+    // and not a waveform cut mid-cycle.
     for (int i = 0; i < c.numFrames; i++) {
         const float lerp_t = (float)(i + 1) / (float)c.numFrames;
         float gate = c.gateStart[t] + (c.gateEnd[t] - c.gateStart[t]) * lerp_t;
@@ -414,15 +426,20 @@ float AudioEngine::mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bo
         }
         buf[i * 2]     *= gate;
         buf[i * 2 + 1] *= gate;
+        send[i * 2]     *= gate;
+        send[i * 2 + 1] *= gate;
     }
 
+    float sendPeak = 0.0f;
     if ((stemsMode == 0 || stemsMode >= 9) && (v.reverbSend.audible() || v.delaySend.audible())) {
         for (int i = 0; i < c.numFrames; i++) {
             const float rev = v.reverbSend.next(), dly = v.delaySend.next();
-            revSendBufL[i] += buf[i * 2]     * rev;
-            revSendBufR[i] += buf[i * 2 + 1] * rev;
-            dlySendBufL[i] += buf[i * 2]     * dly;
-            dlySendBufR[i] += buf[i * 2 + 1] * dly;
+            const float l = send[i * 2], r = send[i * 2 + 1];
+            revSendBufL[i] += l * rev;
+            revSendBufR[i] += r * rev;
+            dlySendBufL[i] += l * dly;
+            dlySendBufR[i] += r * dly;
+            sendPeak = peak_hold(peak_hold(sendPeak, l), r);
         }
     }
 
@@ -446,12 +463,11 @@ float AudioEngine::mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bo
             instrSpectrumTempL[i] += 0.5f * (outL + outR);
         }
     }
-    const float trackPeak = fmaxf(trackPeakL, trackPeakR);
     if (t < 8) {  // mixer meters cover song tracks only, not the preview lane
         framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
         framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
     }
-    return trackPeak;
+    return fmaxf(fmaxf(trackPeakL, trackPeakR), sendPeak);
 }
 
 // ALL audio DSP lives here: processLiveBlock (live) and renderOffline (WAV export) are thin
@@ -832,7 +848,8 @@ void AudioEngine::applyKill(const ScheduledKill& kill, int frame) {
 
 // ⚠️ Each sampler voice runs to the end of the block before the next starts, in pieces cut where
 // its table plays a row — so a row starts on its own sample, not on a block edge.
-// The edit lock is a try_lock: while a sample is being rewritten the voices advance unmixed.
+// The edit lock is a try_lock: while a sample is being rewritten the voices advance unmixed — their
+// VOL envelopes too, which otherwise step in the mix loop.
 void AudioEngine::mixSamplerVoices(BlockMix& b) {
     const int numFrames = b.numFrames;
     std::unique_lock<std::mutex> editLock(sampleEditMutex, std::try_to_lock);
@@ -844,7 +861,7 @@ void AudioEngine::mixSamplerVoices(BlockMix& b) {
                 to = from + processTableTick(voice, from, numFrames - from, b.sampleRate);
                 if (!voice.isFadingOut) storeTic00Cursor(voice.trackId, voice.tableId, voice.lanes);
             }
-            prepareSamplerPiece(voice, to - from, b.sampleRate);
+            prepareSamplerPiece(voice, to - from, b.sampleRate, editLock.owns_lock());
             if (editLock.owns_lock() && voice.isActive) mixSamplerPiece(voice, b, from, to);
             from = to;
         }
@@ -894,12 +911,13 @@ void AudioEngine::tableStartRows(const ScheduledNote& note, const TableLane* liv
 }
 
 // A sampler voice's modulation for the next `frames`, then its pan and filter. Each keeps the value
-// it had: the mix loop ramps from that to the new one.
-void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate) {
+// it had: the mix loop ramps from that to the new one. A `mixed` piece leaves its VOL envelopes to the
+// mix loop, which steps them every sample.
+void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate, bool mixed) {
     updateVoicePitchMod(voice, frames, sampleRate);
 
     for (int m = 0; m < 4; m++) voice.voiceMods[m].prevEnvValue = voice.voiceMods[m].envValue;
-    updateVoiceModulation(voice, frames, sampleRate);
+    updateVoiceModulation(voice, frames, sampleRate, mixed);
 
     voice.prevPanLeft  = voice.panLeft;
     voice.prevPanRight = voice.panRight;
@@ -971,8 +989,9 @@ void AudioEngine::renderMacroNotes(Voice& voice, float rate, int from, int to, c
     }
 }
 
-// A mod routed to VOL, across one piece: an LFO scales the level, an envelope adds to it.
-struct VolMod { float from, step, amount; bool scales; };
+// A mod routed to VOL, across one piece (vol_after_mods): an envelope shapes the level, the rest add to
+// it. An envelope is stepped every sample on `env`, a copy of its slot; the rest ramp `from` + `step`.
+struct VolMod { float from, step, amount; int slot; VoiceModSlot env; EnvFactors f; };
 
 // The voice's VOL mods in slot order; returns how many.
 static int collectVolMods(const Voice& voice, VolMod (&out)[4]) {
@@ -980,7 +999,15 @@ static int collectVolMods(const Voice& voice, VolMod (&out)[4]) {
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voice.voiceMods[m];
         if (!mod_running(mod) || mod.dest != ModDest::VOLUME) continue;
-        out[n++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == ModType::LFO};
+        VolMod& v = out[n++];
+        v.from   = mod.prevEnvValue;
+        v.step   = mod.envValue - mod.prevEnvValue;
+        v.amount = mod.effectiveAmt;
+        v.slot   = mod_is_envelope(mod.type) ? m : -1;
+        if (v.slot >= 0) {
+            v.env = mod;
+            v.f   = env_factors_for(mod, 1);
+        }
     }
     return n;
 }
@@ -1072,8 +1099,11 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
     const float volume   = voice.volume;
     VolMod    volMods[4];
     const int volModCount = collectVolMods(voice, volMods);
+    const float volDepth = voice.params.base[PARAM_VOL];
     const float volRouteFrom = voice.prevModDestValues[PARAM_VOL];
     const float volRouteStep = voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL];
+    const float instrVolFrom = voice.prevModDestValues[PARAM_INSTR_VOL];
+    const float instrVolStep = voice.modDestValues[PARAM_INSTR_VOL] - instrVolFrom;
     const float volGlideFrom = voice.volGlideFrom;
     Ramp  volGlide     = voice.volGlide;
     float volRouteLast = voice.volRouteLast;
@@ -1145,12 +1175,15 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         const float tBlock = (float)(i + 1) / (float)numFrames;
         const float panL   = panLFrom + panLStep * t;
         const float panR   = panRFrom + panRStep * t;
-        float finalVol = volume;
+        float volAdd = 0.0f, volShape = 1.0f;
         for (int m = 0; m < volModCount; m++) {
-            const VolMod& mod    = volMods[m];
-            const float   envAtI = mod.from + mod.step * t;
-            finalVol = mod.scales ? fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.amount))
-                                  : fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.amount);
+            VolMod& mod = volMods[m];
+            if (mod.slot >= 0) {
+                stepEnvelope(mod.env, 1, mod.f);
+                volShape *= mod.env.envValue * mod.amount;
+            } else {
+                volAdd += (mod.from + mod.step * t) * mod.amount;
+            }
         }
         float volRoute = volRouteFrom + volRouteStep * t;
         if (volGlide.moving()) {   // a table VOL on the sounding note: blend in, never step
@@ -1158,6 +1191,7 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
             volRoute = volGlideFrom * k + volRoute * (1.0f - k);
         }
         volRouteLast = volRoute;
+        const float volLevel = volModCount ? vol_after_mods(volRoute, volDepth, volAdd, volShape) : volRoute;
         const float gate      = gateFrom + gateStep * tBlock;
         const float trackVol  = (faderFrom + faderStep * tBlock) * gate;
         const float antiClick = antiClickGain(fadeIn, ph);
@@ -1239,9 +1273,9 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         }
         if (!stereo) procR = procL;   // a mono sample feeds both lanes
 
-        // Sends are tapped below everything on the instrument and ABOVE the track fader — but below
-        // the mute, so a muted track stops feeding the reverb and delay.
-        float scalar = finalVol * volRoute;
+        // Sends are tapped below the velocity and the VOL mods, ABOVE the instrument's VOL and the
+        // track fader — but below the mute, so a muted track stops feeding the reverb and delay.
+        float scalar = volume * volLevel;
         if constexpr (Chord) scalar *= chordOut;
         procL *= scalar;
         procR *= scalar;
@@ -1273,7 +1307,9 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
             }
         }
 
-        const float globalMul = trackVol * antiClick;
+        const float instrVol  = instrVolFrom + instrVolStep * t;
+        const float dryGain   = volModCount ? instr_vol_factor(volRoute, volDepth, volAdd, instrVol) : instrVol;
+        const float globalMul = trackVol * antiClick * dryGain;
         procL *= globalMul;
         procR *= globalMul;
         if (fading) {   // not an unconditional × fo: the multiplies cost more than the test
@@ -1324,6 +1360,8 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         voice.macroDcIn  = macroDcIn;
         voice.macroDcOut = macroDcOut;
     }
+    for (int m = 0; m < volModCount; m++)
+        if (volMods[m].slot >= 0) voice.voiceMods[volMods[m].slot] = volMods[m].env;
     voice.volGlide         = volGlide;
     voice.volRouteLast     = volRouteLast;
     voice.dsFade           = dsFade;
@@ -1352,7 +1390,10 @@ void AudioEngine::mixSoundfontVoices(BlockMix& b) {
         const int slot = sv.sfSlot;
         // Valid until this block ends.
         tsf* h = (slot >= 0 && slot < MAX_SOUNDFONTS) ? soundfonts[slot].handle.load() : nullptr;
-        if (h) memset(sfBuf, 0, sizeof(float) * numFrames * 2);
+        if (h) {
+            memset(sfBuf,    0, sizeof(float) * numFrames * 2);
+            memset(sfDryBuf, 0, sizeof(float) * numFrames * 2);
+        }
         for (int from = 0; from < numFrames; ) {
             int to = numFrames;
             if (sv.tableId >= 0) {
@@ -1367,18 +1408,14 @@ void AudioEngine::mixSoundfontVoices(BlockMix& b) {
         if (!h) continue;
 
         bool stopFadeDone = false;
-        const float trackPeak = mixTrackBuffer(sv, t, sfBuf, b, stopFadeDone);
+        const float trackPeak = mixTrackBuffer(sv, t, sfBuf, sfDryBuf, b, stopFadeDone);
 
-        // A released note is rendered until TSF goes silent — unless an ADSR/TRIG VOL release is
+        // A released note is rendered until TSF goes silent — unless an ADSR VOL release is
         // still running: that one ends the note itself (prepareSoundfontPiece).
         if (sv.isReleasingOnly && trackPeak < 0.0005f) {
             bool adsrReleasing = false;
-            for (int m = 0; m < 4; m++) {
-                const VoiceModSlot& mod = sv.voiceMods[m];
-                if (mod.dest == ModDest::VOLUME && env_releasing(mod)) {
-                    adsrReleasing = true; break;
-                }
-            }
+            for (const VoiceModSlot& mod : sv.voiceMods)
+                if (mod.dest == ModDest::VOLUME && env_releasing(mod)) adsrReleasing = true;
             if (!adsrReleasing) sv.hardStop();
         }
 
@@ -1397,24 +1434,34 @@ void AudioEngine::prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int
     // counts: its value is 0, and skipping it would bring the note back at full volume.
     float noteVol   = sv.modDestValues[PARAM_VOL];
     float onsetVol  = noteVol;
-    bool  hasVolEnv = false, volEnvDone = true;
+    bool  hasVolMod = false, hasVolEnv = false, volEnvDone = true;
+    float volAdd = 0.0f, volShape = 1.0f, onsetShape = 1.0f;
     for (int m = 0; m < 4; m++) {
         VoiceModSlot& mod = sv.voiceMods[m];
         if (!mod_running(mod) || mod.dest != ModDest::VOLUME) continue;
-        if (mod.type == ModType::LFO) {  // bipolar tremolo
-            noteVol  = fmaxf(0.0f, noteVol  * (1.0f + mod.envValue * mod.effectiveAmt));
-            onsetVol = fmaxf(0.0f, onsetVol * (1.0f + mod.envValue * mod.effectiveAmt));
-        } else if (mod_is_envelope(mod.type)) {
-            // Unipolar gain reduction.
+        hasVolMod = true;
+        if (mod_is_envelope(mod.type)) {
             hasVolEnv = true;
             if (!env_done(mod)) volEnvDone = false;
-            const float onsetEnv = mod.attackSamples > 0 ? 0.0f : 1.0f;
-            noteVol  = fmaxf(0.0f, noteVol  + (mod.envValue - 1.0f) * mod.effectiveAmt);
-            onsetVol = fmaxf(0.0f, onsetVol + (onsetEnv     - 1.0f) * mod.effectiveAmt);
+            volShape   *= mod.envValue * mod.effectiveAmt;
+            onsetShape *= (mod.attackSamples > 0 ? 0.0f : 1.0f) * mod.effectiveAmt;
+        } else {
+            volAdd += mod.envValue * mod.effectiveAmt;
         }
+    }
+    if (hasVolMod) {
+        const float depth = sv.params.base[PARAM_VOL];
+        noteVol  = vol_after_mods(noteVol, depth, volAdd, volShape);
+        onsetVol = vol_after_mods(onsetVol, depth, volAdd, onsetShape);
     }
     sv.volGainFrom = sv.hasArmedNote ? onsetVol : sv.volGain;
     sv.volGainTo   = noteVol;
+    const float instrVol = sv.modDestValues[PARAM_INSTR_VOL];
+    const float dryGain  = hasVolMod ? instr_vol_factor(sv.modDestValues[PARAM_VOL], sv.params.base[PARAM_VOL],
+                                                        volAdd, instrVol)
+                                     : instrVol;
+    sv.instrGainFrom = sv.hasArmedNote ? dryGain : sv.instrGain;
+    sv.instrGainTo   = dryGain;
     // A table VOL on the sounding note blends in, as the sampler's does, a piece at a time. The
     // table tick keeps the pieces short meanwhile, so the steps are small ramps.
     if (sv.volGlide.moving() && !sv.hasArmedNote) {
@@ -1498,9 +1545,10 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
             renderSoundfontKeys(sv, h, t, sfBuf, from, to);
         }
         applyGainRamp(sfBuf + from * 2, to - from, sv.volGainFrom, sv.volGainTo);
-        faderThenChain(sv.chain, sfBuf, from, to, faderStart, faderEnd, numFrames);
+        runChain(sv.chain, sfBuf, from, to);
+        addDry(sfBuf, sfDryBuf, from, to, sv.instrGainFrom, sv.instrGainTo, faderStart, faderEnd, numFrames);
     } else {
-        // ⚠️ A steal renders the two notes apart, each through its own fader and chain, and adds them:
+        // ⚠️ A steal renders the two notes apart, each through its own chain, VOL and fader, and adds them:
         // the old one up to `fadeEnd` (past the new onset) through `cutChain`, faded at its output — TSF's
         // own release steps per 64 — and only then cut; the new one from its onset. `fadeEnd` is clamped
         // to the piece.
@@ -1511,7 +1559,7 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
         // The old note keeps the gain it ended the last piece on — the new note's envelope has
         // already replaced the mods, and must not reach the note it cuts.
         applyGainRamp(sfBuf + from * 2, fadeEnd - from, sv.volGain, sv.volGain);
-        if (sv.cutting) faderThenChain(sv.cutChain, sfBuf, from, fadeEnd, faderStart, faderEnd, numFrames);
+        if (sv.cutting) runChain(sv.cutChain, sfBuf, from, fadeEnd);
         Ramp out;
         out.start(1.0f, 0.0f, rampLen - 1);   // at zero on the last frame
         for (int i = rampStart; i < fadeEnd; i++) {
@@ -1519,6 +1567,7 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
             sfBuf[i * 2]     *= g;
             sfBuf[i * 2 + 1] *= g;
         }
+        addDry(sfBuf, sfDryBuf, from, fadeEnd, sv.instrGain, sv.instrGain, faderStart, faderEnd, numFrames);
         sv.cutting   = false;
         sv.faderHeld = false;
         // Now the old voices can be cut: the samples they contributed are already at zero.
@@ -1529,11 +1578,14 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
             float* const note = sfNoteBuf;
             renderSoundfontKeys(sv, h, t, note, sfStart, to);
             applyGainRamp(note + sfStart * 2, noteFrames, sv.volGainFrom, sv.volGainTo);
-            faderThenChain(sv.chain, note, sfStart, to, b.trackVolStart[t], b.trackVolEnd[t], numFrames);
+            runChain(sv.chain, note, sfStart, to);
+            addDry(note, sfDryBuf, sfStart, to, sv.instrGainFrom, sv.instrGainTo, b.trackVolStart[t],
+                   b.trackVolEnd[t], numFrames);
             for (int i = sfStart * 2; i < to * 2; i++) sfBuf[i] += note[i];
         }
     }
-    sv.volGain = sv.volGainTo;
+    sv.volGain   = sv.volGainTo;
+    sv.instrGain = sv.instrGainTo;
 }
 
 // The intra-block frames above were for THIS block. A voice the block did not mix (the sample
