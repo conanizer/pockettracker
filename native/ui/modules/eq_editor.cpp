@@ -1,4 +1,3 @@
-#include "ui/value_hint.h"
 #include "ui/modules/eq_editor.h"
 
 #include <algorithm>
@@ -6,8 +5,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "effects/cell-curves.h"
 #include "effects/modules/eq-band-math.h"
 #include "ui/helpers.h"
+#include "ui/value_hint.h"
 
 namespace pt::ui {
 
@@ -104,7 +105,7 @@ double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rat
 
 // OFF contributes nothing. The shelves and bell from the engine's own coefficients.
 float band_gain_db(const songcore::EqBand& band, float freq, float sample_rate) {
-    const float fc     = eqFreqHzFromHex(band.freq);
+    const float fc     = cutoff_hz(band.freq);
     const float gainDb = eqGainDbFromHex(band.gain);
     const float q      = eqQFromHex(band.q);
     switch (band.type) {
@@ -139,7 +140,7 @@ const std::vector<std::string>& eq_band_type_names() {
 
 // ─── The math the header exposes ─────────────────────────────────────────────────────────────────
 
-float EqModule::freq_hz_from_hex(int hex) { return eqFreqHzFromHex(hex); }
+float EqModule::freq_hz_from_hex(int hex) { return cutoff_hz(hex); }
 
 std::string EqModule::format_freq_hz(float hz) { return format_hz(hz); }
 
@@ -199,16 +200,18 @@ void EqModule::draw_header(Canvas& c, int x, int y, const EqState& s) const {
     const Theme& t  = s.theme;
     const int    hY = y + 3;
 
-    c.text("EQ " + songcore::hex2(s.slotIndex), x + 10, hY, t.textTitle);
+    c.text(c.cased("EQ ") + songcore::hex2(s.slotIndex), x + 10, hY, t.textTitle);
 
     std::string caller;
     switch (s.caller.kind) {
         case EqCallerContext::Kind::MASTER:           caller = "MASTER"; break;
         case EqCallerContext::Kind::REVERB_IN:        caller = "REV IN"; break;
         case EqCallerContext::Kind::DELAY_IN:         caller = "DLY IN"; break;
-        case EqCallerContext::Kind::INSTRUMENT:       caller = "INST " + songcore::hex2(s.caller.instrId); break;
+        case EqCallerContext::Kind::INSTRUMENT:       caller = "INST "; break;
         case EqCallerContext::Kind::SAMPLE_EDITOR_FX: caller = "SAMPLE"; break;
     }
+    caller = c.cased(caller);
+    if (s.caller.kind == EqCallerContext::Kind::INSTRUMENT) caller += songcore::hex2(s.caller.instrId);
     c.text(caller, x + 10 + 8 * CHAR_W, hY, t.textParam);
 }
 
@@ -264,7 +267,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         const int fx = freq_to_pixel(m.hz);
         // A guide, not ink: not held to a contrast floor.
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
-        const int w  = Canvas::text_width(m.label, TextSize::SMALL);
+        const int w  = c.text_width(m.label, TextSize::SMALL);
         const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;
         c.text(m.label, tx, vy + 3, t.eqTxt, TextSize::SMALL);
     }
@@ -335,7 +338,7 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
                     switch (pi) {
                         case 0:
                             text = (band.type >= 0 && band.type < static_cast<int>(eq_band_type_names().size()))
-                                       ? eq_band_type_names()[static_cast<size_t>(band.type)]
+                                       ? c.cased(eq_band_type_names()[static_cast<size_t>(band.type)])
                                        : "???";
                             break;
                         case 1: text = format_freq_hz(freq_hz_from_hex(band.freq)); break;

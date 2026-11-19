@@ -49,11 +49,15 @@ void InputDispatcher::open_send_editor(EffectsSection section) {
 void InputDispatcher::send_editor_edit(InputAction (*fn)(const CursorContext&)) {
     EffectState es{*s_.project};
     es.cursorRow = s_.sendEditor.cursorRow;
+    es.reverb    = s_.presetRows[static_cast<size_t>(PresetRow::REVERB)];
+    es.delay     = s_.presetRows[static_cast<size_t>(PresetRow::DELAY)];
 
     const InputAction action = fn(effects_.cursor_context(es));
     if (action.type == ActionType::NONE) return;
     // `mark_modified` pushes the globals while the editor is open (`on_globals_screen`).
-    if (effects_.handle_input(host_.edit_project(), es.cursorRow, action).modified) mark_modified();
+    const EffectInputResult r = effects_.handle_input(host_.edit_project(), es.cursorRow, action);
+    if (r.modified || (r.presetRow != PresetRow::NONE && preset_step(r.presetRow, r.presetIndex)))
+        mark_modified();
 }
 
 }  // namespace pt::ui

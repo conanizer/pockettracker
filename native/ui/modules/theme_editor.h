@@ -82,25 +82,6 @@ inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
                  | static_cast<Argb>(b);
 }
 
-// Step the built-in palette by `delta` (±1). ⚠️ Replaces the whole theme; SAVE keeps dialled colours.
-// A theme that is not a built-in enters the ring at an end. The visualizer is kept.
-inline void theme_cycle_builtin(Theme& theme, int delta) {
-    const std::vector<Theme> builtins = theme_builtins();
-    const int size = static_cast<int>(builtins.size());
-
-    int idx = -1;
-    for (int i = 0; i < size; ++i)
-        if (builtins[static_cast<size_t>(i)].name == theme.name) { idx = i; break; }
-
-    int target;
-    if (delta >= 0) target = (idx >= 0) ? (idx + 1) % size : 0;          // next
-    else            target = (idx > 0)  ? idx - 1          : size - 1;   // prev
-
-    const VisualizerType keep = theme.visualizerType;
-    theme = builtins[static_cast<size_t>(target)];
-    theme.visualizerType = keep;
-}
-
 // ─── The module ──────────────────────────────────────────────────────────────────────────────────
 
 class ThemeEditorModule {

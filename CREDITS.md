@@ -9,7 +9,8 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | Library | License | Use in PocketTracker |
 |---|---|---|
 | [Oboe](https://github.com/google/oboe) | Apache 2.0 | Low-latency Android audio stream |
-| [DaisySP](https://github.com/electro-smith/DaisySP) | MIT **and** LGPL-2.1 (mixed — see note) | SVF filter, ReverbSc, DelayLine, Compressor, Limiter, BitCrush |
+| [DaisySP](https://github.com/electro-smith/DaisySP) | MIT **and** LGPL-2.1 (mixed — see note) | SVF filter, Moog ladder filter, ReverbSc, DelayLine, Compressor, Limiter, BitCrush |
+| [sst-filters](https://github.com/surge-synthesizer/sst-filters) (Surge Synth Team) | GPL-3.0-or-later | The K35 filter type, which sst-filters adapted from [Odin 2](https://github.com/TheWaveWarden/odin2) (GPL-3.0) |
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | SF2 / SoundFont2 synthesizer (with per-channel rendering fork) |
 | [Braids](https://github.com/pichenettes/eurorack/tree/master/braids) and [stmlib](https://github.com/pichenettes/stmlib) by Émilie Gillet | MIT | The oscillators of the MACRO instrument: 47 synthesis models |
 | [KissFFT](https://github.com/mborgerding/kissfft) | BSD-3-Clause | FFT for spectrum analyzer and transient detection |
@@ -25,7 +26,8 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [stb_image](https://github.com/nothings/stb) | Public domain (MIT) | Decoding theme, touch-skin and CRT-overlay PNGs |
 | [stb_truetype](https://github.com/nothings/stb) | Public domain (MIT) | Rasterizing the touch skin's button-label glyphs |
 | [Liberation Sans](https://github.com/liberationfonts/liberation-fonts) | SIL OFL 1.1 | The letters and arrows on the touch control layout |
-| [QuinqueFive](https://ggbot.itch.io/quinquefive-font) by GGBotNet | SIL OFL 1.1 | The 5×5 pixel font the interface is drawn in, adapted from it |
+| [QuinqueFive](https://ggbot.itch.io/quinquefive-font) by GGBotNet | SIL OFL 1.1 | The capitals of the 5X5 and SLIM interface fonts, adapted from it |
+| [unscii](http://viznut.fi/unscii/) by Viznut | Public domain | The UNSCII interface font (unscii-8) |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Parsing `.ptp` / `.pti` project + instrument JSON |
 | [SDL2](https://www.libsdl.org/) | zlib | Window, renderer, audio device, controller and keyboard input on every platform |
 | [AndroidX Core-KTX](https://developer.android.com/jetpack/androidx/releases/core) | Apache 2.0 | Window-insets handling in the Android launcher activity |
@@ -46,10 +48,11 @@ This file ships beside the notices in every artifact rather than only in the rep
 `assets/licenses/CREDITS.md` in the APK, and `licenses/CREDITS.md` in the Windows zip, the Linux
 tarball and the PortMaster zip.
 
-> **Note on DaisySP:** it is not uniformly MIT. Of the eight files PocketTracker compiles, five are
-> MIT (`svf`, `overdrive`, `decimator`, `limiter`, `crossfade`) and **three are LGPL-2.1** —
+> **Note on DaisySP:** it is not uniformly MIT. Of the nine files PocketTracker compiles, five are
+> MIT (`svf`, `overdrive`, `decimator`, `limiter`, `crossfade`) and **four are LGPL-2.1** —
 > `compressor` (GRAME / Centre National de Creation Musicale), `balance` (Barry Vercoe, john ffitch,
-> Gabriel Maldonado) and `reverbsc` (Sean Costello, Istvan Varga, Paul Batchelor) — because those
+> Gabriel Maldonado) and `reverbsc` (Sean Costello, Istvan Varga, Paul Batchelor) and `moogladder` (Victor Lazzarini, John
+> ffitch, Bob Moog) — because those
 > descend from Csound and Faust rather than from Electrosmith's own code. LGPL-2.1 §3 permits
 > applying the ordinary GPL v2 "or any later version", so they are distributed here under
 > GPL-3.0-or-later along with the rest of the app. Per-file detail in the notices file above.

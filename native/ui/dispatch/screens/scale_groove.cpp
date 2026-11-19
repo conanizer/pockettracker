@@ -61,17 +61,10 @@ GestureResult InputDispatcher::scale_screen(Gesture g) {
 // ─── The SCALE screen's NAME row ─────────────────────────────────────────────────────────────────
 
 void InputDispatcher::scale_row_action() {
-    const songcore::Scale& scale =
-        host_.project().scales[static_cast<size_t>(s_.currentScale)];
-
     switch (scale_name_action(s_.scaleCursor.row, s_.scaleCursor.column)) {
-        case ScaleNameAction::SAVE: {
-            // Seeded with the sanitized display name — what the file will be called.
-            const std::string seed = safe_name(songcore::scale_display_name(scale));
-            open_qwerty(QwertyContext::SCALE_SAVE, seed.empty() ? "SCALE" : seed, "SAVE SCALE:",
-                        fs_.scales_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+        case ScaleNameAction::SAVE:
+            preset_open_save(PresetRow::SCALE);
             break;
-        }
         case ScaleNameAction::LOAD:
             // The browser replaces the screen; it starts at the built-in folder (no config.json key).
             open_file_browser(AppState::BrowserPurpose::LOAD_SCALE, fs_.scales_directory(),
@@ -82,7 +75,7 @@ void InputDispatcher::scale_row_action() {
     }
 }
 
-void InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
+bool InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized filename (empty → SCALE.pts), raw name inside.
     const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("SCALE") : safe) + ".pts";
@@ -100,22 +93,16 @@ void InputDispatcher::save_scale_as(const std::string& dir, const std::string& t
 
     const bool ok = save_scale_file(fs_, dir + "/" + file, slot);
     set_status(s_, ok ? "SCALE SAVED" : "SAVE FAILED", ok);
+    return ok;
 }
 
 // ─── The GROOVE screen's SAVE / LOAD cells ───────────────────────────────────────────────────────
 
 void InputDispatcher::groove_row_action() {
-    const songcore::Groove& groove =
-        host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
-
     switch (groove_file_action(s_.groovePanel.row, s_.groovePanel.column)) {
-        case GrooveFileAction::SAVE: {
-            // Seeded with the sanitized display name — what the file will be called.
-            const std::string seed = safe_name(songcore::groove_display_name(groove));
-            open_qwerty(QwertyContext::GROOVE_SAVE, seed.empty() ? "GROOVE" : seed, "SAVE GROOVE:",
-                        fs_.grooves_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+        case GrooveFileAction::SAVE:
+            preset_open_save(PresetRow::GROOVE);
             break;
-        }
         case GrooveFileAction::LOAD:
             // The browser replaces the screen; it starts at the built-in folder (no config.json key).
             open_file_browser(AppState::BrowserPurpose::LOAD_GROOVE, fs_.grooves_directory(),
@@ -126,7 +113,7 @@ void InputDispatcher::groove_row_action() {
     }
 }
 
-void InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
+bool InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
     // As for scales (empty → GROOVE.ptg).
     const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
@@ -143,6 +130,7 @@ void InputDispatcher::save_groove_as(const std::string& dir, const std::string& 
 
     const bool ok = save_groove_file(fs_, dir + "/" + file, slot);
     set_status(s_, ok ? "GROOVE SAVED" : "SAVE FAILED", ok);
+    return ok;
 }
 
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
@@ -155,6 +143,7 @@ GrooveState InputDispatcher::groove_state(const Project& p) const {
     gs.panelRow     = s_.groovePanel.row;
     gs.panelColumn  = s_.groovePanel.column;
     gs.quantize     = s_.grooveQuantize;
+    gs.preset       = s_.presetRows[static_cast<size_t>(PresetRow::GROOVE)];
     return gs;
 }
 
@@ -171,8 +160,9 @@ bool InputDispatcher::groove_edit(const InputAction& action) {
     // not dirty the project or arm an autosave.
     if (r.newQuantize >= 0) s_.grooveQuantize = r.newQuantize;
     if (r.rulerRefused) {
-        set_status(s_, "A STEP WOULD PASS FF", false);
+        set_status(s_, "A STEP WOULD PASS ", "FF", false);
     }
+    if (r.presetIndex >= 0) return preset_step(PresetRow::GROOVE, r.presetIndex);
     return r.modified;
 }
 
@@ -182,6 +172,7 @@ CursorContext InputDispatcher::scale_context() const {
     cs.key          = p.scaleKey;
     cs.cursorRow    = s_.scaleCursor.row;
     cs.cursorColumn = s_.scaleCursor.column;
+    cs.preset       = s_.presetRows[static_cast<size_t>(PresetRow::SCALE)];
     return scale_.cursor_context(cs);
 }
 
@@ -193,6 +184,7 @@ bool InputDispatcher::scale_edit(const InputAction& action) {
         p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursor.row,
         s_.scaleCursor.column, action);
     if (r.newKey >= 0) p.scaleKey = r.newKey;
+    if (r.presetIndex >= 0) return preset_step(PresetRow::SCALE, r.presetIndex);
     return r.modified;
 }
 

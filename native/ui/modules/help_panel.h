@@ -26,8 +26,7 @@ inline int draw_control_word(Canvas& c, const char* word, int bytes, int x, int 
     if (keyBytes > 0)
         c.text(std::string(word, static_cast<size_t>(keyBytes)), x, y, keyInk);
     if (keyBytes < bytes)
-        c.text(std::string(word + keyBytes, static_cast<size_t>(bytes - keyBytes)), x + keyCols * CHAR_W, y,
-               ink);
+        c.text(std::string(word + keyBytes, static_cast<size_t>(bytes - keyBytes)), x + keyCols * CHAR_W, y, ink);
     return keyCols + columns(keyBytes, bytes);
 }
 

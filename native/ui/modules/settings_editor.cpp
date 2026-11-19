@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "ui/helpers.h"
+#include "ui/ui_fonts.h"
 
 namespace pt::ui {
 
@@ -154,7 +155,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                y + TEXT_PADDING, t.textEmpty);
     }
 
-    const int firstRowY = y + ROW_HEIGHT + 14;
+    const int firstRowY = y + HEADER_Y;
 
     // ── Scroll: only debug builds overflow; derived from the cursor row each frame ───────────────
     const int viewportH = HEIGHT - (firstRowY - y);
@@ -175,7 +176,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const auto param_row = [&](SettingsRow row, const char* name, const std::string& value) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        c.text(name, labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, name, labelX, ry + TEXT_PADDING, on_row(row), t);
         draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
@@ -184,40 +185,46 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                               const char* sublabel, const std::string& value2) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        c.text(name, labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, name, labelX, ry + TEXT_PADDING, on_row(row), t);
         draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
         c.label(sublabel, subX, ry + TEXT_PADDING, t.textParam);
         draw_cursor_cell(c, value2, val2X, ry + TEXT_PADDING, on_cell(row, 2), t.textValue, t);
     };
 
-    const auto on_off = [](bool b) { return std::string(b ? "ON" : "OFF"); };
+    // A value that is a word, in the set case. Names (theme, audio device, overlay file) and hex are not.
+    const auto word   = [&](const std::string& text) { return c.cased(text); };
+    const auto on_off = [&](bool b) { return word(b ? "ON" : "OFF"); };
+    const auto shown  = [&](const Cell& cell) {
+        return cell.kind == Cell::BYTE ? cell_text(cell, v) : word(cell_text(cell, v));
+    };
 
     // Every row is drawn through `rowY`; clipped to the viewport.
     const Canvas::ClipScope rowsClip(c, x, firstRowY, WIDTH, viewportH);
 
     for (const TableRow& r : ROWS) {
         if (r.second.kind == Cell::NONE)
-            param_row(r.row, r.label, cell_text(r.first, v));
+            param_row(r.row, r.label, shown(r.first));
         else
-            dual_row(r.row, r.label, cell_text(r.first, v), r.sublabel, cell_text(r.second, v));
+            dual_row(r.row, r.label, shown(r.first), r.sublabel, shown(r.second));
     }
 
     // ── LAYOUT, and its skin column when the layout is skinned ───────────────────────────────────
     if (v.skinCount > 0) {
-        dual_row(SettingsRow::LAYOUT, "LAYOUT", s.layoutText, "", s.skinText);
+        dual_row(SettingsRow::LAYOUT, "LAYOUT", word(s.layoutText), "", word(s.skinText));
     } else {
-        param_row(SettingsRow::LAYOUT, "LAYOUT", s.layoutText);
+        param_row(SettingsRow::LAYOUT, "LAYOUT", word(s.layoutText));
     }
 
     dual_row(SettingsRow::OVERLAY, "OVERLAY", s.overlayText, "STR", hex2(v.overlayStrength));
 
     // An OS driver name: 18 characters to the panel edge.
     param_row(SettingsRow::AUDIO_OUT, "AUDIO OUT",
-              Canvas::clip_text(s.audioOutText, (WIDTH - VAL1_X - NAME_X) / CHAR_W));
+              c.fit_text(s.audioOutText, (WIDTH - VAL1_X - NAME_X) / CHAR_W,
+                         on_cell(SettingsRow::AUDIO_OUT, 1)));
 
     // POW is LO/HI: the target ROMs have only EFFECT_TICK and EFFECT_CLICK (LO < 128 ≤ HI).
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
-             "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
+             "POW", word(v.vibroPower >= 128 ? "HI" : "LO"));
 
     if (v.oneHanded)
         dual_row(SettingsRow::ONE_HAND, "ONE HAND", on_off(true),
@@ -229,25 +236,35 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         const std::vector<std::string>& names = visualizer_names();
         const int index = clamp(static_cast<int>(t.visualizerType), 0,
                                 static_cast<int>(names.size()) - 1);
-        param_row(SettingsRow::VISUALIZER, "TOP PANEL", names[static_cast<size_t>(index)]);
+        param_row(SettingsRow::VISUALIZER, "TOP PANEL", word(names[static_cast<size_t>(index)]));
+    }
+
+    // FONT, and beside it the letter case where the font has small letters.
+    {
+        const std::string font = word(UI_FONTS[ui_font_index(v.fontName)].name);
+        if (ui_font_has_lowercase(v.fontName))
+            dual_row(SettingsRow::FONT, "FONT", font, "", TEXT_CASE_NAMES[clamp(v.textCase, 0, 2)]);
+        else
+            param_row(SettingsRow::FONT, "FONT", font);
     }
 
     // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped a glyph short so a
     // long name cannot push the ">" out.
     {
         constexpr int VALUE_COLS = (WIDTH - 10 - VAL1_X) / CHAR_W;
+        const std::string name = theme_name_is_builtin(s.themeName) ? word(s.themeName) : s.themeName;
         param_row(SettingsRow::THEME, "THEME",
-                  Canvas::clip_text(s.themeName, VALUE_COLS - 1) + ">");
+                  c.fit_text(name, VALUE_COLS - 1, on_cell(SettingsRow::THEME, 1)) + ">");
     }
 
     // TEMPLATE: a button row, two options, no value.
     if (settings_row_visible(SettingsRow::TEMPLATE, s.caps)) {
         const SettingsRow row = SettingsRow::TEMPLATE;
         const int ry = rowY(row);
-        c.label("TEMPLATE", labelX, ry + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "TEMPLATE", labelX, ry + TEXT_PADDING, on_row(row), t);
         const char* options[2] = {"SAVE", "CLEAR"};
         for (int i = 0; i < 2; ++i) {
-            draw_cursor_cell(c, options[i], val1X + i * 80, ry + TEXT_PADDING,
+            draw_cursor_cell(c, word(options[i]), val1X + i * 80, ry + TEXT_PADDING,
                              on_cell(row, i + 1), t.textValue, t);
         }
     }
@@ -296,6 +313,13 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             const int index = top_panel_index(s.theme.visualizerType);
             return index < 0 ? cc::enum_cycle(count, count + 1) : cc::enum_cycle(index, count);
         }
+
+        case SettingsRow::FONT:
+            if (s.cursorColumn == 2) {
+                if (!ui_font_has_lowercase(v.fontName)) return cc::read_only();
+                return cc::enum_cycle(clamp(v.textCase, 0, 2), 3);
+            }
+            return cc::enum_cycle(ui_font_index(v.fontName), UI_FONT_COUNT);
 
         // A opens the theme editor, or triggers SAVE or CLEAR.
         case SettingsRow::THEME:
@@ -353,6 +377,11 @@ void SettingsModule::handle_input(SettingsValues& v, Theme& theme, const Platfor
                 cycle[static_cast<size_t>(index_in(value, static_cast<int>(cycle.size())))];
             break;
         }
+
+        case SettingsRow::FONT:
+            if (cursor_column == 2) v.textCase = index_in(value, 3);
+            else                    v.fontName = UI_FONTS[index_in(value, UI_FONT_COUNT)].name;
+            break;
 
         // A-only rows (THEME, TEMPLATE) are the dispatcher's.
         default: break;

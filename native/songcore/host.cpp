@@ -299,6 +299,11 @@ std::string SongcoreHost::sf_preset_name(int id) const {
                                  mediaRoots_);
 }
 
+std::vector<std::string> SongcoreHost::sf_preset_names(int id) const {
+    if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return {};
+    return soundfont_preset_names(*engine_, project_.instruments[static_cast<size_t>(id)], mediaRoots_);
+}
+
 void SongcoreHost::set_sf_preset_by_index(int id, int index) {
     if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
     songcore::set_soundfont_preset_by_index(*engine_, project_.instruments[static_cast<size_t>(id)],

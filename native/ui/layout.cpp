@@ -17,6 +17,7 @@
 #include "ui/modules/render_dialog.h"
 #include "ui/overlays.h"
 #include "ui/song_pointer.h"
+#include "ui/ui_fonts.h"
 
 namespace pt::ui {
 
@@ -26,6 +27,8 @@ constexpr int STATUS_MAX_CHARS = 34;   // one line
 }  // namespace
 
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
+    c.set_font(ui_font_named(s.settings.fontName));
+    c.set_case(static_cast<TextCase>(clamp(s.settings.textCase, 0, 2)));
     draw_frame(c, s);
     if (s.project) draw_button_locks(c, s);
 
@@ -71,7 +74,7 @@ void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
 void TrackerLayout::draw_scope_strip(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     if (guide_up(s)) {
-        helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(s), t);
+        helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(c, s), t);
         return;
     }
 
@@ -177,6 +180,7 @@ GrooveState groove_state(const AppState& s) {
     gs.panelRow     = s.groovePanel.row;
     gs.panelColumn  = s.groovePanel.column;
     gs.quantize     = s.grooveQuantize;
+    gs.preset       = s.presetRows[static_cast<size_t>(PresetRow::GROOVE)];
     gs.theme        = s.theme;
     return gs;
 }
@@ -186,6 +190,7 @@ ScaleState scale_state(const AppState& s) {
     cs.key          = s.project->scaleKey;
     cs.cursorRow    = s.scaleCursor.row;
     cs.cursorColumn = s.scaleCursor.column;
+    cs.preset       = s.presetRows[static_cast<size_t>(PresetRow::SCALE)];
     // The pitch classes sounding now, from the voices (the sequencer runs ahead), all tracks in one mask.
     for (int i = 0; i < 8; ++i) {
         const songcore::Note n = s.trackNotes[i];
@@ -243,6 +248,8 @@ MixerState mixer_state(const AppState& s) {
 EffectState effects_state(const AppState& s) {
     EffectState es{*s.project};
     es.cursorRow = s.effectsCursorRow;
+    es.reverb    = s.presetRows[static_cast<size_t>(PresetRow::REVERB)];
+    es.delay     = s.presetRows[static_cast<size_t>(PresetRow::DELAY)];
     es.theme     = s.theme;
     return es;
 }
@@ -372,11 +379,14 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
             case Overlay::INSTRUMENT_PICKER:
                 if (s.project) draw_instrument_picker(c, s.instrumentPicker, s.project->instruments, t);
                 break;
+            case Overlay::SF_PRESET_PICKER:
+                draw_sf_preset_picker(c, s.sfPresetPicker, t);
+                break;
             case Overlay::FX_HELPER:  draw_fx_helper(c, s.fxHelper, t); break;
             case Overlay::SEND:
-                draw_send_editor(c, s.sendEditor, *s.project, t);
+                draw_send_editor(c, s.sendEditor, effects_state(s));
                 // Its cells have a guide of their own: again, over the strip the backdrop just dimmed.
-                if (guide_up(s)) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(s), t);
+                if (guide_up(s)) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, guide_lines(c, s), t);
                 break;
             case Overlay::QWERTY:        qwerty_.draw(c, s.qwerty, t); break;
             case Overlay::RENDER_DIALOG:
@@ -416,14 +426,15 @@ void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
     if (draw_value_hint(c, s)) return;
     if (s.statusMessage.empty()) return;
 
-    const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
+    const std::string text =
+        Canvas::clip_text(status_text(c, s.statusMessage, s.statusNameAt), STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
     c.text(text, SIDE_SPACER + 10, STRIP_ROW_1, color);
 }
 
 // A held on a value whose cell names a unit: what it means, in two lines. False when there is none.
 bool TrackerLayout::draw_value_hint(Canvas& c, const AppState& s) const {
-    const ValueHint h = held_value_hint(s);
+    const ValueHint h = held_value_hint(c, s);
     if (h.head.empty()) return false;
     const int x = SIDE_SPACER + 10;
     c.text(Canvas::clip_text(h.head, STATUS_MAX_CHARS), x, STRIP_ROW_1, s.theme.vizWave);
@@ -457,7 +468,7 @@ void TrackerLayout::draw_button_locks(Canvas& c, const AppState& s) const {
     static constexpr int SLOT_W = 23;   // five fill the right bar; a box each, with a gap between
     const bool full = full_screen_module(s);
     const int  x0   = full ? DESIGN_W - SIDE_SPACER - 5 * SLOT_W : RIGHT_BAR_X;
-    const int  y    = !full ? EDITOR_Y + ROW_HEIGHT + 14 + 10 * ROW_HEIGHT + 10
+    const int  y    = !full ? EDITOR_Y + HEADER_Y + 10 * ROW_HEIGHT + 10
                     : s.currentScreen == ScreenType::SAMPLE_EDITOR
                         ? SampleEditorModule::row_y(SampleRow::SELECTION) + ROW_HEIGHT
                         : SCREEN_SPACER + ROW_HEIGHT;
@@ -478,7 +489,7 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     const songcore::Project& p = *s.project;
 
     // On the editors' column header row.
-    const int bpmRowY  = EDITOR_Y + ROW_HEIGHT + 14;  // 117
+    const int bpmRowY  = EDITOR_Y + HEADER_Y;  // 117
     const int bpmTextY = bpmRowY + TEXT_PADDING;      // 120
 
     c.label("T>", RIGHT_BAR_X + 2, bpmTextY, t.textEmpty);
@@ -511,8 +522,8 @@ void TrackerLayout::draw_placeholder(Canvas& c, int x, int y, ScreenType screen,
 
     c.label(screen_label(screen), x + 20, y + TEXT_PADDING, t.textTitle);
 
-    const std::string message = "COMING SOON";
-    const int         msgW    = Canvas::text_width(message);
+    const std::string message = c.cased("COMING SOON");
+    const int         msgW    = c.text_width(message);
     c.text(message, x + (OscilloscopeModule::WIDTH - msgW) / 2, y + 180, t.textEmpty);
 }
 

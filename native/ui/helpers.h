@@ -2,6 +2,8 @@
 
 // The layout grid every screen is built on, and the cell painters the editors share.
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -27,6 +29,24 @@ inline constexpr int CHAR_W = 5 * FONT_SCALE + CHAR_SPACING;
 inline constexpr int SECTION_GAP = 14;
 inline constexpr int HEADER_Y    = ROW_HEIGHT + SECTION_GAP;
 inline constexpr int ROWS_Y      = HEADER_Y + ROW_HEIGHT;
+
+// Text starts this far inside a module's left edge.
+inline constexpr int INSET = 10;
+
+// A grid column: `slots` characters, then `gutter` px before the next.
+struct GridCol {
+    int slots;
+    int gutter;
+};
+
+// Each column's left edge, the first at 0.
+template <size_t N>
+constexpr std::array<int, N> column_lefts(const GridCol (&cols)[N]) {
+    std::array<int, N> left{};
+    for (size_t i = 1; i < N; ++i)
+        left[i] = left[i - 1] + cols[i - 1].slots * CHAR_W + cols[i - 1].gutter;
+    return left;
+}
 
 // The 620 px content column is centred in 640; modules are separated by 6 px.
 inline constexpr int SCREEN_SPACER = 6;
@@ -118,10 +138,45 @@ inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
     return (cursor_column >= lo && cursor_column <= hi) ? cursor_mark_ink(t) : t.textParam;
 }
 
+// A grid's header label: over cursor columns `first`..`last`, standing at the first.
+struct HeaderLabel {
+    const char* text;
+    int         first, last;
+};
+
+// The header row of a grid whose cursor column N is at `grid_x + left[N]`.
+template <size_t N, size_t M>
+void draw_header(Canvas& c, int grid_x, int y, const std::array<int, N>& left,
+                 const HeaderLabel (&labels)[M], int cursor_column, const Theme& t) {
+    for (const HeaderLabel& l : labels) {
+        c.label(l.text, grid_x + left[static_cast<size_t>(l.first)], y + HEADER_Y + TEXT_PADDING,
+               header_color(cursor_column, l.first, l.last, t));
+    }
+}
+
+// A grid row's stripe, `index` rows below the header; returns where its text goes.
+inline int draw_grid_row(Canvas& c, int x, int y, int width, int index, int stripe_index,
+                         const Theme& t) {
+    const int rowY = y + ROWS_Y + index * ROW_HEIGHT;
+    c.fill_rect(x, rowY, width, ROW_HEIGHT, row_bg_color(stripe_index, t));
+    return rowY + TEXT_PADDING;
+}
+
+// A row number: lit on the cursor's row, brighter every 4th row when `beats`.
+inline Argb row_number_ink(int row, int cursor_row, bool beats, const Theme& t) {
+    return row == cursor_row ? cursor_mark_ink(t) : (beats && row % 4 == 0) ? t.textParam : t.textEmpty;
+}
+
 // A label beside a cell: lit while the cursor is on what it labels.
 inline void draw_cell_label(Canvas& c, const std::string& text, int x, int text_y, bool lit,
                             const Theme& t) {
     c.label(text, x, text_y, lit ? cursor_mark_ink(t) : t.textParam);
+}
+
+// A status message as drawn: the words in the set case, from `name_at` on a name as it is.
+inline std::string status_text(const Canvas& c, const std::string& message, size_t name_at) {
+    if (name_at >= message.size()) return c.cased(message);
+    return c.cased(message.substr(0, name_at)) + message.substr(name_at);
 }
 
 // ─── The playback marker ─────────────────────────────────────────────────────────────────────────
@@ -150,7 +205,7 @@ class RowCells {
     void cell(const std::string& text, int x, bool is_cursor, bool is_selected, bool is_empty,
               Argb value_color) {
         const int left  = x - CHAR_SPACING;
-        const int right = x + Canvas::text_width(text) + CHAR_SPACING;
+        const int right = x + c_.text_width(text) + CHAR_SPACING;
 
         if (is_cursor || is_selected) {
             // The gutter is claimed only between two selected cells.
@@ -195,7 +250,7 @@ inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool i
     // The cursor spans value and arrow, on the same edges as `RowCells`.
     if (is_cursor) {
         const std::string span = show_arrow ? eq_str + ">" : eq_str;
-        const int         w = Canvas::text_width(span) + 2 * CHAR_SPACING;
+        const int         w = c.text_width(span) + 2 * CHAR_SPACING;
         c.fill_rect(value_x - CHAR_SPACING, text_y - TEXT_PADDING, w, ROW_HEIGHT, t.rowCursor);
     }
 

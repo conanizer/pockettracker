@@ -25,18 +25,21 @@ std::string offset_text(int ms, bool automatic) {
 }
 
 // The open port's name, or OFF/AUTO plus the port count — "none picked" vs "this machine has none".
-std::string device_text(const std::vector<std::string>& names, int index, const std::string& open_name) {
+// The words in `c`'s case, the port's name as the system gives it; it scrolls while `on`.
+std::string device_text(Canvas& c, const std::vector<std::string>& names, int index,
+                        const std::string& open_name, bool on) {
     const int count = static_cast<int>(names.size());
-    if (count == 0) return "OFF  NO PORTS";
+    if (count == 0) return c.cased("OFF  NO PORTS");
 
     const int         idx     = clamp(index, 0, count - 1);
     const int         devices = count > MIDI_FIRST_PORT ? count - MIDI_FIRST_PORT : 0;
-    const std::string ports   = devices > 0 ? dec2(devices) + " PORTS" : "NO PORTS";
-    if (idx == 0) return "OFF  " + ports;
-    if (idx == 1) return Canvas::clip_text(open_name.empty() ? "AUTO  " + ports : "AUTO " + open_name,
-                                           VALUE_MAX_CHARS);
+    const std::string ports   = c.cased(devices > 0 ? dec2(devices) + " PORTS" : "NO PORTS");
+    if (idx == 0) return c.cased("OFF  ") + ports;
+    if (idx == 1) return c.fit_text(open_name.empty() ? c.cased("AUTO  ") + ports
+                                                      : c.cased("AUTO ") + open_name,
+                                    VALUE_MAX_CHARS, on);
 
-    return Canvas::clip_text(names[static_cast<size_t>(idx)], VALUE_MAX_CHARS);
+    return c.fit_text(names[static_cast<size_t>(idx)], VALUE_MAX_CHARS, on);
 }
 
 // The CTL CH cycle: ALL, then the sixteen channels. ⚠️ ALL is 16 on disk but 0 in the cycle.
@@ -96,38 +99,42 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
 
     c.label("MIDI", labelX, y + TEXT_PADDING, t.textTitle);
 
-    const int firstRowY = y + ROW_HEIGHT + 14;
+    const int firstRowY = y + HEADER_Y;
     const auto rowY = [&](MidiRow row) { return firstRowY + midi_row_offset_y(row, ROW_HEIGHT); };
 
     const auto on_row = [&](MidiRow row) { return s.cursorRow == static_cast<int>(row); };
 
+    // `value` as it is drawn: every row but OUTPUT and INPUT is words, cased here.
     const auto row_of = [&](MidiRow row, const char* name, const std::string& value) {
-        c.text(name, labelX, rowY(row) + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, name, labelX, rowY(row) + TEXT_PADDING, on_row(row), t);
         draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_row(row), t.textValue, t);
     };
+    const auto words = [&](const std::string& text) { return c.cased(text); };
 
     // ── OUTPUT and INPUT: the port count rides inside the OFF text, where it is wanted ───────────
-    row_of(MidiRow::OUTPUT, "OUTPUT", device_text(s.deviceNames,   s.deviceIndex,   s.outOpenName));
-    row_of(MidiRow::INPUT,  "INPUT",  device_text(s.inDeviceNames, s.inDeviceIndex, s.inOpenName));
+    row_of(MidiRow::OUTPUT, "OUTPUT",
+           device_text(c, s.deviceNames, s.deviceIndex, s.outOpenName, on_row(MidiRow::OUTPUT)));
+    row_of(MidiRow::INPUT, "INPUT",
+           device_text(c, s.inDeviceNames, s.inDeviceIndex, s.inOpenName, on_row(MidiRow::INPUT)));
 
-    row_of(MidiRow::OFFSET,   "OFFSET",   offset_text(midi_offset_in_force(s.settings, s.autoOffsetMs),
-                                                      s.settings.midiOffsetAuto));
+    row_of(MidiRow::OFFSET, "OFFSET",
+           words(offset_text(midi_offset_in_force(s.settings, s.autoOffsetMs), s.settings.midiOffsetAuto)));
     // The value says what the switch does ("ON  24 PPQN").
-    row_of(MidiRow::SYNC,     "SYNC OUT", s.settings.midiSyncOut ? "ON  24 PPQN" : "OFF");
-    row_of(MidiRow::SYNC_IN,  "SYNC IN",  sync_in_text(s.settings.midiSyncIn, s.clockBpm));
+    row_of(MidiRow::SYNC,     "SYNC OUT", words(s.settings.midiSyncOut ? "ON  24 PPQN" : "OFF"));
+    row_of(MidiRow::SYNC_IN,  "SYNC IN",  words(sync_in_text(s.settings.midiSyncIn, s.clockBpm)));
     // CTL CH says where arriving knobs are when they miss it: a state the user cannot leave alone.
-    row_of(MidiRow::CTL_CH,   "CTL CH", ctl_ch_text(s));
-    row_of(MidiRow::PROG_CHG, "PROG CHG", s.project.midiSendProgramChange ? "ON" : "OFF");
-    row_of(MidiRow::KEYS,     "KEYS",     keys_text(s.settings.midiInVoices));
-    row_of(MidiRow::VELOCITY, "VELOCITY", s.settings.midiVelocity ? "ON" : "OFF");
+    row_of(MidiRow::CTL_CH,   "CTL CH",   words(ctl_ch_text(s)));
+    row_of(MidiRow::PROG_CHG, "PROG CHG", words(s.project.midiSendProgramChange ? "ON" : "OFF"));
+    row_of(MidiRow::KEYS,     "KEYS",     words(keys_text(s.settings.midiInVoices)));
+    row_of(MidiRow::VELOCITY, "VELOCITY", words(s.settings.midiVelocity ? "ON" : "OFF"));
 
     // The action rows read what A does; MAPPING carries the count.
     {
         const int n = static_cast<int>(s.project.midiMappings.size());
-        row_of(MidiRow::MAPPING, "MAPPING", n > 0 ? "A: " + dec2(n) + " MAPPED" : "A: NONE YET");
+        row_of(MidiRow::MAPPING, "MAPPING", words(n > 0 ? "A: " + dec2(n) + " MAPPED" : "A: NONE YET"));
     }
-    row_of(MidiRow::PANIC, "PANIC", "A: ALL NOTES OFF");
-    row_of(MidiRow::TEST,  "TEST",  "A: C-4 CH 1");
+    row_of(MidiRow::PANIC, "PANIC", words("A: ALL NOTES OFF"));
+    row_of(MidiRow::TEST,  "TEST",  words("A: C-4 CH 1"));
 
     // ── Status: PANIC and TEST succeed silently, so the press says it happened (or NO PORT) ──────
     if (!s.statusText.empty()) {

@@ -10,7 +10,7 @@ namespace pt::ui {
 
 namespace {
 
-constexpr int ROW_AREA_TOP = ROW_HEIGHT + 14;   // 35, the side panel's first row
+constexpr int ROW_AREA_TOP = HEADER_Y;   // the side panel's first row
 
 int total_rows() { return THEME_FIRST_COLOR_ROW + static_cast<int>(theme_color_rows().size()); }
 
@@ -46,7 +46,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         if (partner != nullptr) message = std::string("BLENDS ") + partner;
     }
     if (!message.empty()) {
-        c.text(Canvas::clip_text(message, MSG_COLS), x + MSG_X, y + TEXT_PADDING, cursor_mark_ink(t));
+        c.text(Canvas::clip_text(c.cased(message), MSG_COLS), x + MSG_X, y + TEXT_PADDING,
+               cursor_mark_ink(t));
     }
 
     // The rows below the title scroll to keep the cursor in view.
@@ -75,15 +76,16 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int  ry     = row_top(THEME_ROW_THEME);
         const int  ty     = ry + TEXT_PADDING;
 
-        c.label("THEME", x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "THEME", x + NAME_COL_X, ty, on_row, t);
 
         // ⚠️ Clipped before SAVE, so a typed name cannot cover the cells.
         constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
-        draw_cursor_cell(c, Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
+        const std::string name = theme_name_is_builtin(t.name) ? c.cased(t.name) : t.name;
+        draw_cursor_cell(c, c.fit_text(name, NAME_COLS, on_cell(on_row, 0)), x + THEME_NAME_X, ty,
                          on_cell(on_row, 0), value_color(on_row, 0), t);
-        draw_cursor_cell(c, "SAVE", x + SAVE_LABEL_X, ty, on_cell(on_row, 1),
+        draw_cursor_cell(c, c.cased("SAVE"), x + SAVE_LABEL_X, ty, on_cell(on_row, 1),
                          value_color(on_row, 1), t);
-        draw_cursor_cell(c, "LOAD", x + LOAD_LABEL_X, ty, on_cell(on_row, 2),
+        draw_cursor_cell(c, c.cased("LOAD"), x + LOAD_LABEL_X, ty, on_cell(on_row, 2),
                          value_color(on_row, 2), t);
     }
 
@@ -93,12 +95,12 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int  ry     = row_top(THEME_ROW_RANDOM);
         const int  ty     = ry + TEXT_PADDING;
 
-        c.label("RANDOMIZE", x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "RANDOMIZE", x + NAME_COL_X, ty, on_row, t);
 
         // The scheme is a cell, so the row says which hue relationship a roll will give.
-        draw_cursor_cell(c, theme_scheme_label(es.scheme), x + SCHEME_LABEL_X, ty,
+        draw_cursor_cell(c, c.cased(theme_scheme_label(es.scheme)), x + SCHEME_LABEL_X, ty,
                          on_cell(on_row, 0), value_color(on_row, 0), t);
-        draw_cursor_cell(c, "ROLL", x + ROLL_LABEL_X, ty, on_cell(on_row, 1),
+        draw_cursor_cell(c, c.cased("ROLL"), x + ROLL_LABEL_X, ty, on_cell(on_row, 1),
                          value_color(on_row, 1), t);
     }
 
@@ -127,7 +129,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int            ry     = row_top(logical);
         const int            ty     = ry + TEXT_PADDING;
 
-        c.text(row.label, x + NAME_COL_X, ty, on_row ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, row.label, x + NAME_COL_X, ty, on_row, t);
 
         // One character, two facts; the lock wins — a locked colour's clash is not flagged.
         if (es.locks.locked(static_cast<int>(i))) {

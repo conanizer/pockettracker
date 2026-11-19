@@ -32,9 +32,10 @@ enum class SettingsRow {
     HELP       = 17,   // retired: SELECT always opens the full help. The number stays taken
     AUDIO_OUT  = 18,   // the output device (Windows)
     ONE_HAND   = 19,   // ON / OFF, + MS (the hold time) — a modifier held alone and let go stays down (sticky_buttons.h)
+    FONT       = 20,   // the font every screen draws in (ui_fonts.h), + UPPER / lower / Title
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 20;
+inline constexpr int SETTINGS_ROW_COUNT = 21;
 
 // The order rows are drawn and walked; every SettingsRow exactly once.
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
@@ -45,7 +46,7 @@ inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
     SettingsRow::ONE_HAND,
     SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
-    SettingsRow::VISUALIZER, SettingsRow::HELP,     SettingsRow::THEME,
+    SettingsRow::VISUALIZER, SettingsRow::HELP,     SettingsRow::FONT,     SettingsRow::THEME,
     SettingsRow::TEMPLATE,
     SettingsRow::RESUME,    SettingsRow::TRACE,
 };
@@ -109,12 +110,14 @@ inline int settings_first_visible_row(const PlatformCaps& caps) {
     return 0;
 }
 
-// Does this row have a second column? LAYOUT's exists only for a skinned layout, ONE HAND's only
-// while it is on.
+// Does this row have a second column? LAYOUT's exists only for a skinned layout, FONT's only for a
+// font with small letters, ONE HAND's only while it is on.
 inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& caps,
-                                           bool layoutHasSkins, bool oneHanded) {
+                                           bool layoutHasSkins, bool fontHasLowercase,
+                                           bool oneHanded) {
     switch (row) {
         case SettingsRow::LAYOUT:    return caps.touchLayouts && layoutHasSkins;
+        case SettingsRow::FONT:      return fontHasLowercase;
         case SettingsRow::ONE_HAND:  return oneHanded;
         case SettingsRow::OVERLAY:   // STR
         case SettingsRow::BTN_SOUND: // VOL

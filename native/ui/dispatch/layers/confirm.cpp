@@ -83,6 +83,17 @@ void InputDispatcher::confirm_accept() {
                 collect_song(collect_free_folder_name(fs_, folder));
             break;
         }
+        case ConfirmDialogState::Kind::PRESET_UNSAVED: {
+            // SAVE keeps the step for the keyboard to carry out once the file is written.
+            const AppState::PendingPresetStep step = s_.presetStep;
+            if (argv == ConfirmDialogState::PRESET_SAVE) {
+                preset_open_save(step.row);
+                break;
+            }
+            s_.presetStep = {};
+            if (argv == ConfirmDialogState::PRESET_DISCARD && preset_carry_out(step)) mark_modified();
+            break;
+        }
 
         case ConfirmDialogState::Kind::TOP_PANEL:
             if (argv == ConfirmDialogState::TOP_PANEL_YES) s_.theme.visualizerType = VisualizerType::GUIDE;
@@ -98,6 +109,7 @@ void InputDispatcher::confirm_accept() {
 void InputDispatcher::confirm_cancel() {
     const ConfirmDialogState::Kind kind = s_.confirm.kind;
     s_.confirm.close();
+    s_.presetStep = {};
 
     // ⚠️ The one NO that acts: it discards the work, or the prompt returns every launch and is
     // dismissed unread.

@@ -11,9 +11,9 @@ Everything you can do with PocketTracker.
 - Transpose phrases per chain slot — sequence the same phrase in different keys
 - Select cells, rows, or entire screens and copy, cut, paste, or delete them
 - Fill a phrase from one cell: repeat it every 2nd, 3rd, 4th, 6th or 8th row, spread it as an even (Euclidean) rhythm, scatter it at random, roll random notes inside the scale, or ramp a value from one row to another
-- Set swing and shuffle per track or globally with groove patterns, written as a tick length per phrase step, counted 24, 48 or 96 to the quarter note. Start from the built-in list — straight, the twelve classic swing settings a drum machine offers, triplets, half and double time — or bend a pair yourself with the quantize aid, which moves one step and its partner the other way so the bar line stays put, and reads back the swing as a percentage. Save your own to `PocketTracker/Grooves` as files you can rename, edit and carry between devices
+- Set swing and shuffle per track or globally with groove patterns, written as a tick length per phrase step, counted 24, 48 or 96 to the quarter note. Start from the built-in list — straight, the twelve classic swing settings a drum machine offers, triplets, half and double time — or bend a pair yourself with the quantize aid, which moves one step and its partner the other way so the bar line stays put, and reads back the swing as a percentage. Save your own to `PocketTracker/Presets/Grooves` as files you can rename, edit and carry between devices
 - Build up to 16 scales per project by switching each of the twelve notes on or off, and set the song's key. A track using a scale plays only the notes in it: anything out of the scale is moved to the nearest note that is in, both as you type and as the song plays, so a phrase written before you chose the scale falls into it. The scale screen marks the note being heard; sliced instruments are left alone, and any instrument can be taken out of transposition entirely with its TSP switch
-- Start from 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and save your own to `PocketTracker/Scales` as files you can rename, edit and carry between devices
+- Start from 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and save your own to `PocketTracker/Presets/Scales` as files you can rename, edit and carry between devices
 - Set the tempo by feel: RIGHT from the tempo value on the PROJECT screen reaches a TAP button — press A in time and the number follows your taps
 - Metronome: a click on every beat while the song plays, with its own volume (SETTINGS → METRONOME). It is there to play along to and is never written into an export
 - 256 phrases, 256 chains, 8 tracks, 128 grooves
@@ -128,6 +128,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Reverb character: pre-delay, stereo width and tail modulation — with built-in presets that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with built-in presets that set all three at once
 - Save a reverb or a delay you have dialled in as a preset file, and load it into any other project
+- Every preset row — scales, grooves, reverbs, delays and themes — steps through its folder, the built-in presets and your own together, and offers to save first when a step would lose changes no file holds
 - Push the delay's feedback past `E0` and it self-oscillates — the repeats bloom into a steady singing tone that carries on after the input stops
 - Write the delay time from a phrase or a table with `TIM`, and fade it with AUS/AUF — the repeats bend in pitch as the time moves, like a tape delay
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency
@@ -176,6 +177,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Theme editor: full RGB palette for every UI color; save and load themes as .ptt files
 - Several built-in themes to start from
+- Three interface fonts, and the app's words in capitals, small letters or Title case; a name too long for its field scrolls while the cursor is on it
 - The top panel shows an octascope (one scope per active track), a full octascope (all 8 track scopes forced on), a spectrum with peak hold, nothing — or hints
 
 ## Controls

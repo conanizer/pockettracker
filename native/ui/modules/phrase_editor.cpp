@@ -10,43 +10,36 @@ namespace pt::ui {
 using songcore::Note;
 using songcore::PhraseStep;
 
+namespace {
+
+// The cursor's columns: the row number (and the playhead's slot beside it), N, V, I, then three FX
+// name/value pairs.
+constexpr GridCol COLS[] = {{1, 6 + CHAR_W}, {3, 14}, {2, 11}, {2, 11}, {3, 4},
+                            {2, 11},         {3, 4},  {2, 11}, {3, 4},  {2, 0}};
+constexpr auto    LEFT   = column_lefts(COLS);
+
+constexpr HeaderLabel HEADERS[] = {{"N", 1, 1},   {"V", 2, 2},   {"I", 3, 3},
+                                   {"FX1", 4, 5}, {"FX2", 6, 7}, {"FX3", 8, 9}};
+
+}  // namespace
+
 void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& s) const {
     const Theme& t = s.theme;
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // Column x: a 2-char cell, then a 10px gutter.
-    int       colX      = x + 10;
-    const int stepX     = colX; colX += 30 + 10;
-    const int noteX     = colX; colX += 45 + 20;
-    const int volX      = colX; colX += 30 + 15;
-    const int instX     = colX; colX += 30 + 15;
-    const int fx1NameX  = colX; colX += 45 + 10;
-    const int fx1ValueX = colX; colX += 30 + 15;
-    const int fx2NameX  = colX; colX += 45 + 10;
-    const int fx2ValueX = colX; colX += 30 + 15;
-    const int fx3NameX  = colX; colX += 45 + 10;
-    const int fx3ValueX = colX;
-
-    int rowY = y + TEXT_PADDING;
-    c.text("PHRASE " + hex2(s.phrase.id), x + 10, rowY, t.textTitle);
+    const int titleY = y + TEXT_PADDING;
+    c.text(c.cased("PHRASE ") + hex2(s.phrase.id), x + INSET, titleY, t.textTitle);
     // The chain row and its song cell (PhraseEditorState).
     if (s.viaChain >= 0 && s.viaChainRow >= 0) {
         std::string via = "C" + hex2(s.viaChain) + "/" + hex1(s.viaChainRow);
         if (s.songRow >= 0 && s.songTrack >= 0)
             via += "  S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1);
-        c.text(via, x + 190, rowY, t.textParam);
+        c.text(via, x + 190, titleY, t.textParam);
     }
 
     // The header lights for the cursor's column, the row number for its row.
-    rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    const int cc = s.cursorColumn;
-    c.label("N", noteX, rowY, header_color(cc, 1, 1, t));
-    c.label("V", volX, rowY, header_color(cc, 2, 2, t));
-    c.label("I", instX, rowY, header_color(cc, 3, 3, t));
-    c.label("FX1", fx1NameX, rowY, header_color(cc, 4, 5, t));
-    c.label("FX2", fx2NameX, rowY, header_color(cc, 6, 7, t));
-    c.label("FX3", fx3NameX, rowY, header_color(cc, 8, 9, t));
+    draw_header(c, x + INSET, y, LEFT, HEADERS, s.cursorColumn, t);
 
     // An AUS/AUF cell no ramp uses draws dimmed — the emitter's own pairing over every chain row that
     // plays this phrase, asked once per draw.
@@ -58,26 +51,20 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
     const int hopRow = songcore::phrase_certain_hop_row(s.phrase);
 
     for (int i = 0; i < static_cast<int>(s.phrase.steps.size()); ++i) {
-        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, rampCells, hopRow, stepX, noteX,
-                 volX, instX, fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
+        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, rampCells, hopRow);
     }
 }
 
 void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const PhraseStep& step,
                                   const PhraseEditorState& s,
-                                  const songcore::RampCells& rampCells, int hopRow, int stepX,
-                                  int noteX, int volX, int instX, int fx1NameX, int fx1ValueX,
-                                  int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const {
+                                  const songcore::RampCells& rampCells, int hopRow) const {
     const Theme& t = s.theme;
 
     // The HOP's own row plays nothing, but its HOP cell acts, so it stays lit.
     const bool cutOff = hopRow >= 0 && index >= hopRow;
 
-    const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
-
-    const int textY = dataRowY + TEXT_PADDING;
+    const int textY = draw_grid_row(c, x, y, WIDTH, index, index, t);
+    const auto at   = [&](int col) { return x + INSET + LEFT[static_cast<size_t>(col)]; };
 
     // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
@@ -87,21 +74,19 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // Every 4th row number is brighter (a beat). Column 0 is a real cursor position.
-    const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
-                           : (index % 4 == 0 && !cutOff) ? t.textParam
-                                                         : t.textEmpty;
-    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
+    cells.cell(hex1(index), at(0), cur(0), /*is_selected=*/false, /*is_empty=*/false,
+               row_number_ink(index, s.cursorRow, !cutOff, t));
 
     // The playhead marker, in the gutter beside the row number.
     for (const TrackPlayhead& ph : s.playheads)
-        if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
+        if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, at(0) + CHAR_W, textY, t);
 
     // An OFF plays nothing: its V and I dim.
     const bool noteEmpty = cutOff || (step.note == Note::EMPTY());
     const bool noNote    = cutOff || !songcore::step_has_note(step);
-    cells.cell(note_name(step.note),  noteX, cur(1), sel(1), noteEmpty, t.textValue);
-    cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
-    cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
+    cells.cell(note_name(step.note),  at(1), cur(1), sel(1), noteEmpty, t.textValue);
+    cells.cell(hex2(step.volume),     at(2), cur(2), sel(2), noNote, t.textParam);
+    cells.cell(hex2(step.instrument), at(3), cur(3), sel(3), noNote, t.textParam);
 
     // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it, and the one of CHD and
     // LEG that MIDI OUT cannot play beside the other.
@@ -110,15 +95,13 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
                           songcore::instrument_routes_external(
                               s.project->instruments[static_cast<size_t>(step.instrument)]);
     const int midiInert = external ? songcore::chord_legato_inert_slot(songcore::as_played(step)) : 0;
-    const int nameX[]  = {fx1NameX, fx2NameX, fx3NameX};
-    const int valueX[] = {fx1ValueX, fx2ValueX, fx3ValueX};
     for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
         const songcore::FxSlot& f = songcore::fx_slot(step, slot);
         const int  col = fx_type_column(slot, PHRASE_FX_COLUMN);
         const bool dim = (cutOff && !(index == hopRow && f.type == songcore::FX_HOP)) || f.type == 0x00 ||
                          f.off || !rampCells.active(f.type, index, slot) || slot == midiInert;
-        cells.cell(effect_name(f.type), nameX[slot - 1],  cur(col),     sel(col),     dim, t.textValue);
-        cells.cell(hex2(f.value),       valueX[slot - 1], cur(col + 1), sel(col + 1), dim, t.textParam);
+        cells.cell(effect_name(f.type), at(col),     cur(col),     sel(col),     dim, t.textValue);
+        cells.cell(hex2(f.value),       at(col + 1), cur(col + 1), sel(col + 1), dim, t.textParam);
     }
 }
 

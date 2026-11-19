@@ -50,6 +50,7 @@ constexpr struct { const char* key; int V::* field; int lo, hi; } INTS[] = {
     {"oneHandHoldMs", &V::oneHandHoldMs, 50, 5000},
     {"abxy", &V::abxyIndex, 0, 2},                  // 0 AUTO, 1 XBOX, 2 NINTENDO
     {"metronomeVolume", &V::metronomeVolume, 0, 255},
+    {"textCase", &V::textCase, 0, 2},               // 0 UPPER, 1 lower, 2 Title
     {"midi_offset_ms", &V::midiOffsetMs, -99, 99},
     {"midi_sync_in", &V::midiSyncIn, 0, 2},
     {"buttonSoundVolume", &V::buttonSoundVolume, 0, 255},
@@ -63,6 +64,7 @@ constexpr struct { const char* key; std::string V::* field; } STRINGS[] = {
     {"midi_out_device", &V::midiOutDevice}, {"midi_in_device", &V::midiInDevice},
     {"audio_output", &V::audioOutput},      // a driver name
     {"portrait_skin", &V::portraitSkin},    {"overlay_name", &V::overlayName},
+    {"font", &V::fontName},                 // a UI_FONTS name
 };
 
 }  // namespace

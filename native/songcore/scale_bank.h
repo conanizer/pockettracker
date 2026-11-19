@@ -100,20 +100,6 @@ inline std::string scale_display_name(const Scale& s) {
     return idx >= 0 ? std::string(scale_bank()[static_cast<size_t>(idx)].name) : std::string();
 }
 
-/** Has a slot drifted from the factory shape it is named after? (the `*`). False for a name the
- *  bank does not know. */
-inline bool scale_differs_from_its_name(const Scale& s) {
-    const int idx = scale_bank_index_by_name(s.name);
-    return idx >= 0 && scale_bank()[static_cast<size_t>(idx)].mask != scale_mask(s);
-}
-
-// The bank row the cycle steps from: by name, else by intervals, else 0.
-inline int scale_bank_cycle_index(const Scale& s) {
-    int idx = scale_bank_index_by_name(s.name);
-    if (idx < 0) idx = scale_bank_index_by_mask(scale_mask(s));
-    return idx < 0 ? 0 : idx;
-}
-
 }  // namespace songcore
 
 #endif  // POCKETTRACKER_SONGCORE_SCALE_BANK_H

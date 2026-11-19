@@ -14,6 +14,7 @@
 #include "songcore/timing.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/preset_row.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -140,6 +141,7 @@ struct GrooveState {
     int   panelRow     = 0;
     int   panelColumn  = 0;                // the FILE row only
     int   quantize     = 0;                // 0 = OFF; see groove_quantize_label
+    PresetRowView preset{};                // the NAME cell: the Grooves folder
     Theme theme        = theme_classic();
 };
 
@@ -147,6 +149,7 @@ struct GrooveInputResult {
     bool modified    = false;
     int  newQuantize = -1;  // ≥ 0 → the QNT cell moved; the pointer lives in AppState, not the song
     bool rulerRefused = false;  // the PPQ cell was turned and a step would have passed FF
+    int  presetIndex  = -1;     // the NAME cell asks for a file of the folder, as SCALE's
 };
 
 class GrooveModule {

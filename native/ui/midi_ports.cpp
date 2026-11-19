@@ -177,7 +177,7 @@ template <class Backend> bool MidiPorts::rescan(Side<Backend>& d) {
         changed = true;
     }
     if (d.openName.empty() && open(d)) {
-        set_status(s_, std::string("MIDI ") + d.tag + ": " + d.openName, true);
+        set_status(s_, std::string("MIDI ") + d.tag + ": ", d.openName, true);
         changed = true;
     }
     return changed;

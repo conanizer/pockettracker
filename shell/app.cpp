@@ -20,6 +20,7 @@
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE
 #include "ui/scale_io.h"              // seed_scale_bank
 #include "ui/groove_io.h"             // seed_groove_bank
+#include "ui/preset_folder.h"         // seed_reverb_bank, seed_delay_bank, seed_theme_bank
 #include "ui/settings_store.h"
 
 #include "skin/device_skin.h"
@@ -232,6 +233,16 @@ void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, S
     if (const int seeded = ui::seed_groove_bank(filesystem); seeded > 0)
         std::printf("files:   seeded %d factory grooves in %s\n", seeded,
                     filesystem.grooves_directory().c_str());
+
+    if (const int seeded = ui::seed_reverb_bank(filesystem); seeded > 0)
+        std::printf("files:   seeded %d factory reverbs in %s\n", seeded,
+                    filesystem.reverbs_directory().c_str());
+
+    if (const int seeded = ui::seed_delay_bank(filesystem); seeded > 0)
+        std::printf("files:   seeded %d factory delays in %s\n", seeded, filesystem.delays_directory().c_str());
+
+    if (const int seeded = ui::seed_theme_bank(filesystem); seeded > 0)
+        std::printf("files:   seeded %d factory themes in %s\n", seeded, filesystem.themes_directory().c_str());
 
     if (ui::load_folder_config(filesystem, state.folderConfig))
         std::printf("config:   %s\n", filesystem.config_path().c_str());
@@ -792,6 +803,14 @@ void FrameLoop::update_overlay() {
     }
 }
 
+// "AUDIO OUT: " and a driver's name or error, which keeps the letters the system gives it.
+void set_audio_out_status(ui::AppState& s, const std::string& name, bool ok) {
+    static const std::string WORDS = "AUDIO OUT: ";
+    s.statusMessage = WORDS + name;
+    s.statusNameAt  = WORDS.size();
+    s.statusSuccess = ok;
+}
+
 // SETTINGS > AUDIO OUT: the row edits an index, the switch happens here (at boot from the saved NAME).
 // The name is rewritten only when a pick plays, so a driver absent at boot is tried again next launch.
 void FrameLoop::sync_audio_output(Uint64 now) {
@@ -818,8 +837,7 @@ void FrameLoop::sync_audio_output(Uint64 now) {
         std::string err;
         if (saved > 0 && saved != cfg.audioOutputs->active()) {
             if (cfg.audioOutputs->select(saved, err)) {
-                state.statusMessage = "AUDIO OUT: " + sv.audioOutput;
-                state.statusSuccess = true;
+                set_audio_out_status(state, sv.audioOutput, true);
             } else {
                 std::printf("audio:   %s still will not open: %s\n", sv.audioOutput.c_str(),
                             err.c_str());
@@ -832,13 +850,9 @@ void FrameLoop::sync_audio_output(Uint64 now) {
         std::string        err;
         if (cfg.audioOutputs->select(pick, err)) {
             sv.audioOutput = want;
-            if (shownAudioOut >= 0) {
-                state.statusMessage = "AUDIO OUT: " + want;
-                state.statusSuccess = true;
-            }
+            if (shownAudioOut >= 0) set_audio_out_status(state, want, true);
         } else {
-            state.statusMessage = "AUDIO OUT: " + err;
-            state.statusSuccess = false;
+            set_audio_out_status(state, err, false);
             std::printf("audio:   %s could not open: %s\n", want.c_str(), err.c_str());
         }
     }
@@ -848,6 +862,7 @@ void FrameLoop::sync_audio_output(Uint64 now) {
     if (active != playingAudioOut) {
         if (pick < 0 && playingAudioOut > 0) {
             state.statusMessage = "AUDIO OUT LOST: SYSTEM";
+            state.statusNameAt  = std::string::npos;
             state.statusSuccess = false;
         }
         playingAudioOut = active;
@@ -1115,6 +1130,7 @@ void FrameLoop::draw_frame(Uint64 now) {
 
     // Everything the UI reads back from the engine; after isPlaying, which the waveform's decay uses.
     feed.poll(engineRef, host, state, static_cast<long long>(now));
+    dispatch.poll_preset_rows();
 
     // Read every frame so no edit site has to push it. 0x80 lands at -12 dBFS, below the limiter.
     engineRef.setMetronome(state.settings.metronomeEnabled,
@@ -1127,18 +1143,21 @@ void FrameLoop::draw_frame(Uint64 now) {
     //
     // Draw only when something may have changed: sound (or the frame after it stops), input, the
     // first frame, a settling resize, falling meters, a timed status message (and the frame it clears
-    // on). present() then skips a frame identical to the screen. ⚠️ That net cannot catch a frame that
-    // is never drawn — hence the last terms.
+    // on), a long name scrolling under the cursor. present() then skips a frame identical to the
+    // screen. ⚠️ That net cannot catch a frame that is never drawn — hence the last terms.
     const bool timedWork = dispatch.has_pending_timed_work();
     const bool metersFalling = layout.has_falling_meters(state);
     const bool audible = audio_is_audible(state);
     const bool settling = resizeSettle > 0;
+    const long long scrollDue = screen.canvas.scroll_due_ms();
+    const bool scrolling = scrollDue >= 0 && static_cast<long long>(now) >= scrollDue;
     if (settling) {
         screen.video.invalidate_backbuffer(/*texture_lost=*/false);
         --resizeSettle;
     }
     if (audible || audibleEdge || sawInput || !drewOnce || settling || metersFalling ||
-        timedWork || timedWorkEdge) {
+        timedWork || timedWorkEdge || scrolling) {
+        screen.canvas.begin_frame(static_cast<long long>(now));
         layout.draw(screen.canvas, state);
         ++counts.drawn;
 

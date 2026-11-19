@@ -1207,7 +1207,7 @@ A new groove holds **two steps of 12 ticks**, which is the pair swing works on. 
 
 | Row | What it does |
 |---|---|
-| Name | The groove this slot was taken from. A+LEFT/RIGHT steps through the built-in grooves and loads the one you land on. **SAVE** and **LOAD** write and read groove files — see below. A `*` means the ticks no longer match the name. |
+| Name | The groove this slot was taken from. A+LEFT/RIGHT steps through the groove files — the built-in ones and your own — and loads the one you land on. **SAVE** and **LOAD** write and read groove files — see below. A `*` means the ticks no longer match the name. |
 | QNT | The quantize pointer — see below. |
 | SWG | Read-only. How long the first half of the group is, as a share of the whole. `50.0%` is even, `66.7%` is a triplet feel. It follows the **TIC** cursor, not the panel, so changing QNT never moves the number. |
 | PPQ | How finely this groove's ticks count: **24**, **48** or **96** to the quarter note, which makes an even step `06`, `0C` or `18`. Changing it rewrites the ticks so the groove sounds the same — going down rounds them to the nearest tick, and a change that would push a step past `FF` is refused. It is this groove's own: the ticks that `LAT`, `KIL`, `RPT` and the other effects count in stay twelve to the step. |
@@ -1250,9 +1250,9 @@ Armed, both A axes do the same move of 1, because one tick is exactly one step o
 
 ### Built-in grooves, and groove files
 
-The name row cycles a built-in list: **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), then **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME**. Landing on one replaces every tick in the slot, so save a groove you have built before stepping off it.
+The name row steps through the `.ptg` files in `PocketTracker/Presets/Grooves`, in file-name order: the built-in ones — **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME** — and every groove you have saved. Landing on one replaces every tick in the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
 
-**SAVE** names the slot and writes it to `PocketTracker/Grooves` as a `.ptg` file; **LOAD** reads one back into the slot you are looking at, with the PPQ it was written in. The built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers them all.
+**SAVE** names the slot and writes it to that folder; **LOAD** reads a groove from anywhere back into the slot you are looking at, with the PPQ it was written in. The built-ins are written into the folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and they leave the name row.
 
 ### Assigning grooves
 
@@ -1271,7 +1271,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 | D-pad UP/DOWN | Move between rows |
 | D-pad RIGHT / LEFT | Move into the panel and back |
 | A | On a `--` row, add an even step. On SAVE or LOAD, press the button |
-| A + LEFT/RIGHT | Edit tick value. On the name row, step through the built-in grooves. On QNT or PPQ, change it |
+| A + LEFT/RIGHT | Edit tick value. On the name row, step through the grooves. On QNT or PPQ, change it |
 | A + UP/DOWN | Edit tick value (large step) |
 | A + B | Clear row. On the name row, back to STRAIGHT. On PPQ, back to 48 |
 | B + UP/DOWN | Set QNT from anywhere on the screen |
@@ -1309,7 +1309,7 @@ B  B    ON
 
 | Field | Meaning |
 |---|---|
-| Name | The scale this slot was taken from. A+LEFT/RIGHT steps through the 38 built-in scales and loads the one you land on. **SAVE** and **LOAD** write and read scale files — see below. |
+| Name | The scale this slot was taken from. A+LEFT/RIGHT steps through the scale files — the 38 built-in ones and your own — and loads the one you land on. **SAVE** and **LOAD** write and read scale files — see below. |
 | KEY | The root the scale is built from. It belongs to the project rather than to the individual scale, so changing it re-labels every row and moves all 16 scales to the new key. |
 | LEN | How many notes this scale contains. 7 is a mode, 5 a pentatonic, 12 no constraint at all. |
 | Rows 0–B | The twelve intervals above the key, each `ON` or `--`. The note name beside each row is what that interval sounds like in the current key. |
@@ -1323,14 +1323,11 @@ The `>` marker shows a note that is sounding right now. Play a chromatic run und
 
 ### The built-in scales, and scale files
 
-The name row cycles 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones. Landing on a name loads that scale's twelve notes into the slot.
+The name row steps through the `.pts` files in `PocketTracker/Presets/Scales`, in file-name order: 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and every scale you have saved. Landing on a name loads that scale's twelve notes into the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
 
 Switching a note on or off afterwards leaves the name alone and puts a `*` in front of it, so `*MAJOR` is a major scale you have changed.
 
-**SAVE** names the slot and writes it to `PocketTracker/Scales` as a `.pts` file; **LOAD** reads one back into the slot you are looking at. The 38 built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers all 38.
-
-> [!NOTE]
-> Cycling the name replaces all twelve notes. Save a scale you have built before stepping off it.
+**SAVE** names the slot and writes it to that folder; **LOAD** reads a scale from anywhere back into the slot you are looking at. The 38 built-ins are written into the folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and they leave the name row.
 
 ### What a scale changes
 
@@ -1355,7 +1352,7 @@ While you are typing, the note cell follows the last `SCA` or `SCG` written **at
 |---|---|
 | D-pad UP/DOWN | Move between rows |
 | D-pad LEFT/RIGHT | On the name row, move between the name, SAVE and LOAD |
-| A + LEFT/RIGHT | Step through the built-in scales / change KEY / switch a note ON or off |
+| A + LEFT/RIGHT | Step through the scales / change KEY / switch a note ON or off |
 | A | On SAVE or LOAD, run it. Nothing on any other cell |
 | A + B | On the name, put the slot back to Chromatic — all twelve notes on |
 | A + UP/DOWN | Nothing — none of these cells has a large step |
@@ -1530,7 +1527,7 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets, from **DEFAULT** through small rooms to long halls and plates. Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
+| *preset name* | The first line of the section. **A + D-pad** on the name steps through the `.ptr` files in `PocketTracker/Presets/Reverbs`: the seven built-in ones, from **DEFAULT** through small rooms to long halls and plates, and every reverb you have saved. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Presets/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
 | ALGO | Which reverb the cells below drive: **DEFAULT** (the app's own reverb), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
@@ -1547,7 +1544,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets, from **DIGITAL** (a clean echo) to dub and endless repeats. Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to DIGITAL, the delay a new project starts with. |
+| *preset name* | The first line of the section. **A + D-pad** on the name steps through the `.ptd` files in `PocketTracker/Presets/Delays`: the seven built-in ones, from **DIGITAL** (a clean echo) to dub and endless repeats, and every delay you have saved. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to DIGITAL, the delay a new project starts with. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Presets/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **A** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
@@ -1712,13 +1709,14 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
 | METRONOME | ON / OFF (+ VOL) | A click on every beat — one per four phrase steps — for as long as the song is playing, with an accent on the first beat of each bar. The **VOL** sub-column sets how loud it is (`00`–`FF`). You hear it while you work; it is never written into an exported WAV. |
-| KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
+| KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. The key left of SPACE, or L+UP / L+DOWN, switches it between capitals and small letters. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NAV | POOL / SONG | What B + D-pad walks. **SONG** (the default) walks the arrangement: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds. **POOL** steps through the 00–FF chain and phrase pools instead, which is what earlier versions did — see §5.4. |
 | ONE HAND | ON / OFF (+ MS) | For playing with one hand. With it on, **A**, **B**, **L**, **R** or **SELECT** held alone for a moment and let go stays down until you press it again, so a combination can be played one button at a time: lock R, then press B to mute. Its letter shows under the note monitor while it is held. A lock lets go by itself after a combination done in one go — delete, cut, paste, clone, a new selection — and when a question box opens; it stays for the ones you repeat, such as A + D-pad or a mute. **MS**, shown while it is on, sets how long the hold takes, from 150 to 1000 ms (300 by default). |
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 27). |
 | NOTE PREV | ON / OFF | On the PHRASE screen, play the note under the cursor for as long as you hold **A** — when you insert it, change it with A + D-pad, or just hold A on it. Not in selection mode, and not while playing. |
 | TOP PANEL | OCTA / OCTA.F / SPCT.P / EMPTY / HINTS | What the strip across the top shows: a visualizer, nothing, or hints (see §3 for descriptions). |
+| FONT | 5X5 / UNSCII / SLIM, then UPPER / lower / Title | The font every screen is drawn in, and how the app's own words are written: all capitals, all small letters, or a capital at the start of each word. Names you typed, numbers and notes are shown as they are. |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 | ABXY | AUTO / XBOX / NINTENDO | Which face button your controller has **printed** A. Appears only while a controller is attached. **AUTO** trusts the controller and is right for a handheld's built-in pad and for a real Switch pad. Use **NINTENDO** if A is the right-hand button but the app reads it as B - common with 8BitDo pads in XInput mode, which report themselves as Xbox controllers. **XBOX** = A is the bottom button. Keyboard keys are never affected. |
@@ -1752,13 +1750,13 @@ The THEME EDITOR lets you customize the entire color scheme of the app, or switc
 
 Press **B** to close and return to SETTINGS. All color changes apply immediately so you can see them live.
 
-### Row 0 — THEME (built-in selection + SAVE/LOAD)
+### Row 0 — THEME (the theme files + SAVE/LOAD)
 
-The top row lets you cycle through built-in themes and save or load custom themes.
+The top row steps through the themes in `PocketTracker/Themes` and saves or loads one.
 
 | Cursor position (channel) | Action |
 |---|---|
-| 0 — theme name | A+LEFT/RIGHT to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED |
+| 0 — theme name | A+LEFT/RIGHT to step through the `.ptt` files in the folder, in file-name order: the built-in ones (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED, written there on the first start) and your own. If you have changed a colour by hand and not saved it, a step — or a ROLL of the colours — first offers **SAVE**, **DISCARD** or **CANCEL**; colours that only came from a ROLL are let go without asking |
 | 1 — SAVE | Press A to save the current theme to a `.ptt` file |
 | 2 — LOAD | Press A to load a theme from a `.ptt` file |
 
@@ -2963,7 +2961,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 1. Navigate to SETTINGS (PROJECT → SETTINGS row → A).
 2. Move to the THEME row and press **A** to open the THEME EDITOR.
-3. On row 0, use A+LEFT/RIGHT on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED).
+3. On row 0, use A+LEFT/RIGHT on the theme name to step through the themes (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED, and any you have saved).
 4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+LEFT/RIGHT to adjust.
 5. When you are happy with the look, move back to row 0, move RIGHT to SAVE, and press A.
 

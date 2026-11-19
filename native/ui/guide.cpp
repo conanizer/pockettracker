@@ -8,6 +8,7 @@
 #include "ui/canvas.h"
 #include "ui/clipboard.h"
 #include "ui/help_text.h"
+#include "ui/helpers.h"
 #include "ui/navigation.h"
 #include "ui/overlays.h"
 #include "ui/song_pointer.h"
@@ -88,7 +89,7 @@ std::string screen_moves(const AppState& s) {
 
 // "2x3 from PHRASE": what L+A would paste, and the screen it was copied on.
 std::string clipboard_words(const Clipboard* clip) {
-    if (clip == nullptr || !clip->has_data()) return "empty";
+    if (clip == nullptr || !clip->has_data()) return "Empty";
     const char* from = "";
     switch (clip->type()) {
         case ClipboardType::PHRASE_STEPS: from = "PHRASE"; break;
@@ -109,7 +110,7 @@ const GuideScreenLines* l_lines_for(HelpTopic screen) {
 
 bool guide_up(const AppState& s) { return s.theme.visualizerType == VisualizerType::GUIDE; }
 
-GuideLines guide_lines(const AppState& s) {
+GuideLines guide_lines(const Canvas& c, const AppState& s) {
     const HelpTopic  screenTopic = help_screen(s);
     const HelpEntry& cell        = help_entry(help_topic(s));
     const HelpEntry& screen      = help_entry(screenTopic);
@@ -129,7 +130,7 @@ GuideLines guide_lines(const AppState& s) {
         keys = {idle[0] != nullptr ? idle[0] : "", idle[1] != nullptr ? idle[1] : ""};
     }
 
-    const ValueHint hint = held_value_hint(s);
+    const ValueHint hint = held_value_hint(c, s);
     if (s.selection.active) {
         const SelectionBounds b = s.selection.bounds();
         title = "SELECTION: " + std::to_string(b.width()) + "x" + std::to_string(b.height());
@@ -168,7 +169,8 @@ GuideLines guide_lines(const AppState& s) {
     GuideLines   g;
     g.line[0] = s.statusMessage.empty()
                     ? GuideLines::Line{title, t.textTitle}
-                    : GuideLines::Line{s.statusMessage, s.statusSuccess ? t.vizWave : Argb{0xFFFF0000}};
+                    : GuideLines::Line{status_text(c, s.statusMessage, s.statusNameAt),
+                                       s.statusSuccess ? t.vizWave : Argb{0xFFFF0000}};
     g.line[1] = {keys[0], t.textValue, t.vizWave};
     g.line[2] = {keys[1], t.textValue, t.vizWave};
     for (GuideLines::Line& line : g.line) line.text = Canvas::clip_text(line.text, HELP_MAX_CHARS);

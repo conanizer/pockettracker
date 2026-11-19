@@ -36,19 +36,19 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     // The sequencer's own active length (timing.h), never re-derived here.
     const int activeLen = songcore::groove_active_length(groove);
 
-    c.text("GROOVE " + hex2(groove.id), x + 10, headerY, t.textTitle);
+    c.text(c.cased("GROOVE ") + hex2(groove.id), x + 10, headerY, t.textTitle);
 
     std::string lenText = std::to_string(activeLen);
     if (lenText.size() < 2) lenText = " " + lenText;
-    c.text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam);
+    c.text(c.cased("LEN:") + lenText, x + WIDTH - 130, headerY, t.textParam);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
     // Lit for the cursor's column.
-    c.label("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING,
-            header_color(s.cursorColumn, GROOVE_COL_TICK, GROOVE_COL_TICK, t));
+    c.label("TIC", tickX, y + HEADER_Y + TEXT_PADDING,
+           header_color(s.cursorColumn, GROOVE_COL_TICK, GROOVE_COL_TICK, t));
 
     // ── 16 data rows ─────────────────────────────────────────────────────────────────────────────
-    const int dataStartY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + TEXT_PADDING;
+    const int dataStartY = y + ROWS_Y + TEXT_PADDING;
     const bool onGrid    = (s.cursorColumn == GROOVE_COL_TICK);
 
     for (int index = 0; index < 16; ++index) {
@@ -74,39 +74,40 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     };
 
     // NAME (groove_display_name). `----` = a hand-built groove; `*` = drifted from its name.
+    // A built-in groove's name is the app's word, in the set case; a saved one is the user's.
     std::string shown = songcore::groove_display_name(groove);
     const bool  named = !shown.empty();
     if (!named) shown = "----";
-    if (static_cast<int>(shown.size()) > GROOVE_NAME_MAX_CHARS)
-        shown.resize(GROOVE_NAME_MAX_CHARS);
+    else if (songcore::groove_bank_index_by_name(shown) >= 0) shown = c.cased(shown);
 
-    const bool marked = songcore::groove_differs_from_its_name(groove);
+    const bool marked = s.preset.marked;
     if (marked)
         c.text("*", x + GROOVE_STAR_X, panelY(GROOVE_PANEL_NAME), t.textPlayhead);
 
-    draw_cell(c, shown, x + GROOVE_PANEL_X + (marked ? CHAR_W : 0), panelY(GROOVE_PANEL_NAME),
+    draw_cell(c, c.fit_text(shown, GROOVE_NAME_MAX_CHARS, here(GROOVE_PANEL_NAME, 0)),
+              x + GROOVE_PANEL_X + (marked ? CHAR_W : 0), panelY(GROOVE_PANEL_NAME),
               here(GROOVE_PANEL_NAME, 0), /*is_selected=*/false, /*is_empty=*/!named, t.textValue, t);
 
     // SAVE · LOAD
     const int fileY = panelY(GROOVE_PANEL_FILE);
-    draw_cursor_cell(c, "SAVE", x + GROOVE_PANEL_X, fileY, here(GROOVE_PANEL_FILE, 0), t.textParam, t);
-    draw_cursor_cell(c, "LOAD", x + GROOVE_LOAD_X, fileY, here(GROOVE_PANEL_FILE, 1), t.textParam, t);
+    draw_cursor_cell(c, c.cased("SAVE"), x + GROOVE_PANEL_X, fileY, here(GROOVE_PANEL_FILE, 0), t.textParam, t);
+    draw_cursor_cell(c, c.cased("LOAD"), x + GROOVE_LOAD_X, fileY, here(GROOVE_PANEL_FILE, 1), t.textParam, t);
 
     // QNT — the editing aid, not a stored setting.
     const int qntY = panelY(GROOVE_PANEL_QNT);
-    c.label("QNT", x + GROOVE_PANEL_X, qntY, here(GROOVE_PANEL_QNT, 0) ? cursor_mark_ink(t) : t.textParam);
-    draw_cursor_cell(c, groove_quantize_label(s.quantize), x + GROOVE_VALUE_X, qntY,
+    draw_cell_label(c, "QNT", x + GROOVE_PANEL_X, qntY, here(GROOVE_PANEL_QNT, 0), t);
+    draw_cursor_cell(c, c.cased(groove_quantize_label(s.quantize)), x + GROOVE_VALUE_X, qntY,
                      here(GROOVE_PANEL_QNT, 0), t.textValue, t);
 
     // SWG — read-only, for the tick cursor's group.
     const int swgY = panelY(GROOVE_PANEL_SWG);
-    c.label("SWG", x + GROOVE_PANEL_X, swgY, here(GROOVE_PANEL_SWG, 0) ? cursor_mark_ink(t) : t.textParam);
+    draw_cell_label(c, "SWG", x + GROOVE_PANEL_X, swgY, here(GROOVE_PANEL_SWG, 0), t);
     draw_cursor_cell(c, swing_text(groove_swing_tenths(groove, s.cursorRow, s.quantize)),
                      x + GROOVE_VALUE_X, swgY, here(GROOVE_PANEL_SWG, 0), t.textParam, t);
 
     // PPQ — tick column tics per quarter note.
     const int ppqY = panelY(GROOVE_PANEL_PPQ);
-    c.label("PPQ", x + GROOVE_PANEL_X, ppqY, here(GROOVE_PANEL_PPQ, 0) ? cursor_mark_ink(t) : t.textParam);
+    draw_cell_label(c, "PPQ", x + GROOVE_PANEL_X, ppqY, here(GROOVE_PANEL_PPQ, 0), t);
     draw_cursor_cell(c, std::to_string(songcore::groove_ticks_per_step(groove) * 4),
                      x + GROOVE_VALUE_X, ppqY, here(GROOVE_PANEL_PPQ, 0), t.textValue, t);
 }
@@ -114,17 +115,9 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
 CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
     if (s.cursorColumn == GROOVE_COL_PANEL) {
         switch (s.panelRow) {
-            case GROOVE_PANEL_NAME: {
-                // The factory list, cycled as SCALE's name row.
-                const int index = songcore::groove_bank_cycle_index(s.groove);
-                CursorContext c = cc::index_cycle(index, static_cast<int>(songcore::groove_bank().size()));
-                c.defaultValue = 0;  // A+B: STRAIGHT, a new groove's own steps
-                songcore::Groove applied = s.groove;
-                songcore::groove_apply_bank(applied, index);
-                c.reappliesSame = applied.steps != s.groove.steps || applied.name != s.groove.name ||
-                                  applied.ticksPerStep != s.groove.ticksPerStep;
-                return c;
-            }
+            case GROOVE_PANEL_NAME:
+                // A+B: the file a new groove's own steps equal (STRAIGHT).
+                return cc::preset_cycle(s.preset);
             case GROOVE_PANEL_QNT:
                 return cc::index_cycle(s.quantize, GROOVE_QUANTIZE_COUNT);
             case GROOVE_PANEL_PPQ: {
@@ -165,8 +158,7 @@ GrooveInputResult GrooveModule::handle_input(songcore::Groove& groove, const Gro
     if (s.cursorColumn == GROOVE_COL_PANEL) {
         if (action.type != ActionType::SET_VALUE) return r;
         if (s.panelRow == GROOVE_PANEL_NAME) {
-            songcore::groove_apply_bank(groove, action.value);
-            r.modified = true;
+            r.presetIndex = action.value;
         } else if (s.panelRow == GROOVE_PANEL_QNT) {
             r.newQuantize = action.value;  // not the song's — the dispatcher owns the pointer
         } else if (s.panelRow == GROOVE_PANEL_PPQ) {

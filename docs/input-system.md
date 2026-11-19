@@ -165,7 +165,8 @@ Hold R and press directions to navigate the 5×5 screen grid:
 
 **R elsewhere:** in the file browser **R+LEFT** goes up one directory level and **R+UP/DOWN** cycles
 the sort mode. In the QWERTY overlay **R+LEFT/RIGHT** scrolls the text cursor, accelerating from 1 to
-4 characters per repeat, and **R+UP/DOWN** switches between the letter and number layouts. In the
+4 characters per repeat, and **R+UP/DOWN** switches between the letter and number layouts;
+**L+UP/DOWN** there types capitals or small letters. In the
 SAMPLE EDITOR **R+UP/DOWN** zooms the waveform from wherever the cursor is.
 
 The full-screen overlays (SAMPLE EDITOR, EQ EDITOR, THEME EDITOR) own no cell in the grid above, so

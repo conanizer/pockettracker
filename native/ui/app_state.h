@@ -25,11 +25,14 @@
 #include "ui/modules/settings_editor.h"
 #include "ui/platform_caps.h"
 #include "ui/playhead.h"
+#include "ui/preset_row.h"
 #include "ui/selection.h"
+#include "ui/sf_preset_picker.h"
 
 #include "songcore/midi_in.h"    // IMidiIn
 #include "songcore/midi_port.h"  // IMidiOut
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -136,6 +139,25 @@ struct AppState {
     int         sfPresetCount = 0;
     int         sfPresetIndex = 0;
 
+    // SCALE, GROOVE, the reverb, the delay and THEME: refreshed once a frame for the row on screen.
+    // Indexed by `PresetRow`.
+    std::array<PresetRowView, PRESET_ROW_COUNT> presetRows{};
+
+    // A step PRESET NOT SAVED is holding back: carried out on DISCARD, or after SAVE's keyboard writes
+    // the file; dropped on CANCEL and on the keyboard's ABORT. ⚠️ By path, not index: the SAVE adds a
+    // file, and every index after it moves.
+    struct PendingPresetStep {
+        PresetRow   row = PresetRow::NONE;
+        std::string path;
+        // THEME's ROLL is held the same way, with an empty path.
+    };
+    PendingPresetStep presetStep{};
+
+    // The theme's colour rows dialled by hand since it was last loaded or saved (bit = colour row). A
+    // roll is not the user's work: it asks only before dropping one of these. ⚠️ All set at boot — a
+    // palette in no file may be last session's hand work.
+    uint32_t themeHandRows = ~0u;
+
     // ── The visualizer: filled once a frame; null is silence ─────────────────────────────────────
     const float* waveform       = nullptr;  // WAVEFORM_SIZE master samples
     const float* trackWaveforms = nullptr;  // TRACK_WAVEFORM_COUNT × WAVEFORM_SIZE, flat (OCTA)
@@ -172,6 +194,7 @@ struct AppState {
     FxHelperState fxHelper{};     // ui/fx_helper.h
     MapPickerState mapPicker{};   // ui/map_picker.h
     InstrumentPickerState instrumentPicker{};   // ui/instrument_picker.h
+    SfPresetPickerState   sfPresetPicker{};     // ui/sf_preset_picker.h
 
     FileBrowserState fileBrowser{};
 
@@ -327,8 +350,10 @@ struct AppState {
     uint16_t buttonsLocked  = 0;
     uint16_t buttonsLocking = 0;
 
-    // "SAVED", "NO FREE PHRASES"… over the visualizer header on every screen.
+    // "SAVED", "NO FREE PHRASES"… over the visualizer header on every screen. From `statusNameAt` on
+    // it is a name (a file, a device), shown as it is; before that, words in the set letter case.
     std::string statusMessage{};
+    size_t      statusNameAt  = std::string::npos;
     bool        statusSuccess = true;
 
     // The full help overlay, raised by SELECT: a layer, dims the frame, consumes its closing press.
@@ -394,6 +419,14 @@ inline void scroll_song_to_row(AppState& s, int row) {
 // A status line — the app's or the browser's own — green when `ok`, red otherwise.
 template <class S> void set_status(S& s, std::string message, bool ok) {
     s.statusMessage = std::move(message);
+    s.statusNameAt  = std::string::npos;
+    s.statusSuccess = ok;
+}
+
+// The same, ending in a name — a file, a device, a value — that keeps its own letters.
+template <class S> void set_status(S& s, const std::string& words, const std::string& name, bool ok) {
+    s.statusMessage = words + name;
+    s.statusNameAt  = words.size();
     s.statusSuccess = ok;
 }
 

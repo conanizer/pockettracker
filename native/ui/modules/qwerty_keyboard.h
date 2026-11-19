@@ -5,6 +5,7 @@
 //   A             type the key — or switch layout, cancel, confirm
 //   B             delete (backspace or forward-delete, per INSERT MODE)
 //   R+DOWN / UP   switch layout (letters ↔ numbers+symbols)
+//   L+UP / DOWN   capitals / small letters (the case key left of SPACE toggles them)
 //   R+LEFT/RIGHT  move the text cursor
 //   SELECT        cancel · START apply
 
@@ -33,15 +34,21 @@ enum class QwertyContext {
     DELAY_SAVE        // write EFFECTS' delay cells to `contextExtra`/<text>.ptd, and name them <text>
 };
 
-// 3 key rows of 10, then the space bar. The ABORT/APPLY row is virtual.
+// 3 key rows of 10, then the space bar. The ABORT/APPLY row is virtual. Letters are capitals here;
+// `qwerty_key()` gives the one the case types.
 const std::vector<std::vector<char>>& qwerty_rows(int layout);
 
-// The layout key shows the one it switches to.
-inline const char* qwerty_layout_label(int layout) { return layout == 0 ? "ABC" : "123"; }
+inline char qwerty_key(char key, bool lower) {
+    return lower && key >= 'A' && key <= 'Z' ? static_cast<char>(key - 'A' + 'a') : key;
+}
 
-// SPACE under key columns 0-7, the layout key under 8-9.
-inline constexpr int QWERTY_SPACE_ROW_COLS = 2;
-inline constexpr int QWERTY_SPACE_KEY_COLS = 8;
+// The case and layout keys show what they switch to.
+inline const char* qwerty_layout_label(int layout) { return layout == 0 ? "ABC" : "123"; }
+inline const char* qwerty_case_label(bool lower) { return lower ? "CAP" : "low"; }
+
+// The row under the keys: the case key under columns 0-1, SPACE under 2-7, the layout key under 8-9.
+inline constexpr int QWERTY_SPACE_ROW_COLS = 3;
+inline constexpr int QWERTY_SPACE_ROW_SPANS[QWERTY_SPACE_ROW_COLS] = {2, 6, 2};
 
 // Col 0 = ABORT, col 1 = APPLY.
 inline constexpr int QWERTY_ACTION_COLS = 2;
@@ -57,6 +64,7 @@ struct QwertyKeyboardState {
     int keyCursorRow = 0;
     int keyCursorCol = 0;
     int layout       = 0;   // 0 = letters, 1 = numbers/symbols
+    bool lower       = false;   // letters type small; kept across a layout switch
 
     std::string fieldLabel = "NAME:";
 
@@ -73,12 +81,14 @@ struct QwertyKeyboardState {
     int action_row_index() const { return static_cast<int>(qwerty_rows(layout).size()); }
     bool is_on_action_row() const { return keyCursorRow == action_row_index(); }
     int  space_row_index() const { return action_row_index() - 1; }
-    bool is_on_layout_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 1; }
+    bool is_on_case_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 0; }
+    bool is_on_space_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 1; }
+    bool is_on_layout_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 2; }
     int  total_rows() const { return action_row_index() + 1; }
     int  current_row_cols() const;
     int  letter_count() const { return Canvas::glyph_count(text); }
 
-    // ' ' on the action row.
+    // What A types here, in the set case; ' ' on the action row and the space row.
     char current_key() const;
 };
 

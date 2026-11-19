@@ -32,14 +32,15 @@ GestureResult InputDispatcher::theme_layer(Gesture g) {
         // ⚠️ No "are you sure": the live theme is the applied theme.
         case Gesture::B: close_theme_editor(); break;
 
-        // On a colour row: L+A locks it against a roll, R+A re-rolls it alone.
+        // On a colour row: L+A locks it against a roll, R+A re-rolls it alone. R+A never asks: it is an
+        // edit of the row under the cursor, like A+DPAD.
         case Gesture::L_A: {
             const int color = theme_color_index(es.cursorRow);
             if (color >= 0) es.locks.toggle(color);
             break;
         }
         case Gesture::R_A:
-            if (theme_color_index(es.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
+            if (theme_color_index(es.cursorRow) >= 0) theme_roll_palette(theme_color_index(es.cursorRow));
             break;
 
         case Gesture::START:
@@ -77,6 +78,7 @@ void InputDispatcher::theme_dpad_edit(int cycleDelta, int nudge) {
     const int color = theme_color_index(es.cursorRow);
     if (color >= 0) {
         theme_adjust_color(s_.theme, color + 1, es.cursorChannel, nudge);
+        s_.themeHandRows |= 1u << color;
         theme_refresh_message();
         return;
     }
@@ -89,22 +91,43 @@ void InputDispatcher::theme_dpad_edit(int cycleDelta, int nudge) {
         }
         return;
     }
-    // The THEME row: the NAME cell steps the built-in palettes; SAVE and LOAD are buttons.
-    if (es.cursorChannel == 0) theme_cycle_builtin(s_.theme, cycleDelta);
+    // The THEME row: the NAME cell steps the Themes folder, wrapping; SAVE and LOAD are buttons.
+    if (es.cursorChannel != 0) return;
+    const PresetRowView v = preset_row_view(PresetRow::THEME);
+    if (v.count == 0) return;
+    // A palette in no file enters the ring at an end.
+    const int at     = v.index >= 0 ? v.index : (cycleDelta >= 0 ? -1 : 0);
+    const int target = ((at + (cycleDelta >= 0 ? 1 : -1)) % v.count + v.count) % v.count;
+    preset_step(PresetRow::THEME, target);
 }
 
 /** Drop a failed roll's message. The clash line is derived in the draw, so only the event is cleared. */
 void InputDispatcher::theme_refresh_message() { s_.themeEditor.message.clear(); }
 
-/** Roll the palette; `rowOnly` re-rolls one row with the others held (far likelier to fail). */
-void InputDispatcher::theme_roll_palette(bool rowOnly) {
+void InputDispatcher::theme_request_roll() {
+    // The rows the roll would replace: every unlocked one.
+    uint32_t lost = 0;
+    for (int i = 0; i < static_cast<int>(s_.themeEditor.locks.row.size()); ++i)
+        if (!s_.themeEditor.locks.locked(i)) lost |= 1u << i;
+
+    if ((s_.themeHandRows & lost) != 0 &&
+        !preset_values_kept<Theme>(presetLists_.theme(true), s_.theme.name, s_.theme, same_theme)) {
+        s_.presetStep = {PresetRow::THEME, std::string()};
+        s_.confirm.open(ConfirmDialogState::Kind::PRESET_UNSAVED);
+        return;
+    }
+    theme_roll_palette(-1);
+}
+
+/** One row alone (`only` ≥ 0) is far likelier to fail than the whole palette. */
+void InputDispatcher::theme_roll_palette(int only) {
     ThemeEditorState& es = s_.themeEditor;
+    const bool rowOnly = only >= 0;
 
     ThemeLocks locks = es.locks;
     if (rowOnly) {
         // "This row only" is "everything else locked", so there is one solver and one set of rules.
-        const int target = theme_color_index(es.cursorRow);
-        for (size_t i = 0; i < locks.row.size(); ++i) locks.row[i] = (static_cast<int>(i) != target);
+        for (size_t i = 0; i < locks.row.size(); ++i) locks.row[i] = (static_cast<int>(i) != only);
     }
 
     es.seed = es.seed * 1664525u + 1013904223u;
@@ -114,23 +137,22 @@ void InputDispatcher::theme_roll_palette(bool rowOnly) {
         return;
     }
     s_.theme = *rolled;   // its name kept: the roll carries it
+    // The rows rolled are no longer hand work; the locked ones keep what they were.
+    for (int i = 0; i < static_cast<int>(locks.row.size()); ++i)
+        if (!locks.locked(i)) s_.themeHandRows &= ~(1u << i);
     theme_refresh_message();
 }
 
 void InputDispatcher::theme_row_action() {
     if (s_.themeEditor.cursorRow == THEME_ROW_RANDOM) {
         // ROLL — a whole palette, in the scheme the cell beside it is showing.
-        if (s_.themeEditor.cursorChannel == 1) theme_roll_palette(/*rowOnly=*/false);
+        if (s_.themeEditor.cursorChannel == 1) theme_request_roll();
         return;
     }
     switch (s_.themeEditor.cursorChannel) {
-        case 1: {   // SAVE — name it, then write it
-            // ⚠️ Opens without closing the editor (QWERTY is above THEME). Seeded with the sanitized name.
-            const std::string seed = safe_name(s_.theme.name);
-            open_qwerty(QwertyContext::THEME_SAVE, seed.empty() ? "THEME" : seed, "SAVE THEME:",
-                        fs_.themes_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+        case 1:     // SAVE — name it, then write it
+            preset_open_save(PresetRow::THEME);
             break;
-        }
         case 2: {   // LOAD — browse the Themes folder for a .ptt
             // The editor stays open under the browser (`theme_editor_up`), so B or a load comes back to
             // it with its locks, scheme and cursor.
@@ -143,7 +165,7 @@ void InputDispatcher::theme_row_action() {
     }
 }
 
-void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
+bool InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized filename (empty → THEME.ptt), raw name inside.
     const std::string safe = safe_name(typed_text);
     const std::string file = (safe.empty() ? std::string("THEME") : safe) + ".ptt";
@@ -152,11 +174,16 @@ void InputDispatcher::save_theme_as(const std::string& dir, const std::string& t
     Theme to_save = s_.theme;
     if (!typed_text.empty()) to_save.name = typed_text;
 
-    // ⚠️ The live theme keeps its name: the built-in cycle keys off it. Loading the file sets it.
+    // The live theme takes the name it was saved under, so the row finds it in the folder.
     const bool ok = save_theme_file(fs_, path, to_save);
+    if (ok) {
+        s_.theme.name    = to_save.name;
+        s_.themeHandRows = 0;
+    }
 
     // ⚠️ A full card or a read-only mount must not report success.
     set_status(s_, ok ? "THEME SAVED" : "SAVE FAILED", ok);
+    return ok;
 }
 
 }  // namespace pt::ui

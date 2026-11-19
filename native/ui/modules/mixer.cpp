@@ -155,8 +155,8 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const int delCX = x + FIRST_METER_X + METER_SPACING + (BAR_W + BAR_SEP + BAR_W) / 2;
 
     // The headers are these cells' labels, above rather than beside.
-    c.label("REV", revCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, revSendSel ? cursor_mark_ink(t) : t.textParam);
-    c.label("DEL", delCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, delSendSel ? cursor_mark_ink(t) : t.textParam);
+    draw_cell_label(c, "REV", revCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, revSendSel, t);
+    draw_cell_label(c, "DEL", delCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, delSendSel, t);
 
     draw_cursor_cell(c, hex2(p.reverbWet), revCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, revSendSel,
                      revAudible ? t.textValue : t.textEmpty, t);
@@ -176,13 +176,13 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
 
     // Label/value rows; the meter stays lit for all four.
     const auto master_row = [&](const char* label, int row_y, const std::string& value, bool sel) {
-        c.text(label, x + MSTR_LABEL_X, y + row_y, sel ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, label, x + MSTR_LABEL_X, y + row_y, sel, t);
         draw_cursor_cell(c, value, x + MSTR_VALUE_X, y + row_y, sel, t.textValue, t);
     };
 
     master_row("MIX", MROW0_Y, hex2(p.masterVolume), mixSel);
 
-    c.label("EQ", x + MSTR_LABEL_X, y + MROW1_Y, eqSel ? cursor_mark_ink(t) : t.textParam);
+    draw_cell_label(c, "EQ", x + MSTR_LABEL_X, y + MROW1_Y, eqSel, t);
     draw_eq_cell(c, x + MSTR_VALUE_X, y + MROW1_Y, p.masterEqSlot, eqSel, t);
 
     master_row(depthLabel, MROW2_Y, hex2(depthValue), depthSel);

@@ -71,6 +71,13 @@ struct SettingsValues {
     // ⚠️ False reaches every install that has no such key yet, on purpose: they are asked too.
     bool topPanelAsked    = false;
 
+    // ── FONT — a UI_FONTS name; one no build knows draws the 5×5 ───────────────────────────────
+    std::string fontName = "5X5";
+
+    // How UI words are written (TextCase: 0 UPPER, 1 lower, 2 Title) — the FONT row's second column,
+    // there only for a font with small letters.
+    int textCase = 0;
+
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
     // Bilinear: integer scaling leaves black borders at anything but exact multiples of 640×480.
     bool scalingBilinear    = true;

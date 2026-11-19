@@ -62,7 +62,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
     c.label("MIDI MAPPING", colX(COL_CC), y + TEXT_PADDING, t.textTitle);
 
     // The column headers carry the cursor mark for its column.
-    const int headerY = y + ROW_HEIGHT + 14;
+    const int headerY = y + HEADER_Y;
     const int cursorCol = s.cursorColumn;
     const auto header = [&](const char* text, int column, MapCol lo, MapCol hi) {
         c.label(text, colX(column), headerY + TEXT_PADDING,
@@ -98,7 +98,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
             if (m == nullptr) {
                 // The ADD row, a button.
                 const bool full = static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX;
-                draw_cursor_cell(c, full ? "FULL: 128 MAPPINGS" : "A: ADD MAPPING", colX(COL_CC),
+                draw_cursor_cell(c, c.cased(full ? "FULL: 128 MAPPINGS" : "A: ADD MAPPING"), colX(COL_CC),
                                  rowY + TEXT_PADDING, onRow, full ? t.textEmpty : t.textParam, t);
                 continue;
             }
@@ -119,12 +119,12 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
             draw_cursor_cell(c, hex2(m->rangeMax), colX(COL_MAX), rowY + TEXT_PADDING,
                              onCell(MapCol::MAX), ink, t);
 
-            draw_cursor_cell(c, d ? songcore::map_group_name(d->group) : "???", colX(COL_GROUP),
+            draw_cursor_cell(c, d ? c.cased(songcore::map_group_name(d->group)) : "???", colX(COL_GROUP),
                              rowY + TEXT_PADDING, onCell(MapCol::GROUP), ink, t);
             if (d && map_scope_editable(d->scope))
                 draw_cursor_cell(c, scope_text(d->scope, m->scopeIndex), colX(COL_SCOPE),
                                  rowY + TEXT_PADDING, onCell(MapCol::SCOPE), ink, t);
-            draw_cursor_cell(c, d ? d->cell : "---", colX(COL_PARAM), rowY + TEXT_PADDING,
+            draw_cursor_cell(c, d ? c.cased(d->cell) : "---", colX(COL_PARAM), rowY + TEXT_PADDING,
                              onCell(MapCol::PARAM), ink, t);
         }
     }

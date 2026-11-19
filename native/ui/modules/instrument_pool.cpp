@@ -38,20 +38,20 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
     }
 
     // The headers say which column: the cursor is one cell, and four columns look alike.
-    const int  headerY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
+    const int  headerY = y + HEADER_Y + TEXT_PADDING;
     const auto head    = [&](int col) { return header_color(s.cursorColumn, col, col, t); };
-    c.text("# ", x + ID_X, headerY, t.textParam);
+    c.text("# ",    x + ID_X,   headerY, t.textParam);
     c.label("NAME", x + NAME_X, headerY, head(0));
-    c.label("V", x + VOL_X, headerY, head(1));
-    c.label("RV", x + REV_X, headerY, head(2));
-    c.label("DE", x + DEL_X, headerY, head(3));
-    c.label("EQ", x + EQ_X, headerY, head(4));
+    c.label("V",    x + VOL_X,  headerY, head(1));
+    c.label("RV",   x + REV_X,  headerY, head(2));
+    c.label("DE",   x + DEL_X,  headerY, head(3));
+    c.label("EQ",   x + EQ_X,   headerY, head(4));
 
     // The selected row is kept centred; no scroll state.
     const int maxScroll = (count - VISIBLE_ROWS) < 0 ? 0 : (count - VISIBLE_ROWS);
     const int scroll    = clamp(s.selectedInstrument - VISIBLE_ROWS / 2, 0, maxScroll);
 
-    const int dataTop = y + ROW_HEIGHT + 14 + ROW_HEIGHT;
+    const int dataTop = y + ROWS_Y;
     for (int i = 0; i < VISIBLE_ROWS; ++i) {
         const int slot = scroll + i;
         if (slot >= count) break;
@@ -67,13 +67,13 @@ void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const 
 
     const auto on_col = [&](int col) { return selected && s.cursorColumn == col; };
 
-    // The slot number lights across the selected row.
+    // The slot number lights across the selected row. A number, so not `draw_cell_label`.
     c.text(hex2(slot), x + ID_X, textY, selected ? cursor_mark_ink(t) : t.textParam);
 
     // An unnamed slot draws a dim underscore run, so an empty pool reads as blanks, not 128 "INSTxx".
     const bool        unnamed = songcore::instrument_has_default_name(ins);
     const std::string name    = unnamed ? std::string(NAME_MAX_CHARS, '_')
-                                        : Canvas::clip_text(ins.name, NAME_MAX_CHARS);
+                                        : c.fit_text(ins.name, NAME_MAX_CHARS, on_col(0));
     draw_cursor_cell(c, name, x + NAME_X, textY, on_col(0),
                      unnamed ? t.textEmpty : t.textValue, t);
 

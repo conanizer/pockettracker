@@ -285,17 +285,18 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     const int barY2 = barY1 + ROW_HEIGHT;
     c.fill_rect(x, barY1, WIDTH, ROW_HEIGHT * 2, t.meterBackground);
 
+    // The words in the set case; a file or folder name inside a question as it is.
     std::string hint;
     Argb        hintColor;
     // A question: the name gets what the sentence around it leaves of the bar.
-    const auto ask = [](const std::string& before, const std::string& name, const std::string& after) {
+    const auto ask = [&c](const std::string& before, const std::string& name, const std::string& after) {
         const int room = (WIDTH - 20 + CHAR_SPACING) / CHAR_W - Canvas::glyph_count(before + after);
-        return before + Canvas::clip_text(name, room) + after;
+        return c.cased(before) + Canvas::clip_text(name, room) + c.cased(after);
     };
     if (s.mode == BrowserMode::DELETE) {
         const std::vector<const BrowserItem*> doomed = s.delete_targets();
         hint = doomed.size() == 1 ? ask("DELETE ", doomed[0]->displayName, "? A=YES B=NO")
-                                  : "DELETE " + std::to_string(doomed.size()) + " FILES? A=YES B=NO";
+                                  : c.cased("DELETE " + std::to_string(doomed.size()) + " FILES? A=YES B=NO");
         hintColor = 0xFFFF0000;
     } else if (s.mode == BrowserMode::SET_HOME) {
         const BrowserItem* item = s.current();
@@ -308,17 +309,17 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         hint = ask("FORGET ", item ? item->displayName : "", "? A=YES B=NO");
         hintColor = t.textTitle;
     } else if (s.selectionMode) {
-        hint      = "B=COPY L+A=CUT L+B=ALL L+R=CANCEL";
+        hint      = c.cased("B=COPY L+A=CUT L+B=ALL L+R=CANCEL");
         hintColor = t.rowSelection;
     } else if (!s.fileClipboard.empty()) {
-        hint      = "L+A=PASTE  " + s.clipboard_info();
+        hint      = c.cased("L+A=PASTE  " + s.clipboard_info());
         hintColor = t.textTitle;
     } else if (const BrowserItem* item = s.current(); item && item->isRoot) {
         // On a granted tree the file chords are refused, so the bar names what works there.
-        hint      = "SEL+A=SET HOME  SEL+B=FORGET";
+        hint      = c.cased("SEL+A=SET HOME  SEL+B=FORGET");
         hintColor = t.textParam;
     } else {
-        hint      = "SEL+A=RENAME SEL+B=DEL SEL+R=NEW";
+        hint      = c.cased("SEL+A=RENAME SEL+B=DEL SEL+R=NEW");
         hintColor = t.textParam;
     }
     c.text(hint, x + 10, barY1 + TEXT_PADDING, hintColor);
@@ -369,8 +370,11 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         if (isCursor) c.text(">", x + 10, rowY + TEXT_PADDING, cursor_cell_ink(t));
 
         // 20 fits before the size column; a granted tree has none, so its marker gets more room.
-        c.text(Canvas::clip_text(item.displayName, item.isRoot ? ROOT_COLS : NAME_COLS), x + 30,
-               rowY + TEXT_PADDING, textColor);
+        // An ACTION row is the app's own words; every other row a name.
+        const std::string shown = item.kind == BrowserItem::Kind::ACTION ? c.cased(item.displayName)
+                                                                         : item.displayName;
+        c.text(c.fit_text(shown, item.isRoot ? ROOT_COLS : NAME_COLS, isCursor),
+               x + 30, rowY + TEXT_PADDING, textColor);
 
         if (item.kind == BrowserItem::Kind::FILE) {
             c.text(item.sizeText, x + 370, rowY + TEXT_PADDING, t.textEmpty);
@@ -386,21 +390,20 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
 
     // Right-aligned, so the count grows leftward; `text_width` because the trailing gap is not ink.
     const std::string count  = total > 0 ? std::to_string(s.cursor + 1) + "/" + std::to_string(total) : "";
-    const int         countW = Canvas::text_width(count);
+    const int         countW = c.text_width(count);
 
     // A status message takes what the count leaves, a glyph of air between.
     if (!s.statusMessage.empty()) {
         const int cols = (WIDTH - 20 - countW - CHAR_W + CHAR_SPACING) / CHAR_W;
-        c.text(Canvas::clip_text(s.statusMessage, cols), x + 10, bottomY + TEXT_PADDING,
-               s.statusSuccess ? t.textTitle : 0xFFFF4444);
+        c.text(Canvas::clip_text(status_text(c, s.statusMessage, s.statusNameAt), cols), x + 10,
+               bottomY + TEXT_PADDING, s.statusSuccess ? t.textTitle : 0xFFFF4444);
     } else {
         // Real arrows (the font has them; '^' draws blank). 28 code points leave the counter room.
         c.label("A=OPN B=BCK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SRT", x + 10,
                 bottomY + TEXT_PADDING, t.textParam);
     }
 
-    if (!count.empty())
-        c.text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam);
+    if (!count.empty()) c.text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam);
 }
 
 }  // namespace pt::ui

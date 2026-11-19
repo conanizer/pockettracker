@@ -11,6 +11,7 @@
 
 namespace pt::ui {
 
+class Canvas;
 struct AppState;
 
 struct GuideLines {
@@ -26,6 +27,7 @@ struct GuideLines {
 // over it: the guide carries both.
 bool guide_up(const AppState& s);
 
-GuideLines guide_lines(const AppState& s);
+// `c` for the case its words are written in.
+GuideLines guide_lines(const Canvas& c, const AppState& s);
 
 }  // namespace pt::ui

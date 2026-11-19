@@ -361,6 +361,7 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/send_editor.cpp
         ui/dispatch/layers/stretch_editor.cpp
         ui/dispatch/layers/theme.cpp
+        ui/dispatch/preset_rows.cpp
         ui/dispatch/project.cpp
         ui/dispatch/screens/file_browser.cpp
         ui/dispatch/screens/instrument.cpp

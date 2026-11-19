@@ -119,7 +119,7 @@ Used for: SVF filter, the Moog ladder filter, overdrive, decimator/bitcrush, lim
 crossfade, balance, ReverbSc (`native/effects/primitives/daisysp/`).
 
 ⚠️ **DaisySP is not uniformly MIT, and the files PocketTracker compiles land on both sides.**
-Three of the eight are LGPL-2.1 because they descend from Csound and Faust/GRAME rather than from
+Four of the nine are LGPL-2.1 because they descend from Csound and Faust/GRAME rather than from
 Electrosmith's own code. Verified by reading the banner of each compiled file:
 
 | File | Licence | Copyright |
@@ -134,9 +134,9 @@ Electrosmith's own code. Verified by reading the banner of each compiled file:
 | **`reverbsc`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, Sean Costello, Istvan Varga, Paul Batchelor |
 | **`moogladder`** | **LGPL-2.1** | (c) 2023 Electrosmith, Corp, Victor Lazzarini, John ffitch (fast tanh), Bob Moog — from DaisySP-LGPL, changed (the file says how) |
 
-**On the LGPL-2.1 three:** PocketTracker as a whole is GPL-3.0-or-later. LGPL-2.1 **§3** expressly
+**On the LGPL-2.1 four:** PocketTracker as a whole is GPL-3.0-or-later. LGPL-2.1 **§3** expressly
 permits applying "the ordinary GNU General Public License" version 2 "or any later version" to a
-given copy of the library, so these three are distributed here under **GPL-3.0-or-later**, and the
+given copy of the library, so these four are distributed here under **GPL-3.0-or-later**, and the
 `LICENSE` text shipped beside this file is their governing text. There is no compatibility problem,
 but the attribution above is required.
 
@@ -541,11 +541,11 @@ Full text: licenses/OFL-1.1-LiberationSans.txt (and http://scripts.sil.org/OFL).
 
 ## QuinqueFive — SIL Open Font License 1.1
 
-Used for: every piece of text on the tracker screen. The 5×5 bitmap font table
-(`native/ui/font5x5.h`) is adapted from QuinqueFive by GGBotNet, with some glyphs redrawn — a
-Modified Version under the OFL, so it does not carry the Reserved Font Name. ⚠️ **Unlike the font
-asset above, it is compiled into the program**, so its notice and licence ship in **every**
-artifact.
+Used for: the interface fonts 5X5 and SLIM. Their capitals (`native/ui/fonts/pt5x5.bdf`,
+`pt5x5base1.bdf`, `ptslim.bdf`) are adapted from QuinqueFive by GGBotNet, with some glyphs redrawn
+and the small letters drawn for PocketTracker — a Modified Version under the OFL, so neither carries
+the Reserved Font Name. ⚠️ **Unlike the font asset above, they are compiled into the program**, so
+this notice and the licence ship in **every** artifact.
 
 ```
 Copyright © 2019-2025 GGBotNet (https://ggbot.net), with Reserved Font Name "QuinqueFive".
@@ -553,6 +553,14 @@ Copyright © 2019-2025 GGBotNet (https://ggbot.net), with Reserved Font Name "Qu
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 Full text: licenses/OFL-1.1-QuinqueFive.txt (and http://scripts.sil.org/OFL).
 ```
+
+---
+
+## unscii — public domain
+
+Used for: the UNSCII interface font (`native/ui/fonts/unscii.bdf`), unscii-8 by Viznut
+(http://viznut.fi/unscii/), released into the public domain. No notice is required; it is credited
+here.
 
 ---
 

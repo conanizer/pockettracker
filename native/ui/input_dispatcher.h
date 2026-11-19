@@ -43,6 +43,7 @@
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
 #include "ui/phrase_fill.h"
+#include "ui/preset_lists.h"
 #include "ui/project_actions.h"
 #include "ui/sample_edit_session.h"
 #include "ui/tap_tempo.h"
@@ -69,6 +70,10 @@ class InputDispatcher {
     // The frame's clock, once per frame before the events. Runs what is due: the sample editor's
     // audition restore, the autosave, the status lines' auto-dismiss.
     void set_now(long long now_ms);
+
+    // The folder-stepped preset rows (`AppState::presetRows`): where the values on screen sit in their
+    // folder's list, read again when the screen changed. Once a frame.
+    void poll_preset_rows();
 
     // Will timed work change the screen on its own? The shell skips drawing idle frames.
     // ⚠️ It goes false on the frame that must be drawn: the caller owes the active→idle edge a redraw.
@@ -544,6 +549,9 @@ class InputDispatcher {
     GestureResult instrument_picker_layer(Gesture g);
     bool on_phrase_instrument_cell() const;
     void open_instrument_picker();
+    // The same list for a SoundFont's PATCH row: the presets in its file.
+    GestureResult sf_preset_picker_layer(Gesture g);
+    void open_sf_preset_picker();
 
     // ── The layer stack ──────────────────────────────────────────────────────────────────────────
     // A gesture a layer does not answer is swallowed, so a new layer is one row in `OVERLAYS` plus its
@@ -650,14 +658,17 @@ class InputDispatcher {
     void theme_dpad_edit(int cycleDelta, int nudge);
 
     // Generate a palette; `rowOnly` keeps every row but the cursor's.
-    void theme_roll_palette(bool rowOnly);
+    // Roll the palette, or only colour row `only` (−1: every unlocked one).
+    void theme_roll_palette(int only);
+    // ROLL: the whole palette, asking first when it would drop colours dialled by hand that no file holds.
+    void theme_request_roll();
 
     // Drop a failed roll's message.
     void theme_refresh_message();
 
     // Write `<dir>/<name>.ptt` (the keyboard's THEME_SAVE).
     // ⚠️ `dir` is a parameter because `qwerty_apply()` clears the keyboard state before dispatching.
-    void save_theme_as(const std::string& dir, const std::string& typed_text);
+    bool save_theme_as(const std::string& dir, const std::string& typed_text);
 
     // NEW, with the engine sync a fresh project needs.
     void start_new_project();
@@ -729,8 +740,6 @@ class InputDispatcher {
     void browser_confirm_root();
     // The file `browserPurpose` opened the browser for.
     void browser_load(const BrowserItem& item);
-    // A scale, groove, reverb or delay file into its place; false when it does not parse.
-    bool load_browser_preset(AppState::BrowserPurpose purpose, const std::string& path);
     // The selection's paths, without "..".
     std::vector<std::string> browser_selected_paths() const;
     // Copy or move the clipboard into the directory on screen, de-duplicating names.
@@ -744,7 +753,10 @@ class InputDispatcher {
     // APPLY (START, or A on APPLY): acts on the context it was opened with.
     void qwerty_apply();
     // ABORT (SELECT, or A on ABORT): discards the text.
-    void qwerty_cancel() { s_.qwerty = QwertyKeyboardState{}; }
+    void qwerty_cancel() {
+        s_.qwerty     = QwertyKeyboardState{};
+        s_.presetStep = {};   // ABORT on PRESET NOT SAVED's SAVE drops the step too
+    }
 
     // ── PROJECT and SETTINGS (ui/dispatch/screens/project.cpp) ───────────────────────────────────
 
@@ -890,13 +902,33 @@ class InputDispatcher {
     void scale_row_action();
 
     // Write `<dir>/<name>.pts` (the keyboard's SCALE_SAVE).
-    void save_scale_as(const std::string& dir, const std::string& typed_text);
+    bool save_scale_as(const std::string& dir, const std::string& typed_text);
 
     // A on GROOVE's panel: the SAVE and LOAD cells only.
     void groove_row_action();
 
     // Write `<dir>/<name>.ptg` (the keyboard's GROOVE_SAVE).
-    void save_groove_as(const std::string& dir, const std::string& typed_text);
+    bool save_groove_as(const std::string& dir, const std::string& typed_text);
+
+    // ── The folder-stepped preset rows (ui/dispatch/preset_rows.cpp) ─────────────────────────────
+
+    // Step `row` to entry `index` of its list — or, when no file holds the values on screen, open
+    // PRESET NOT SAVED and hold the step. True when the project changed.
+    bool preset_step(PresetRow row, int index);
+    // Would a step lose nothing? The values are in a file (or are an untouched slot).
+    bool preset_kept(PresetRow row);
+    // Load the file at `path` into `row`. True when the project changed.
+    bool preset_apply(PresetRow row, const std::string& path);
+    // What PRESET NOT SAVED held: a step, or THEME's ROLL. True when the project changed.
+    bool preset_carry_out(const AppState::PendingPresetStep& step);
+    // The row's own SAVE keyboard.
+    void preset_open_save(PresetRow row);
+    // After SAVE's keyboard wrote `saved`'s file: carry out the step the dialog held, if it was this row's.
+    void preset_step_after_save(const AppState::PendingPresetStep& step, PresetRow saved);
+    // A file into the row's values, as LOAD does; false when it does not parse. `changed`: did they move?
+    bool load_preset_file(PresetRow row, const std::string& path, bool* changed = nullptr);
+    // The row as drawn, from the lists as last read.
+    PresetRowView preset_row_view(PresetRow row);
 
     // ── MIXER and EFFECTS (ui/dispatch/screens/mixer.cpp) ────────────────────────────────────────
 
@@ -917,10 +949,10 @@ class InputDispatcher {
     bool effects_release_action(int row, bool peek);
 
     // Write `<dir>/<name>.ptr` (the keyboard's REVERB_SAVE).
-    void save_reverb_preset_as(const std::string& dir, const std::string& typed_text);
+    bool save_reverb_preset_as(const std::string& dir, const std::string& typed_text);
 
     // Write `<dir>/<name>.ptd` (the keyboard's DELAY_SAVE).
-    void save_delay_preset_as(const std::string& dir, const std::string& typed_text);
+    bool save_delay_preset_as(const std::string& dir, const std::string& typed_text);
 
     // ── The sample editor (ui/dispatch/screens/sample_editor.cpp) ────────────────────────────────
     // What its buttons do to the sample is `sampleSession_`'s; the screen, the keyboard and the browser
@@ -968,6 +1000,8 @@ class InputDispatcher {
 
     SampleEditSession  sampleSession_{s_, host_, fs_, [this] { mark_modified(); }};
     SampleEditorModule sample_{};
+
+    PresetLists presetLists_{fs_};
 };
 
 }  // namespace pt::ui

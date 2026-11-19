@@ -16,9 +16,10 @@ GestureResult InputDispatcher::qwerty_layer(Gesture g) {
         case Gesture::DPAD_LEFT:  move_key_cursor_left(k);  break;
         case Gesture::DPAD_RIGHT: move_key_cursor_right(k); break;
 
-        // A types the key — except the layout key and the action row (ABORT col 0, APPLY col 1).
+        // A types the key — except the case and layout keys and the action row (ABORT col 0, APPLY col 1).
         case Gesture::A:
-            if (k.is_on_layout_key())         k.layout = 1 - k.layout;
+            if (k.is_on_case_key())           k.lower = !k.lower;
+            else if (k.is_on_layout_key())    k.layout = 1 - k.layout;
             else if (!k.is_on_action_row())   insert_current_key(k);
             else if (k.keyCursorCol == 0) qwerty_cancel();
             else                          qwerty_apply();
@@ -34,6 +35,9 @@ GestureResult InputDispatcher::qwerty_layer(Gesture g) {
         case Gesture::R_DOWN:  k.layout = 1; clamp_col(k); break;
         case Gesture::R_LEFT:  move_text_cursor_left(k);  break;
         case Gesture::R_RIGHT: move_text_cursor_right(k); break;
+        // L+UP/DOWN set the case: capitals, small letters.
+        case Gesture::L_UP:    k.lower = false; break;
+        case Gesture::L_DOWN:  k.lower = true;  break;
 
         default: break;
     }
@@ -60,6 +64,9 @@ void InputDispatcher::qwerty_apply() {
     const QwertyKeyboardState k    = s_.qwerty;   // by value: every arm below closes the keyboard
     const std::string         text = trimmed_text(k);
     s_.qwerty = QwertyKeyboardState{};
+    // The step PRESET NOT SAVED held for a SAVE; only that row's save carries it out.
+    const AppState::PendingPresetStep step = s_.presetStep;
+    s_.presetStep = {};
 
     switch (k.context) {
         case QwertyContext::FILE_RENAME: {
@@ -106,7 +113,7 @@ void InputDispatcher::qwerty_apply() {
             const std::string name = text.empty() ? "PRESET" : text;
             const std::string path = k.contextExtra + "/" + name + ".pti";
             if (save_instrument_preset(host_, fs_, s_.currentInstrument, path)) {
-                set_status(s_, "SAVED: " + name, true);
+                set_status(s_, "SAVED: ", name, true);
             } else {
                 set_status(s_, "SAVE FAILED", false);
             }
@@ -115,23 +122,23 @@ void InputDispatcher::qwerty_apply() {
 
         case QwertyContext::THEME_SAVE:
             // ⚠️ k.contextExtra, not s_.qwerty's: the live keyboard is already cleared.
-            save_theme_as(k.contextExtra, text);
+            if (save_theme_as(k.contextExtra, text)) preset_step_after_save(step, PresetRow::THEME);
             break;
 
         case QwertyContext::SCALE_SAVE:
-            save_scale_as(k.contextExtra, text);
+            if (save_scale_as(k.contextExtra, text)) preset_step_after_save(step, PresetRow::SCALE);
             break;
 
         case QwertyContext::GROOVE_SAVE:
-            save_groove_as(k.contextExtra, text);
+            if (save_groove_as(k.contextExtra, text)) preset_step_after_save(step, PresetRow::GROOVE);
             break;
 
         case QwertyContext::REVERB_SAVE:
-            save_reverb_preset_as(k.contextExtra, text);
+            if (save_reverb_preset_as(k.contextExtra, text)) preset_step_after_save(step, PresetRow::REVERB);
             break;
 
         case QwertyContext::DELAY_SAVE:
-            save_delay_preset_as(k.contextExtra, text);
+            if (save_delay_preset_as(k.contextExtra, text)) preset_step_after_save(step, PresetRow::DELAY);
             break;
 
         case QwertyContext::SAMPLE_NAME: {

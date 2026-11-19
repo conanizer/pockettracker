@@ -7,7 +7,7 @@
 #include <SDL.h>
 
 #include "ui/buttons.h"
-#include "ui/font5x5.h"
+#include "ui/fonts/pt5x5.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -50,13 +50,17 @@ inline void draw_label(SDL_Renderer* r, pt::ui::Button b, const SDL_Rect& rc, ui
 
     SDL_SetRenderDrawColor(r, static_cast<Uint8>((rgb >> 16) & 0xFF),
                            static_cast<Uint8>((rgb >> 8) & 0xFF), static_cast<Uint8>(rgb & 0xFF), 255);
+    const pt::ui::BitmapFont& f = pt::ui::fonts::PT5X5;
     for (int k = 0; k < lab.n; ++k) {
-        const pt::ui::Glyph& g = pt::ui::glyph_for_codepoint(lab.cp[k]);
-        for (int row = 0; row < 5; ++row) {
-            for (int col = 0; col < 5; ++col) {
-                if (g[row] & (1 << (4 - col))) {
-                    SDL_Rect px{x + col * scale, y + row * scale, scale, scale};
-                    SDL_RenderFillRect(r, &px);
+        if (const pt::ui::FontGlyph* g = f.find(lab.cp[k])) {
+            const uint16_t* rows = f.rows + g->offset;
+            const int       top  = y + (f.ascent - g->top) * scale;
+            for (int row = 0; row < g->h; ++row) {
+                for (int col = 0; col < g->w; ++col) {
+                    if (rows[row] & (0x8000u >> col)) {
+                        SDL_Rect px{x + (g->dx + col) * scale, top + row * scale, scale, scale};
+                        SDL_RenderFillRect(r, &px);
+                    }
                 }
             }
         }

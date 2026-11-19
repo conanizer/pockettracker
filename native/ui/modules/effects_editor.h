@@ -13,6 +13,7 @@
 #include "ui/canvas.h"
 #include "ui/cursor.h"
 #include "ui/effects_row_layout.h"
+#include "ui/preset_row.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -20,6 +21,7 @@ namespace pt::ui {
 struct EffectState {
     const songcore::Project& project;
     int   cursorRow = 0;   // see the ROW_* constants
+    PresetRowView reverb{}, delay{};   // the two preset rows: the Reverbs and Delays folders
     Theme theme     = theme_classic();
 };
 
@@ -32,6 +34,9 @@ struct SendEditorState {
 
 struct EffectInputResult {
     bool modified = false;
+    // A preset row asks for a file of its folder; the dispatcher loads it (or asks first).
+    PresetRow presetRow   = PresetRow::NONE;
+    int       presetIndex = -1;
 };
 
 class EffectModule {
@@ -78,8 +83,8 @@ public:
                                    const InputAction& action) const;
 };
 
-// The send editor's box over the finished frame; no-op when closed.
-void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Project& project,
-                      const Theme& t);
+// The send editor's box over the finished frame; no-op when closed. `effects` gives the cells, the
+// preset rows and the theme; its cursor is the editor's.
+void draw_send_editor(Canvas& c, const SendEditorState& s, const EffectState& effects);
 
 }  // namespace pt::ui

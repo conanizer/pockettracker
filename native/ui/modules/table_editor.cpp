@@ -23,36 +23,26 @@ constexpr int marker_gap() { return 2 * CHAR_SPACING + 2 * MARKER_CLEAR + GLYPH_
 // Where the marker goes in that gap.
 constexpr int marker_x(int name_x) { return name_x - CHAR_SPACING - MARKER_CLEAR - GLYPH_W; }
 
+// The cursor's columns: the row number (and lane 0's marker slot), N, V, then three FX name/value
+// pairs, each after a gap wide enough for its marker.
+constexpr GridCol COLS[] = {{1, 6 + CHAR_W}, {3, 9}, {2, marker_gap()}, {3, 4}, {2, marker_gap()},
+                            {3, 4},          {2, marker_gap()},        {3, 4}, {2, 0}};
+constexpr auto    LEFT   = column_lefts(COLS);
+
+constexpr HeaderLabel HEADERS[] = {{"N", 1, 1}, {"V", 2, 2}, {"FX1", 3, 4}, {"FX2", 5, 6}, {"FX3", 7, 8}};
+
 void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     const Theme& t = s.theme;
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // The gap before each FX column is wider, for the markers; it comes out of the right-edge slack.
-    int       colX       = x + 10;
-    const int stepX      = colX; colX += 30 + 10;
-    const int transposeX = colX; colX += 45 + 15;
-    const int volX       = colX; colX += 2 * CHAR_W + marker_gap();
-    const int fx1NameX   = colX; colX += 45 + 10;
-    const int fx1ValueX  = colX; colX += 2 * CHAR_W + marker_gap();
-    const int fx2NameX   = colX; colX += 45 + 10;
-    const int fx2ValueX  = colX; colX += 2 * CHAR_W + marker_gap();
-    const int fx3NameX   = colX; colX += 45 + 10;
-    const int fx3ValueX  = colX;
-
-    int rowY = y + TEXT_PADDING;
-    c.text("TABLE " + hex2(s.table.id), x + 10, rowY, t.textTitle);
+    const int titleY = y + TEXT_PADDING;
+    c.text(c.cased("TABLE ") + hex2(s.table.id), x + INSET, titleY, t.textTitle);
     // The tic rate is the instrument's, not the table's; shown here because this is where it is felt.
-    c.text(hex2(s.ticRate) + " TIC", x + WIDTH - 120, rowY, t.textParam);
+    c.text(hex2(s.ticRate) + c.cased(" TIC"), x + WIDTH - 120, titleY, t.textParam);
 
     // The header lights for the cursor's column, the row number for its row.
-    rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    const int cc = s.cursorColumn;
-    c.label("N", transposeX, rowY, header_color(cc, 1, 1, t));
-    c.label("V", volX, rowY, header_color(cc, 2, 2, t));
-    c.label("FX1", fx1NameX, rowY, header_color(cc, 3, 4, t));
-    c.label("FX2", fx2NameX, rowY, header_color(cc, 5, 6, t));
-    c.label("FX3", fx3NameX, rowY, header_color(cc, 7, 8, t));
+    draw_header(c, x + INSET, y, LEFT, HEADERS, s.cursorColumn, t);
 
     // An AUS/AUF cell no ramp uses draws dimmed — the engine's own pairing walk over the rows as
     // played, asked once per draw.
@@ -63,23 +53,17 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
             table_automation::find_table_ramp_cells(played, rowCount);
 
     for (int i = 0; i < static_cast<int>(s.table.rows.size()); ++i) {
-        draw_row(c, x, y, i, s.table.rows[static_cast<size_t>(i)], s, rampCells, stepX, transposeX,
-                 volX, fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
+        draw_row(c, x, y, i, s.table.rows[static_cast<size_t>(i)], s, rampCells);
     }
 }
 
 void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& row,
                            const TableState& s,
-                           const table_automation::TableRampCells& rampCells, int stepX,
-                           int transposeX, int volX, int fx1NameX, int fx1ValueX, int fx2NameX,
-                           int fx2ValueX, int fx3NameX, int fx3ValueX) const {
+                           const table_automation::TableRampCells& rampCells) const {
     const Theme& t = s.theme;
 
-    const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
-
-    const int textY = dataRowY + TEXT_PADDING;
+    const int  textY = draw_grid_row(c, x, y, WIDTH, index, index, t);
+    const auto at    = [&](int col) { return x + INSET + LEFT[static_cast<size_t>(col)]; };
 
     // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
@@ -88,37 +72,35 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // No every-4th accent: a table row is a tic. Column 0 is a real cursor position.
-    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false,
-               (index == s.cursorRow) ? cursor_mark_ink(t) : t.textEmpty);
+    cells.cell(hex1(index), at(0), cur(0), /*is_selected=*/false, /*is_empty=*/false,
+               row_number_ink(index, s.cursorRow, /*beats=*/false, t));
 
     // 0x00 = no transpose: drawn dim, still a value.
-    cells.cell(hex2(row.transpose), transposeX, cur(1), sel(1),
+    cells.cell(hex2(row.transpose), at(1), cur(1), sel(1),
                /*is_empty=*/row.transpose == 0x00, t.textValue);
 
     // −1 = leave the note's own volume alone.
-    cells.cell(row.volume == -1 ? "--" : hex2(row.volume), volX, cur(2), sel(2),
+    cells.cell(row.volume == -1 ? "--" : hex2(row.volume), at(2), cur(2), sel(2),
                /*is_empty=*/row.volume == -1, t.textValue);
 
     // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it.
-    const int nameX[]  = {fx1NameX, fx2NameX, fx3NameX};
-    const int valueX[] = {fx1ValueX, fx2ValueX, fx3ValueX};
     for (int slot = 1; slot <= songcore::FX_SLOTS; ++slot) {
         const songcore::FxSlot& f = songcore::fx_slot(row, slot);
         const int  col = fx_type_column(slot, TABLE_FX_COLUMN);
         const bool dim = f.type == 0x00 || f.off || !rampCells.active(f.type, index, slot);
-        cells.cell(effect_name(f.type), nameX[slot - 1],  cur(col),     sel(col),     dim, t.textValue);
-        cells.cell(hex2(f.value),       valueX[slot - 1], cur(col + 1), sel(col + 1), dim, t.textValue);
+        cells.cell(effect_name(f.type), at(col),     cur(col),     sel(col),     dim, t.textValue);
+        cells.cell(hex2(f.value),       at(col + 1), cur(col + 1), sel(col + 1), dim, t.textValue);
     }
 
     // Lanes 1 and 2 get a marker ahead of their FX column; lane 0 two, beside the row number and
     // ahead of FX1. A stopped lane (−1) has none.
     // ⚠️ After the cells: a selection across a gutter would erase the marker.
     if (s.playbackRows[0] == index) {
-        draw_playhead(c, stepX + CHAR_W, textY, t);
-        draw_playhead(c, marker_x(fx1NameX), textY, t);
+        draw_playhead(c, at(0) + CHAR_W, textY, t);
+        draw_playhead(c, marker_x(at(3)), textY, t);
     }
-    if (s.playbackRows[1] == index) draw_playhead(c, marker_x(fx2NameX), textY, t);
-    if (s.playbackRows[2] == index) draw_playhead(c, marker_x(fx3NameX), textY, t);
+    if (s.playbackRows[1] == index) draw_playhead(c, marker_x(at(5)), textY, t);
+    if (s.playbackRows[2] == index) draw_playhead(c, marker_x(at(7)), textY, t);
 }
 
 CursorContext TableModule::cursor_context(const TableState& s) const {

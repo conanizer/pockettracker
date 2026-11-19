@@ -59,21 +59,6 @@ int byte_default(const ByteCell& b) {
     return b.reverb ? songcore::ReverbCells{}.*b.reverb : songcore::DelayCells{}.*b.delay;
 }
 
-// The bank's own cycle; A+B back to row 0 (NORMAL, the defaults). `exact`: the cells are that row's.
-CursorContext preset_name_context(int cycle_index, int count, bool exact) {
-    CursorContext c = cc::index_cycle(cycle_index, count);
-    c.defaultValue  = 0;
-    c.reappliesSame = !exact;
-    return c;
-}
-
-bool reverb_is_exactly(const songcore::Project& p, int i) {
-    return reverb_bank_match(p) == i && (p.reverbPreset.empty() || p.reverbPreset == kReverbPresets[i].name);
-}
-
-bool delay_is_exactly(const songcore::Project& p, int i) {
-    return delay_bank_match(p) == i && (p.delayPreset.empty() || p.delayPreset == kDelayPresets[i].name);
-}
 
 }  // namespace
 
@@ -125,12 +110,12 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         const int  ry  = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx  = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel = (s.cursorRow == row);
-        c.label("INP EQ", lx, ry, sel ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "INP EQ", lx, ry, sel, t);
         draw_eq_cell(c, lx + VALUE_GAP, ry, eq_slot, sel, t);
     };
 
-    // Name, SAVE, LOAD. `shown` empty = no built-in matches (`----`); `drifted` = the cells have
-    // moved off the named built-in (`*`).
+    // Name, SAVE, LOAD. `shown` empty = no preset matches (`----`); `drifted` = the cells have
+    // moved off the file the row is named after (`*`).
     const auto preset_line = [&](int name_row, int save_row, int load_row, std::string shown,
                                  bool drifted) {
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(name_row)]);
@@ -140,25 +125,25 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
         draw_cell(c, shown, x + LABEL_X[0] + (drifted ? CHAR_W : 0), ry,
                   /*is_cursor=*/s.cursorRow == name_row, /*is_selected=*/false, /*is_empty=*/!named,
                   t.textValue, t);
-        draw_cursor_cell(c, "SAVE", x + PRESET_SAVE_X, ry, s.cursorRow == save_row, t.textParam, t);
-        draw_cursor_cell(c, "LOAD", x + PRESET_LOAD_X, ry, s.cursorRow == load_row, t.textParam, t);
+        draw_cursor_cell(c, c.cased("SAVE"), x + PRESET_SAVE_X, ry, s.cursorRow == save_row, t.textParam, t);
+        draw_cursor_cell(c, c.cased("LOAD"), x + PRESET_LOAD_X, ry, s.cursorRow == load_row, t.textParam, t);
     };
 
     // ── Master bus ───────────────────────────────────────────────────────────────────────────────
     if (drawn(EffectsSection::MASTER)) {
         header(EffectsSection::MASTER);
-        param("TYPE", EffectModule::ROW_MASTER_TYPE, p.masterBusFx == 0 ? "OTT" : "DUST");
+        param("TYPE", EffectModule::ROW_MASTER_TYPE, c.cased(p.masterBusFx == 0 ? "OTT" : "DUST"));
     }
 
     // ── Reverb ───────────────────────────────────────────────────────────────────────────────────
     if (drawn(EffectsSection::REVERB)) {
         header(EffectsSection::REVERB);
         preset_line(EffectModule::ROW_REV_TYPE, EffectModule::ROW_REV_SAVE, EffectModule::ROW_REV_LOAD,
-                    reverb_preset_display_name(p), reverb_preset_differs_from_its_name(p));
+                    reverb_preset_display_name(p), s.reverb.marked);
 
         // Which reverb reads the cells below. ⚠️ Turning it writes none of them.
         const bool unread = !reverb_algo_reads_size_and_mod(p.reverb.algo);
-        param("ALGO", EffectModule::ROW_REV_ALGO, reverb_algo_name(p.reverb.algo));
+        param("ALGO", EffectModule::ROW_REV_ALGO, c.cased(reverb_algo_name(p.reverb.algo)));
         param("SIZE", EffectModule::ROW_REV_SIZE, hex2(p.reverb.size), unread);
 
         param("PRE",  EffectModule::ROW_REV_PRE,   hex2(p.reverb.pre));
@@ -175,9 +160,9 @@ void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int onl
     if (drawn(EffectsSection::DELAY)) {
         header(EffectsSection::DELAY);
         preset_line(EffectModule::ROW_DLY_TYPE, EffectModule::ROW_DLY_SAVE, EffectModule::ROW_DLY_LOAD,
-                    delay_preset_display_name(p), delay_preset_differs_from_its_name(p));
+                    delay_preset_display_name(p), s.delay.marked);
 
-        param("PONG", EffectModule::ROW_DLY_PONG, p.delay.pong ? "ON" : "OFF");
+        param("PONG", EffectModule::ROW_DLY_PONG, c.cased(p.delay.pong ? "ON" : "OFF"));
         // Synced, TIME is a note division, and its range changes with it (0..B instead of 00..FF).
         const auto& divisions = EffectModule::delay_sync_names();
         param("TIME", EffectModule::ROW_DLY_TIME,
@@ -220,7 +205,7 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     // The lines scroll under the title, following the cursor row.
     c.label("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle);
 
-    const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
+    const int firstLineY = y + HEADER_Y + TEXT_PADDING;   // the gap SETTINGS leaves too
     const int viewportH  = HEIGHT - (firstLineY - y);
     // A line's cursor cell starts TEXT_PADDING above its text, so the last one ends that much short
     // of a whole row.
@@ -240,9 +225,9 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     draw_cells(c, x, firstLineY - rows * ROW_HEIGHT, lay, /*only=*/-1, s);
 }
 
-void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Project& project,
-                      const Theme& t) {
+void draw_send_editor(Canvas& c, const SendEditorState& s, const EffectState& effects) {
     if (!s.isOpen) return;
+    const Theme& t = effects.theme;
 
     // Modal: not clipped by the editor beneath.
     c.reset_clip();
@@ -258,13 +243,12 @@ void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Proje
     draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
 
     // `text_width` drops the trailing gap; the run's advance centres it.
-    const std::string title = SECTION_NAMES[section];
+    const std::string title = c.cased(SECTION_NAMES[section]);
     const int         textY = BOX_Y + CONTENT_PAD + TEXT_PADDING;
     c.text(title, BOX_X + (BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, textY, t.textTitle);
 
-    EffectState es{project};
-    es.cursorRow = s.cursorRow;
-    es.theme     = t;
+    EffectState es = effects;
+    es.cursorRow   = s.cursorRow;
     draw_cells(c, BOX_X, textY + ROW_HEIGHT + TITLE_GAP, lay, section, es);
 }
 
@@ -290,14 +274,11 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
             return c;
         }
 
-        case ROW_REV_TYPE: {
-            const int i = reverb_bank_cycle_index(p);
-            return preset_name_context(i, kReverbPresetCount, reverb_is_exactly(p, i));
-        }
-        case ROW_DLY_TYPE: {
-            const int i = delay_bank_cycle_index(p);
-            return preset_name_context(i, kDelayPresetCount, delay_is_exactly(p, i));
-        }
+        // A+B: the file a new project's cells equal.
+        case ROW_REV_TYPE:
+            return cc::preset_cycle(s.reverb);
+        case ROW_DLY_TYPE:
+            return cc::preset_cycle(s.delay);
 
         // ⚠️ Read-only, not absent: they answer a bare A, and `none()` would hide the cursor box.
         case ROW_REV_SAVE:
@@ -384,24 +365,16 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
             p.reverb.algo = clamp(action.value, 0, kReverbAlgoCount - 1);
             return {true};
 
-        case ROW_REV_TYPE: {
-            if (!isSet || action.value < 0 || action.value >= kReverbPresetCount) break;
-            // ⚠️ Compared first: landing back on the shown preset must not bump the dirty counter.
-            if (reverb_is_exactly(p, action.value)) break;
-            reverb_apply_bank(p, action.value);
-            return {true};
-        }
+        case ROW_REV_TYPE:
+            if (!isSet) break;
+            return {false, PresetRow::REVERB, action.value};
 
         case ROW_REV_EQ:
             return {apply_optional_byte(p.reverbInputEq, 127, action)};
 
-        case ROW_DLY_TYPE: {
-            // As the reverb's, dirty counter included.
-            if (!isSet || action.value < 0 || action.value >= kDelayPresetCount) break;
-            if (delay_is_exactly(p, action.value)) break;
-            delay_apply_bank(p, action.value);
-            return {true};
-        }
+        case ROW_DLY_TYPE:
+            if (!isSet) break;
+            return {false, PresetRow::DELAY, action.value};
 
         case ROW_DLY_PONG:
             if (!isSet) break;

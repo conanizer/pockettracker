@@ -88,6 +88,7 @@ struct FileBrowserState {
     FileSortMode             sortMode = FileSortMode::NAME_ASC;
 
     std::string statusMessage;
+    size_t      statusNameAt  = std::string::npos;   // as AppState's
     bool        statusSuccess = true;
 
     // Empty = every file; else the lowercased extensions that pass.

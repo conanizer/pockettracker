@@ -31,6 +31,10 @@ constexpr int BTN_COL3   = 400;        // cursor column 3: TYPE-row EDIT, PRESET
 constexpr int DUAL_N2 = 230;
 constexpr int DUAL_V2 = 220;
 
+// A SINGLE row's value, and how many glyphs of a name fit after it.
+constexpr int VALUE_X            = 150;
+constexpr int SINGLE_VALUE_CHARS = (InstrumentEditorModule::WIDTH - VALUE_X - 10 + CHAR_SPACING) / CHAR_W;
+
 
 // "--" for an unset MIDI byte: −1 sends nothing, 00 is a real program change.
 std::string midi_opt(int v) { return v < 0 ? "--" : hex2(v); }
@@ -107,7 +111,7 @@ const FieldCell* field_cell(Cell cell) {
     return nullptr;
 }
 
-const char* on_off(bool v) { return v ? "on" : "off"; }
+const char* on_off(bool v) { return v ? "ON" : "OFF"; }
 
 // What a MACRO cell is in the instrument's model; null for every other cell.
 const char* macro_note(Cell cell, const Instrument& ins) {
@@ -145,13 +149,14 @@ const char* cell_label(Cell cell, int cc_slot_index) {
     }
 }
 
-std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState& s) {
+// Words (on, lp, fwd) in the set case; numbers, notes and names as they are.
+std::string cell_text(const Canvas& c, Cell cell, int cc_slot_index, const InstrumentEditorState& s) {
     const Instrument& ins = s.instrument;
     if (const FieldCell* f = field_cell(cell)) {
         switch (f->kind) {
             case FieldKind::BYTE:   return hex2(ins.*f->number);
             case FieldKind::NIBBLE: return hex1(ins.*f->number);
-            case FieldKind::FLAG:   return on_off(ins.*f->flag);
+            case FieldKind::FLAG:   return c.cased(on_off(ins.*f->flag));
         }
     }
     switch (cell) {
@@ -159,7 +164,7 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
             // "______" until something is loaded or named; the generated "INSTxx" is never shown.
             return songcore::instrument_has_default_name(ins) ? "______" : ins.name;
         case Cell::ROOT:       return note_name(ins.root);
-        case Cell::FILTER:     return ins.filterType;
+        case Cell::FILTER:     return c.cased(ins.filterType);
         case Cell::PATCH: {
             // "3/128 Acoustic Grand": the 1-based position in the patch list, then its name.
             const std::string num = (s.sfPresetCount > 0) ? std::to_string(s.sfPresetIndex + 1) + "/" +
@@ -167,8 +172,9 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
                                                           : "--";
             return s.sfPresetName.empty() ? num : num + " " + s.sfPresetName;
         }
-        case Cell::SLICE:      return slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))];
-        case Cell::LOOP:       return ins.loopMode;
+        case Cell::SLICE:
+            return c.cased(slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))]);
+        case Cell::LOOP:       return c.cased(ins.loopMode);
         // CHAN is stored 0-15 and shown 1-16.
         case Cell::MIDI_CHANNEL: return dec2(clamp(ins.midiChannel, 0, 15) + 1);
         // 14-bit, so four hex digits.
@@ -203,12 +209,12 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
     const int nameX  = x + 10;
-    const int valueX = x + 150;
+    const int valueX = x + VALUE_X;
 
-    c.text("INSTRUMENT " + hex2(ins.id), nameX, y + TEXT_PADDING, t.textTitle);
+    c.text(c.cased("INSTRUMENT ") + hex2(ins.id), nameX, y + TEXT_PADDING, t.textTitle);
 
     // Row tops, level with the side panel's.
-    int rowY = y + ROW_HEIGHT + 14;
+    int rowY = y + HEADER_Y;
     const int rows = instrument_row_count(type);
     for (int row = 0; row < rows; ++row, rowY += ROW_HEIGHT) {
         const InstrumentRow r     = instrument_row(type, row);
@@ -262,13 +268,15 @@ void InstrumentEditorModule::draw_cell(Canvas& c, int label_x, int value_x, int 
                                        int cc_slot_index, bool is_cursor,
                                        const InstrumentEditorState& s) const {
     const Theme& t = s.theme;
-    c.text(cell_label(cell, cc_slot_index), label_x, text_y, is_cursor ? cursor_mark_ink(t) : t.textParam);
+    draw_cell_label(c, cell_label(cell, cc_slot_index), label_x, text_y, is_cursor, t);
     // The shared EQ-cell painter: "--" when unassigned, ">" for "opens the editor".
     if (cell == Cell::EQ) {
         draw_eq_cell(c, value_x, text_y, s.instrument.eqSlot, is_cursor, t);
         return;
     }
-    draw_cursor_cell(c, cell_text(cell, cc_slot_index, s), value_x, text_y, is_cursor, t.textValue, t);
+    std::string text = cell_text(c, cell, cc_slot_index, s);
+    if (cell == Cell::NAME || cell == Cell::PATCH) text = c.fit_text(text, SINGLE_VALUE_CHARS, is_cursor);
+    draw_cursor_cell(c, text, value_x, text_y, is_cursor, t.textValue, t);
 }
 
 void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int name_x,
@@ -284,25 +292,24 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     const bool c2 = onRow && cursor_column == 2;
     const bool c3 = onRow && cursor_column == 3;
 
-    // Lowercase, as the other cycling cells here.
-    const char* typeText = "sampler";
+    const char* typeText = "SAMPLER";
     switch (type) {
-        case InstrumentType::SOUNDFONT: typeText = "soundfont"; break;
-        case InstrumentType::EXTERNAL:  typeText = "external";  break;
-        case InstrumentType::MACRO:     typeText = "macro";     break;
+        case InstrumentType::SOUNDFONT: typeText = "SOUNDFONT"; break;
+        case InstrumentType::EXTERNAL:  typeText = "EXTERNAL";  break;
+        case InstrumentType::MACRO:     typeText = "MACRO";     break;
         case InstrumentType::SAMPLER:   break;
     }
 
     // LOAD and EDIT are buttons: `textValue` even unselected, so they do not read as labels.
-    c.label("TYPE", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam);
-    draw_cursor_cell(c, typeText, x + TYPE_VALUE, textY, c1, t.textValue, t);
+    draw_cell_label(c, "TYPE", name_x, textY, c1, t);
+    draw_cursor_cell(c, c.cased(typeText), x + TYPE_VALUE, textY, c1, t.textValue, t);
 
     // Drawn only where the type has them, which is also where the cursor stops.
     if (instrument_cell_at(type, this_row, 2) == Cell::SOURCE_LOAD) {
-        draw_cursor_cell(c, "LOAD", x + BTN_COL2, textY, c2, t.textValue, t);
+        draw_cursor_cell(c, c.cased("LOAD"), x + BTN_COL2, textY, c2, t.textValue, t);
     }
     if (instrument_cell_at(type, this_row, 3) == Cell::SOURCE_EDIT) {
-        draw_cursor_cell(c, "EDIT>", x + BTN_COL3, textY, c3, t.textValue, t);
+        draw_cursor_cell(c, c.cased("EDIT>"), x + BTN_COL3, textY, c3, t.textValue, t);
     }
 }
 
@@ -313,9 +320,9 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
     const bool onRow = (cursor_row == this_row);
 
     // INST PRESET: SAVE / LOAD a .pti, under TYPE's LOAD / EDIT.
-    c.label("INST PRESET", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam);
-    draw_cursor_cell(c, "SAVE", x + BTN_COL2, textY, onRow && cursor_column == 2, t.textValue, t);
-    draw_cursor_cell(c, "LOAD", x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
+    draw_cell_label(c, "INST PRESET", name_x, textY, onRow, t);
+    draw_cursor_cell(c, c.cased("SAVE"), x + BTN_COL2, textY, onRow && cursor_column == 2, t.textValue, t);
+    draw_cursor_cell(c, c.cased("LOAD"), x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
 }
 
 // ─── Cursor context ──────────────────────────────────────────────────────────────────────────────

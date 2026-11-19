@@ -104,20 +104,6 @@ inline std::string groove_display_name(const Groove& g) {
     return idx >= 0 ? std::string(groove_bank()[static_cast<size_t>(idx)].name) : std::string();
 }
 
-/** Has a slot drifted from the factory groove it is named after? (the `*` on screen). False for a
- *  name the bank does not know. */
-inline bool groove_differs_from_its_name(const Groove& g) {
-    const int idx = groove_bank_index_by_name(g.name);
-    return idx >= 0 && !groove_matches_bank(g, groove_bank()[static_cast<size_t>(idx)]);
-}
-
-// The bank row the cycle steps from: by name, else by steps, else 0.
-inline int groove_bank_cycle_index(const Groove& g) {
-    int idx = groove_bank_index_by_name(g.name);
-    if (idx < 0) idx = groove_bank_index_by_steps(g);
-    return idx < 0 ? 0 : idx;
-}
-
 }  // namespace songcore
 
 #endif  // POCKETTRACKER_SONGCORE_GROOVE_BANK_H

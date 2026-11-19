@@ -71,8 +71,8 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
         const bool     open = (gi == s.group);
 
         // ⚠️ Raw UTF-8 arrows: MSVC without /utf-8 would convert an escape to the codepage.
-        c.label(std::string(g.title) + (open ? " ↓" : " →"), gridX, gridY + row * ROW_HEIGHT + TEXT_PADDING,
-                t.textTitle);
+        c.label(std::string(g.title) + (open ? " ↓" : " →"), gridX,
+                gridY + row * ROW_HEIGHT + TEXT_PADDING, t.textTitle);
         ++row;
         if (!open) continue;
 

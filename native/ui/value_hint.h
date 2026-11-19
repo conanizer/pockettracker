@@ -11,6 +11,7 @@
 
 namespace pt::ui {
 
+class Canvas;
 struct AppState;
 
 struct ValueHint {
@@ -18,15 +19,15 @@ struct ValueHint {
     std::string detail;
 };
 
-ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactMs = -1.0);
+ValueHint value_hint(const Canvas& c, ValueUnit unit, int value, const AppState& s, double exactMs = -1.0);
 
 // The hint for the cell under the cursor while A is held on it; empty with A up, in a selection, on an
 // empty cell and on one that names no unit.
-ValueHint held_value_hint(const AppState& s);
+ValueHint held_value_hint(const Canvas& c, const AppState& s);
 
 // What an instrument is called in a list: its name; EMPTY for a sampler or SoundFont with no file; its
 // type when nobody named it.
-std::string instrument_label(const songcore::Instrument& ins);
+std::string instrument_label(const Canvas& c, const songcore::Instrument& ins);
 
 // The unit an FX command's value is in; NONE for the rest.
 ValueUnit fx_value_unit(int effect_code);

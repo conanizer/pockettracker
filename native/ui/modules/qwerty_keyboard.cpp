@@ -7,7 +7,7 @@
 namespace pt::ui {
 
 // ─── The layouts: three rows of ten, so UP/DOWN stays in one column ──────────────────────────────
-// The space bar row (SPACE + the layout key) and the virtual ABORT/APPLY row are not in the table.
+// The space bar row (case key, SPACE, layout key) and the virtual ABORT/APPLY row are not in the table.
 
 const std::vector<std::vector<char>>& qwerty_rows(int layout) {
     static const std::vector<std::vector<char>> letters = {
@@ -42,7 +42,7 @@ char QwertyKeyboardState::current_key() const {
     const auto& row = rows[static_cast<size_t>(keyCursorRow)];
     if (row.empty()) return ' ';
     const int col = std::min(std::max(keyCursorCol, 0), static_cast<int>(row.size()) - 1);
-    return row[static_cast<size_t>(col)];
+    return qwerty_key(row[static_cast<size_t>(col)], lower);
 }
 
 // ─── The verbs ───────────────────────────────────────────────────────────────────────────────────
@@ -54,14 +54,22 @@ void clamp_col(QwertyKeyboardState& s) {
 
 namespace {
 
-// Crossing the SPACE row maps the column by what is drawn: 0-7 meet SPACE, 8-9 the layout key.
+// Crossing the SPACE row maps the column by what is drawn: a key column meets the space-row key
+// under it; a space-row key meets the column under its left edge, the layout key the last one.
 void move_key_cursor_to_row(QwertyKeyboardState& s, int row) {
     const int  spaceRow  = s.space_row_index();
     const bool fromKeys  = s.keyCursorRow < spaceRow;
     const bool fromSpace = s.keyCursorRow == spaceRow;
     const int  lastCol   = static_cast<int>(qwerty_rows(s.layout)[0].size()) - 1;
-    if (row == spaceRow && fromKeys)      s.keyCursorCol = s.keyCursorCol >= QWERTY_SPACE_KEY_COLS ? 1 : 0;
-    else if (row < spaceRow && fromSpace) s.keyCursorCol = s.keyCursorCol == 1 ? lastCol : 0;
+    if (row == spaceRow && fromKeys) {
+        int key = 0, right = QWERTY_SPACE_ROW_SPANS[0];
+        while (key + 1 < QWERTY_SPACE_ROW_COLS && s.keyCursorCol >= right) right += QWERTY_SPACE_ROW_SPANS[++key];
+        s.keyCursorCol = key;
+    } else if (row < spaceRow && fromSpace) {
+        int left = 0;
+        for (int key = 0; key < s.keyCursorCol; ++key) left += QWERTY_SPACE_ROW_SPANS[key];
+        s.keyCursorCol = s.keyCursorCol == QWERTY_SPACE_ROW_COLS - 1 ? lastCol : left;
+    }
     s.keyCursorRow = row;
     clamp_col(s);
 }
@@ -90,7 +98,7 @@ void move_key_cursor_right(QwertyKeyboardState& s) {
 // in a name makes the file it is saved into unreadable.
 
 void insert_current_key(QwertyKeyboardState& s) {
-    if (s.is_on_action_row() || s.is_on_layout_key()) return;      // these keys type nothing
+    if (s.is_on_action_row() || s.is_on_case_key() || s.is_on_layout_key()) return;   // they type nothing
     const int len = s.letter_count();
     if (len >= s.maxLength) return;
 
@@ -192,9 +200,7 @@ std::string trimmed_text(const QwertyKeyboardState& s) {
 // A 470×228 box, centred; the keys on a fixed 10-column grid.
 
 void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const Theme& t) const {
-    constexpr int FS    = 4;                  // 20×20px keys, the one place the font goes big
     constexpr int CS    = 3;
-    constexpr int CHARW = 5 * FS + CS;        // 23px per char slot
     constexpr int CELLH = 26;
     constexpr int CELLW = 46;                 // innerW 460 / 10 keys
     constexpr int ROWGAP = 4;
@@ -218,25 +224,30 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const int contentY = BOXY + (BOXH - contentH) / 2;
 
     // ── The header ──────────────────────────────────────────────────────────────────────────────
-    const int labelW = static_cast<int>(s.fieldLabel.size()) * CHARW;
-    c.text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, TextSize::LARGE);
+    const std::string fieldLabel = c.cased(s.fieldLabel);
+    const int         labelW     = c.text_width(fieldLabel, TextSize::LARGE) + CS;
+    c.text(fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, TextSize::LARGE);
 
     // ── The text row: a scroll window that keeps the cursor visible ─────────────────────────────
     // Short text is centred; overflowing, it left-aligns and scrolls with a "…" on the hidden side.
-    const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
+    const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column
     const int              textRowY   = contentY + TEXTROW_OFF;
     const int              textLen    = s.letter_count();
-    const int              windowCols = INNERW / CHARW;   // whole character columns the box holds
+    const int              step       = c.char_step(TextSize::LARGE);   // the font's own spacing
+    const int              glyphW     = c.glyph_width(TextSize::LARGE);
+    // The cursor's margin, on both sides: the whole gap, so it reaches each neighbour without covering it.
+    const int              pad        = step - glyphW;
+    const int              windowCols = INNERW / step;    // whole character columns the box holds
     const QwertyTextWindow win        = qwerty_text_window(textLen, s.textCursor, windowCols);
 
     const bool fits    = (win.cols == textLen + 1);
     const int  leftPad = win.clipLeft ? 1 : 0;
     // Centre only when it fits, then clamp so the phantom end-cursor stays inside.
-    const int  contentRight = textLen * CHARW + 5 * FS;   // right edge of the phantom cursor from startX
-    int        startX       = fits ? BOXX + BOXW / 2 - (textLen * CHARW) / 2 : INNERX;
+    const int  contentRight = textLen * step + glyphW + pad;   // right edge of the phantom cursor from startX
+    int        startX       = fits ? BOXX + BOXW / 2 - (textLen * step) / 2 : INNERX;
     if (startX + contentRight > INNERX + INNERW) startX = INNERX + INNERW - contentRight;
-    if (startX < INNERX) startX = INNERX;
-    const int  textX   = startX + leftPad * CHARW;
+    if (startX < INNERX + pad) startX = INNERX + pad;
+    const int  textX   = startX + leftPad * step;
 
     const Argb markerColor = darken(t.textValue, 0.5f);
     if (win.clipLeft) c.text(ELLIPSIS, startX, textRowY + 3, markerColor, TextSize::LARGE);
@@ -244,18 +255,19 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     size_t at = Canvas::glyph_offset(s.text, win.first);
     for (int k = 0; k < win.cols; ++k) {
         const int  idx      = win.first + k;
-        const int  px       = textX + k * CHARW;
+        const int  px       = textX + k * step;
         const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end
-        if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
+        if (isCursor) c.fill_rect(px - pad, textRowY, glyphW + 2 * pad, CELLH, t.rowCursor);
         if (idx < textLen) {
             const size_t next = Canvas::glyph_offset(s.text, idx + 1);
             c.text_as_typed(s.text.substr(at, next - at), px, textRowY + 3,
-                            isCursor ? cursor_cell_ink(t) : t.textValue, TextSize::LARGE);
+                   isCursor ? cursor_cell_ink(t) : t.textValue, TextSize::LARGE);
             at = next;
         }
     }
 
-    if (win.clipRight) c.text(ELLIPSIS, textX + win.cols * CHARW, textRowY + 3, markerColor, TextSize::LARGE);
+    if (win.clipRight)
+        c.text(ELLIPSIS, textX + win.cols * step, textRowY + 3, markerColor, TextSize::LARGE);
 
     // ── The key rows ────────────────────────────────────────────────────────────────────────────
     const auto& rows     = qwerty_rows(s.layout);
@@ -266,19 +278,18 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const int rowY = rowBaseY + r * (CELLH + ROWGAP);
 
         if (r == lastRow) {
-            // SPACE, then the layout key naming the layout it switches to.
-            const std::string labels[QWERTY_SPACE_ROW_COLS] = {"SPACE", qwerty_layout_label(1 - s.layout)};
-            const int         spans[QWERTY_SPACE_ROW_COLS]  = {QWERTY_SPACE_KEY_COLS,
-                                                               10 - QWERTY_SPACE_KEY_COLS};
+            // The case and layout keys name what they switch to, as written — "low" in small letters.
+            const std::string labels[QWERTY_SPACE_ROW_COLS] = {qwerty_case_label(s.lower), c.cased("SPACE"),
+                                                               qwerty_layout_label(1 - s.layout)};
             int keyX = INNERX;
             for (int col = 0; col < QWERTY_SPACE_ROW_COLS; ++col) {
-                const int  keyW   = spans[col] * CELLW - 1;
+                const int  keyW   = QWERTY_SPACE_ROW_SPANS[col] * CELLW - 1;
                 const bool cursor = (s.keyCursorRow == r && s.keyCursorCol == col);
-                const int  textW  = static_cast<int>(labels[col].size()) * CHARW - CS;
+                const int  textW  = c.text_width(labels[col], TextSize::LARGE);
                 c.fill_rect(keyX, rowY, keyW, CELLH, cursor ? t.rowCursor : t.background);
                 c.text_as_typed(labels[col], keyX + (keyW - textW) / 2, rowY + 3,
-                                cursor ? cursor_cell_ink(t) : t.textParam, TextSize::LARGE);
-                keyX += spans[col] * CELLW;
+                       cursor ? cursor_cell_ink(t) : t.textParam, TextSize::LARGE);
+                keyX += QWERTY_SPACE_ROW_SPANS[col] * CELLW;
             }
             continue;
         }
@@ -291,7 +302,8 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             c.fill_rect(cellX, rowY, CELLW - 1, CELLH,
                         cursor ? t.rowCursor : t.background);
 
-            c.text(std::string(1, row[static_cast<size_t>(col)]), cellX + (CELLW - 1 - 5 * FS) / 2, rowY + 3,
+            c.text_as_typed(std::string(1, qwerty_key(row[static_cast<size_t>(col)], s.lower)),
+                   cellX + (CELLW - 1 - glyphW) / 2, rowY + 3,
                    cursor ? cursor_cell_ink(t) : t.textValue, TextSize::LARGE);
         }
     }
@@ -301,11 +313,11 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const int actionRow  = s.action_row_index();
     const int actionRowY = rowBaseY + actionRow * (CELLH + ROWGAP);
     constexpr int AFS    = 3;
-    constexpr int ACHARW = 5 * AFS + CS;
     constexpr int AGAP   = 10;
     const int     ABTNW  = (INNERW - AGAP) / 2;
 
-    const char* labels[QWERTY_ACTION_COLS] = {"ABORT(SEL)", "APPLY(START)"};
+    // The word in the set case, the button that also does it in capitals.
+    const std::string labels[QWERTY_ACTION_COLS] = {c.cased("ABORT") + "(SEL)", c.cased("APPLY") + "(START)"};
     for (int col = 0; col < QWERTY_ACTION_COLS; ++col) {
         const int  btnX   = INNERX + col * (ABTNW + AGAP);
         const bool cursor = (s.keyCursorRow == actionRow && s.keyCursorCol == col);
@@ -313,8 +325,8 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         c.fill_rect(btnX, actionRowY, ABTNW, CELLH,
                     cursor ? t.rowCursor : t.background);
 
-        const std::string label = labels[col];
-        const int         lw    = static_cast<int>(label.size()) * ACHARW;
+        const std::string& label = labels[col];
+        const int         lw    = c.text_width(label, TextSize::BUTTON) + CS;
         c.text(label, btnX + (ABTNW - lw) / 2, actionRowY + (CELLH - 5 * AFS) / 2,
                cursor ? cursor_cell_ink(t) : t.textParam, TextSize::BUTTON);
     }

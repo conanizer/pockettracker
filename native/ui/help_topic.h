@@ -310,6 +310,8 @@ enum class HelpTopic {
     MOD_POLARITY,
     MOD_CURVE,
     MOD_TRK_AMOUNT,
+    SET_FONT,
+    SET_FONT_CASE,
 
     COUNT
 };

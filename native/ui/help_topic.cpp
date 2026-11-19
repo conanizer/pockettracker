@@ -247,7 +247,7 @@ HelpTopic effects_cell_topic(int row) {
 }
 
 // SETTINGS: column 2 is the row's second cell where it has one (the skin, STR, VOL, POW, TEMPLATE's
-// second button).
+// second button, FONT's letter case).
 HelpTopic settings_cell_topic(int row, int column) {
     if (row < 0 || row >= SETTINGS_ROW_COUNT) return HelpTopic::NONE;
     const bool second = (column == 2);
@@ -272,6 +272,7 @@ HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::FOLDER:     return HelpTopic::SET_FOLDER;
         case SettingsRow::NOTE_PREV:  return HelpTopic::SET_NOTE_PREVIEW;
         case SettingsRow::VISUALIZER: return HelpTopic::SET_VISUALIZER;
+        case SettingsRow::FONT:       return second ? HelpTopic::SET_FONT_CASE : HelpTopic::SET_FONT;
         case SettingsRow::THEME:      return HelpTopic::SET_THEME;
         case SettingsRow::TEMPLATE:
             return second ? HelpTopic::SET_TEMPLATE_CLEAR : HelpTopic::SET_TEMPLATE_SAVE;

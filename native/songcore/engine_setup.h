@@ -368,6 +368,22 @@ std::string soundfont_preset_name(Engine& engine, const Instrument& ins, const M
     return engine.getSoundfontFilePresetName(path.c_str(), ins.sfBank, ins.sfPreset);
 }
 
+// Every preset's name, in the PATCH row's order; empty with no SoundFont.
+template <typename Engine>
+std::vector<std::string> soundfont_preset_names(Engine& engine, const Instrument& ins, const MediaRoots& roots) {
+    std::vector<std::string> names;
+    const std::string path = instrument_soundfont_path(ins, roots);
+    if (path.empty()) return names;
+    const int count = engine.getSoundfontFilePresetCount(path.c_str());
+    for (int i = 0; i < count; ++i) {
+        int bank = -1, preset = -1;
+        names.push_back(engine.getSoundfontFilePresetAt(path.c_str(), i, &bank, &preset)
+                            ? engine.getSoundfontFilePresetName(path.c_str(), bank, preset)
+                            : std::string());
+    }
+    return names;
+}
+
 // The PATCH row: bank+preset only, so scrolling is free; `sync_instrument_soundfont` loads later.
 template <typename Engine>
 bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, int index,

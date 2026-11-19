@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "songcore/effects.h"
+#include "ui/preset_row.h"
 
 namespace pt::ui {
 
@@ -324,6 +325,16 @@ inline CursorContext index_cycle(int current, int count) {
     c.maxValue     = count - 1;
     c.smallStep    = 1;
     c.largeStep    = 1;
+    return c;
+}
+
+// A preset row: steps its folder's list; A+B goes to `defaultIndex`. Read-only while the folder is empty.
+// Values in no file, or moved off theirs, re-apply on the same entry.
+inline CursorContext preset_cycle(const PresetRowView& v) {
+    if (v.count <= 0) return read_only();
+    CursorContext c = index_cycle(v.index, v.count);
+    c.defaultValue  = v.defaultIndex;
+    c.reappliesSame = v.index < 0 || v.marked;
     return c;
 }
 

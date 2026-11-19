@@ -21,18 +21,6 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
-// Each 5×5 font pixel a `scale` square, `gap` px after each glyph.
-struct TextMetrics { int scale, gap; };
-constexpr TextMetrics metrics(TextSize size) {
-    switch (size) {
-        case TextSize::SMALL:  return {2, 2};   // the EQ editor's frequency marks
-        case TextSize::LARGE:  return {4, 3};   // the on-screen keyboard's keys
-        case TextSize::BUTTON: return {3, 3};   // the keyboard's ABORT / APPLY
-        case TextSize::NORMAL: break;
-    }
-    return {3, 2};
-}
-
 // One UTF-8 code point at `i`, advancing past it. A malformed byte is consumed as U+FFFD (blank).
 inline uint32_t next_codepoint(const std::string& s, size_t& i) {
     const auto b0 = static_cast<unsigned char>(s[i]);
@@ -60,7 +48,96 @@ inline uint32_t next_codepoint(const std::string& s, size_t& i) {
     return 0xFFFD;
 }
 
+// Spelt this way in Title case: initialisms, units, a name with capitals of its own, and the filter
+// types, so LP and LD look alike.
+constexpr const char* CASE_KEPT[] = {
+    "ABXY", "ADSR", "AHD", "BP",  "BPM",  "CC",  "CPU", "EQ", "FX", "HP",
+    "KB",   "LD",  "LFO",  "LP",  "MB",  "MIDI", "NT",  "OTT", "PPQ",       "PPQN", "RAM",
+    "SoundFont", "Hz", "ms",
+};
+
+constexpr bool is_letter(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+constexpr bool is_digit(char c) { return c >= '0' && c <= '9'; }
+constexpr bool is_hex_letter(char c) { return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'); }
+constexpr char to_upper(char c) { return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c; }
+constexpr char to_lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; }
+
+// A word runs over letters, digits and dots, so OCTA.F is one word and C-4 is two.
+constexpr bool is_word_char(char c) { return is_letter(c) || is_digit(c) || c == '.'; }
+
+// The CASE_KEPT spelling of s[from, to), or null.
+const char* case_kept(const std::string& s, size_t from, size_t to) {
+    for (const char* w : CASE_KEPT) {
+        size_t i = from, k = 0;
+        while (i < to && w[k] != '\0' && to_upper(s[i]) == to_upper(w[k])) { ++i; ++k; }
+        if (i == to && w[k] == '\0') return w;
+    }
+    return nullptr;
+}
+
+// The letters and dots s[from, to) in `mode`; lower case makes every one small. `whole`: they are
+// the whole word, so in Title a lone letter or a button keeps its capital. `numbered`: a digit is
+// before them (4TH), so Title does not capitalise.
+void case_word(std::string& s, size_t from, size_t to, TextCase mode, bool whole, bool numbered) {
+    if (mode != TextCase::TITLE) {
+        for (size_t i = from; i < to; ++i) s[i] = mode == TextCase::UPPER ? to_upper(s[i]) : to_lower(s[i]);
+        return;
+    }
+    if (const char* kept = case_kept(s, from, to)) {
+        for (size_t i = from; i < to; ++i) s[i] = kept[i - from];
+        return;
+    }
+    // "A" before another word is the article; elsewhere a lone letter is a name (N, CC A, A:).
+    const size_t n       = s.size();
+    const bool   article = to - from == 1 && to_upper(s[from]) == 'A' && to + 1 < n && s[to] == ' ' &&
+                           is_letter(s[to + 1]);
+    const bool   lone    = whole && to - from == 1 && !article;
+    // A button joins another with + (SEL+A, R+←) or names what it does with = (A=YES). FADE+ is not one.
+    const bool   button  = whole && ((to + 1 < n && ((s[to] == '+' && s[to + 1] != ' ') || s[to] == '=')) ||
+                                     (from > 0 && s[from - 1] == '+'));
+    bool         capital = mode == TextCase::TITLE && !numbered;   // the next letter starts a run
+    for (size_t i = from; i < to; ++i) {
+        if (lone || button)     s[i] = to_upper(s[i]);
+        else if (s[i] == '.')   capital = mode == TextCase::TITLE;
+        else if (capital)       { s[i] = to_upper(s[i]); capital = false; }
+        else                    s[i] = to_lower(s[i]);
+    }
+}
+
 }  // namespace
+
+void Canvas::label(const std::string& text, int x, int y, Argb color, TextSize size) {
+    if (!scrollShown_.empty() && text == scrollShown_) {   // the scrolling name, cased as a whole
+        scrollShown_ = cased(text);
+        scrollText_  = cased(scrollText_);
+    }
+    this->text(cased(text), x, y, color, size);
+}
+
+std::string Canvas::cased(const std::string& text) const {
+    std::string out = text;
+    for (size_t from = 0; from < out.size();) {
+        if (!is_word_char(out[from])) { ++from; continue; }
+        size_t next = from;
+        while (next < out.size() && is_word_char(out[next])) ++next;
+
+        // A number or a hex value (0A, 7F, 120) stays as written.
+        bool hex = is_digit(out[from]);
+        for (size_t i = from; hex && i < next; ++i) hex = !is_letter(out[i]) || is_hex_letter(out[i]);
+        if (!hex) {
+            // The letters between digits are each a word: MOD1, SUS2, 4TH, 44100Hz.
+            for (size_t a = from; a < next;) {
+                if (is_digit(out[a])) { ++a; continue; }
+                size_t b = a;
+                while (b < next && !is_digit(out[b])) ++b;
+                case_word(out, a, b, case_, /*whole=*/a == from && b == next, /*numbered=*/a > from);
+                a = b;
+            }
+        }
+        from = next;
+    }
+    return out;
+}
 
 void Canvas::clear(Argb color) {
     std::fill(px_.begin(), px_.end(), color);
@@ -109,23 +186,24 @@ void Canvas::stroke_rect(int x, int y, int w, int h, Argb color, int thickness) 
     fill_rect(x + w - t, y + t, t, h - 2 * t, color);  // right
 }
 
-// Each source pixel a font_scale square. Drawn as runs and bands rather than per pixel (text is most
+// Each font pixel a font_scale square. Drawn as runs and bands rather than per pixel (text is most
 // of a frame's cost); the rects never overlap, so a translucent colour blends each pixel once.
-void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale) {
+void Canvas::draw_glyph(const BitmapFont& f, const FontGlyph& g, int x, int y, Argb color, int font_scale) {
     if (font_scale <= 0) return;
-    for (int row = 0; row < 5;) {
-        const uint8_t bits = g[static_cast<size_t>(row)];
+    const uint16_t* rows = f.rows + g.offset;
+    for (int row = 0; row < g.h;) {
+        const uint16_t bits = rows[row];
         if (bits == 0) { ++row; continue; }
 
         int last = row + 1;
-        while (last < 5 && g[static_cast<size_t>(last)] == bits) ++last;
+        while (last < g.h && rows[last] == bits) ++last;
         const int band_y = y + row * font_scale;
         const int band_h = (last - row) * font_scale;
 
-        for (int col = 0; col < 5;) {
-            if (!((bits >> (4 - col)) & 1)) { ++col; continue; }
+        for (int col = 0; col < g.w;) {
+            if (!(bits & (0x8000u >> col))) { ++col; continue; }
             int end = col + 1;
-            while (end < 5 && ((bits >> (4 - end)) & 1)) ++end;
+            while (end < g.w && (bits & (0x8000u >> end))) ++end;
             fill_rect(x + col * font_scale, band_y, (end - col) * font_scale, band_h, color);
             col = end;
         }
@@ -133,25 +211,54 @@ void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale
     }
 }
 
+std::string Canvas::as_shown(const std::string& text) const {
+    if (case_ == TextCase::TITLE) return text;
+    std::string out = text;
+    for (char& ch : out) ch = case_ == TextCase::UPPER ? to_upper(ch) : to_lower(ch);
+    return out;
+}
+
 void Canvas::text(const std::string& text, int x, int y, Argb color, TextSize size) {
-    const TextMetrics m = metrics(size);
-    int cx = x;
+    if (scrollShown_.empty() || text.compare(0, scrollShown_.size(), scrollShown_) != 0) {
+        text_as_typed(as_shown(text), x, y, color, size);
+        return;
+    }
+    // The scrolling name, then whatever follows it in `text` (THEME's " >") where it always sat.
+    const std::string rest = text.substr(scrollShown_.size());
+    scrollShown_.clear();
+    const int cx = clipX_, cy = clipY_, cw = clipW_, ch = clipH_;
+    const int left = std::max(cx, x), right = std::min(cx + cw, x + scrollW_);
+    set_clip(left, cy, right - left, ch);
+    text_as_typed(as_shown(scrollText_), x - scrollPx_, y, color, size);
+    set_clip(cx, cy, cw, ch);
+    if (!rest.empty()) text_as_typed(as_shown(rest), x + scrollW_ + font_->size(size).gap, y, color, size);
+}
+
+void Canvas::text_as_typed(const std::string& text, int x, int y, Argb color, TextSize size) {
+    const BitmapFont&  f        = font_->face(size);
+    const UiFont::Size s        = font_->size(size);
+    const int          baseline = y + s.baseline;
+    int                pen      = x;
     for (size_t i = 0; i < text.size();) {
-        draw_glyph(glyph_for_codepoint(next_codepoint(text, i)), cx, y, color, m.scale);
-        cx += 5 * m.scale + m.gap;
+        const FontGlyph* g = f.find(next_codepoint(text, i));
+        if (g == nullptr) {
+            pen += f.defaultAdvance * s.scale + s.gap;
+            continue;
+        }
+        draw_glyph(f, *g, pen + g->dx * s.scale, baseline - g->top * s.scale, color, s.scale);
+        pen += g->advance * s.scale + s.gap;
     }
 }
 
-int Canvas::text_width(const std::string& text, TextSize size) {
-    const TextMetrics m = metrics(size);
-    return glyph_count(text) * (5 * m.scale + m.gap) - (text.empty() ? 0 : m.gap);
-}
-
-int Canvas::glyph_width(TextSize size) { return 5 * metrics(size).scale; }
-
-int Canvas::char_step(TextSize size) {
-    const TextMetrics m = metrics(size);
-    return 5 * m.scale + m.gap;
+int Canvas::text_width(const std::string& raw, TextSize size) const {
+    const std::string  text = as_shown(raw);
+    const UiFont::Size s    = font_->size(size);
+    int                w = 0;
+    for (size_t i = 0; i < text.size();)
+        w += font_->face(size).advance(next_codepoint(text, i)) * s.scale + s.gap;
+    if (text.empty()) return 0;
+    const int built_in = font_->face(size).advance('M') * s.scale - glyph_width(size);
+    return w - s.gap - built_in;
 }
 
 int Canvas::glyph_count(const std::string& text) {
@@ -182,6 +289,52 @@ std::string Canvas::clip_text(const std::string& text, int max_glyphs) {
         if (++n > max_glyphs) return text.substr(0, cut) + "\xE2\x80\xA6";
     }
     return text;
+}
+
+void Canvas::begin_frame(long long now_ms) {
+    // A name that was not drawn last frame starts from its front when it comes back.
+    if (!scrollDrawn_) scrollText_.clear();
+    scrollDrawn_ = false;
+    scrollDueMs_ = -1;
+    nowMs_       = now_ms;
+    scrollShown_.clear();
+}
+
+std::string Canvas::fit_text(const std::string& text, int max_glyphs, bool scrolls) {
+    constexpr long long HOLD_MS = 1000;   // at either end
+    constexpr int       STEP_PX = 3;      // one pixel of the 5×5 font at its usual size
+    constexpr long long STEP_MS = 60;     // 50 px a second
+
+    if (!scrolls || max_glyphs <= 0 || glyph_count(text) <= max_glyphs) return clip_text(text, max_glyphs);
+    if (scrollDrawn_ && text != scrollText_) return clip_text(text, max_glyphs);
+
+    // The field: the name's first `max_glyphs` glyphs, so the cell behind it is as wide as ever.
+    std::string shown = text.substr(0, glyph_offset(text, max_glyphs));
+    const int   field = text_width(shown);
+    const int   over  = text_width(text) - field;
+    if (over <= 0) return shown;
+
+    if (text != scrollText_) {
+        scrollText_    = text;
+        scrollStartMs_ = nowMs_;
+    }
+    scrollDrawn_ = true;
+
+    // Hold at the front, STEP_PX per step, hold at the end, back to the front.
+    const long long steps = (over + STEP_PX - 1) / STEP_PX;
+    const long long cycle = HOLD_MS + steps * STEP_MS + HOLD_MS;
+    const long long t     = (nowMs_ - scrollStartMs_) % cycle;
+    int             px    = 0;
+    long long       wait  = HOLD_MS - t;
+    if (t >= HOLD_MS) {
+        px   = static_cast<int>(std::min<long long>(over, ((t - HOLD_MS) / STEP_MS + 1) * STEP_PX));
+        wait = px < over ? STEP_MS - (t - HOLD_MS) % STEP_MS : cycle - t;
+    }
+    scrollDueMs_ = nowMs_ + wait;
+    scrollPx_    = px;
+    scrollW_     = field;
+    scrollShown_ = shown;
+    return shown;
 }
 
 std::string Canvas::clip_text_head(const std::string& text, int max_glyphs) {

@@ -37,27 +37,18 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
 // ─── EFFECTS: a preset line's SAVE and LOAD ──────────────────────────────────────────────────────
 
 bool InputDispatcher::effects_preset_action(int row) {
-    const songcore::Project& p = host_.project();
-
-    // SAVE is seeded with the sanitized name the row shows. LOAD starts at the built-in folder (config.json
-    // has no key for either).
+    // LOAD starts at the built-in folder (config.json has no key for either).
     switch (row) {
-        case EffectModule::ROW_REV_SAVE: {
-            const std::string seed = safe_name(reverb_preset_display_name(p));
-            open_qwerty(QwertyContext::REVERB_SAVE, seed.empty() ? "REVERB" : seed, "SAVE REVERB:",
-                        fs_.reverbs_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
+        case EffectModule::ROW_REV_SAVE:
+            preset_open_save(PresetRow::REVERB);
             return true;
-        }
         case EffectModule::ROW_REV_LOAD:
             open_file_browser(AppState::BrowserPurpose::LOAD_REVERB, fs_.reverbs_directory(),
                               {REVERB_FILE_EXT});
             return true;
-        case EffectModule::ROW_DLY_SAVE: {
-            const std::string seed = safe_name(delay_preset_display_name(p));
-            open_qwerty(QwertyContext::DELAY_SAVE, seed.empty() ? "DELAY" : seed, "SAVE DELAY:",
-                        fs_.delays_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
+        case EffectModule::ROW_DLY_SAVE:
+            preset_open_save(PresetRow::DELAY);
             return true;
-        }
         case EffectModule::ROW_DLY_LOAD:
             open_file_browser(AppState::BrowserPurpose::LOAD_DELAY, fs_.delays_directory(),
                               {DELAY_FILE_EXT});
@@ -91,7 +82,7 @@ bool InputDispatcher::effects_release_action(int row, bool peek) {
     return false;
 }
 
-void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::string& typed_text) {
+bool InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized filename, raw name in the file and on the row; empty falls back to the shown name, then
     // "REVERB" (never the dotfile .ptr).
     const std::string shown = reverb_preset_display_name(host_.project());
@@ -106,9 +97,10 @@ void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::s
 
     const bool ok = save_reverb_file(fs_, dir + "/" + safe + ".ptr", reverb_cells_of(host_.project()));
     set_status(s_, ok ? "REVERB SAVED" : "SAVE FAILED", ok);
+    return ok;
 }
 
-void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::string& typed_text) {
+bool InputDispatcher::save_delay_preset_as(const std::string& dir, const std::string& typed_text) {
     // As the reverb's.
     const std::string shown = delay_preset_display_name(host_.project());
     const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "DELAY";
@@ -121,6 +113,7 @@ void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::st
 
     const bool ok = save_delay_file(fs_, dir + "/" + safe + ".ptd", delay_cells_of(host_.project()));
     set_status(s_, ok ? "DELAY SAVED" : "SAVE FAILED", ok);
+    return ok;
 }
 
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
@@ -151,12 +144,16 @@ CursorContext InputDispatcher::effects_context() const {
     const Project& p = *s_.project;
     EffectState es{p};
     es.cursorRow = s_.effectsCursorRow;
+    es.reverb    = s_.presetRows[static_cast<size_t>(PresetRow::REVERB)];
+    es.delay     = s_.presetRows[static_cast<size_t>(PresetRow::DELAY)];
     return effects_.cursor_context(es);
 }
 
 bool InputDispatcher::effects_edit(const InputAction& action) {
     Project& p = host_.edit_project();
-    return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
+    const EffectInputResult r = effects_.handle_input(p, s_.effectsCursorRow, action);
+    if (r.presetRow != PresetRow::NONE) return preset_step(r.presetRow, r.presetIndex);
+    return r.modified;
 }
 
 songcore::MapTarget InputDispatcher::effects_knob() const {

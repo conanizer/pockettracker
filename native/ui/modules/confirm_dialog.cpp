@@ -14,12 +14,9 @@ constexpr int BOX_H = 55;
 constexpr int BOX_X = (DESIGN_W - BOX_W) / 2;
 constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;
 
-// A bigger font than the editors.
-constexpr int DLG_FONT_SCALE   = 3;
-
 // Two lines a fixed distance apart, the pair centred.
 constexpr int DLG_LINE_PITCH = 22;
-constexpr int DLG_GLYPH_H    = 5 * DLG_FONT_SCALE;
+constexpr int DLG_GLYPH_H    = ROW_HEIGHT - 2 * TEXT_PADDING;
 constexpr int DLG_CONTENT_H  = DLG_LINE_PITCH + DLG_GLYPH_H;
 constexpr int DLG_TITLE_Y    = (BOX_H - DLG_CONTENT_H) / 2;
 constexpr int DLG_INSTR_Y    = DLG_TITLE_Y + DLG_LINE_PITCH;
@@ -35,19 +32,21 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
         case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";
         case ConfirmDialogState::Kind::COLLECT_EXISTS: return "ALREADY IN SONGS";
+        case ConfirmDialogState::Kind::PRESET_UNSAVED: return "PRESET NOT SAVED";
         case ConfirmDialogState::Kind::TOP_PANEL:   return "SHOW HINTS AT THE TOP?";
         case ConfirmDialogState::Kind::NONE:        break;
     }
     return "";
 }
 
-void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
-    const std::string instruction = "A=YES  B=NO";
+void draw_confirm_box(Canvas& c, const std::string& question, const Theme& t) {
+    const std::string title       = c.cased(question);
+    const std::string instruction = c.cased("A=YES  B=NO");
 
     draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
 
-    const int titleW = Canvas::text_width(title);
-    const int instrW = Canvas::text_width(instruction);
+    const int titleW = c.text_width(title);
+    const int instrW = c.text_width(instruction);
 
     c.text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle);
     // ⚠️ The YES line takes TXT VALUE, the one ink role bright in every palette.
@@ -61,6 +60,7 @@ std::vector<const char*> confirm_dialog_note(ConfirmDialogState::Kind kind) {
 
 std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind) {
     if (kind == ConfirmDialogState::Kind::COLLECT_EXISTS) return {"REPLACE", "NEW COPY", "CANCEL"};
+    if (kind == ConfirmDialogState::Kind::PRESET_UNSAVED) return {"SAVE", "DISCARD", "CANCEL"};
     if (kind == ConfirmDialogState::Kind::CHANGE_TYPE)    return {"DISCARD", "KEEP", "CANCEL"};
     if (kind == ConfirmDialogState::Kind::TOP_PANEL)      return {"YES", "NO"};
     return {};
@@ -75,15 +75,13 @@ void draw_choice_box(Canvas& c, const std::string& question, const std::vector<c
     constexpr int GAP = 24;   // between answers
     constexpr int PAD = 24;   // either side of the widest line
 
-    const auto width_of = [](const std::string& s) {
-        return Canvas::text_width(s);
-    };
-
+    const std::string title = c.cased(question);
+    const int titleW = c.text_width(title);
     int width = -GAP;
-    for (const char* a : answers) width += width_of(a) + GAP;
+    for (const char* a : answers) width += c.text_width(c.cased(a)) + GAP;
 
-    int textW = std::max(width_of(question), width);
-    for (const char* line : note) textW = std::max(textW, width_of(line));
+    int textW = std::max(titleW, width);
+    for (const char* line : note) textW = std::max(textW, c.text_width(c.cased(line)));
 
     constexpr int NOTE_GAP = 8;   // sets the answers apart from the note above them
     const int noteH = note.empty() ? 0 : static_cast<int>(note.size()) * DLG_LINE_PITCH + NOTE_GAP;
@@ -93,20 +91,20 @@ void draw_choice_box(Canvas& c, const std::string& question, const std::vector<c
     const int boxY = (DESIGN_H - boxH) / 2;
     draw_modal_box(c, boxX, boxY, boxW, boxH, t);
 
-    c.text(question, boxX + (boxW - width_of(question)) / 2, boxY + DLG_TITLE_Y, t.textTitle);
+    c.text(title, boxX + (boxW - titleW) / 2, boxY + DLG_TITLE_Y, t.textTitle);
     int y = boxY + DLG_TITLE_Y + DLG_LINE_PITCH;
     for (const char* line : note) {
-        c.text(line, boxX + (boxW - width_of(line)) / 2, y, t.textParam);
+        const std::string text = c.cased(line);
+        c.text(text, boxX + (boxW - c.text_width(text)) / 2, y, t.textParam);
         y += DLG_LINE_PITCH;
     }
 
     const int answersY = boxY + DLG_INSTR_Y + noteH;
     int x = boxX + (boxW - width) / 2;
-    int i = 0;
-    for (const char* a : answers) {
-        draw_cursor_cell(c, a, x, answersY, i == chosen, t.textValue, t);
-        x += width_of(a) + GAP;
-        ++i;
+    for (size_t i = 0; i < answers.size(); ++i) {
+        const std::string label = c.cased(answers[i]);
+        draw_cursor_cell(c, label, x, answersY, static_cast<int>(i) == chosen, t.textValue, t);
+        x += c.text_width(label) + GAP;
     }
 }
 

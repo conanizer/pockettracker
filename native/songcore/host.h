@@ -250,6 +250,7 @@ class SongcoreHost {
     int sf_preset_count(int id) const;
     int sf_preset_index(int id) const;
     std::string sf_preset_name(int id) const;
+    std::vector<std::string> sf_preset_names(int id) const;   // the whole list, for the PATCH picker
     void set_sf_preset_by_index(int id, int index);
 
     // Bring the loaded sound in line with the preset the instrument names; free when nothing moved.

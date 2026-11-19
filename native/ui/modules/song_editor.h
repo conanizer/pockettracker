@@ -52,7 +52,7 @@ public:
 
 private:
     void draw_row(Canvas& c, int x, int y, int row_index, int absolute_row,
-                  const SongEditorState& s, int stepX, const int* trackColumns) const;
+                  const SongEditorState& s) const;
 };
 
 }  // namespace pt::ui

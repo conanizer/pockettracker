@@ -52,14 +52,13 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     draw_modal_backdrop(c);
     draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
 
-    const std::string title = (s.output == RenderDialogState::Output::STEMS) ? "RENDER STEMS"
-                                                                             : "RENDER MIX";
-    const int titleW = Canvas::text_width(title);
+    const std::string title = c.cased(s.output == RenderDialogState::Output::STEMS ? "RENDER STEMS"
+                                                                                   : "RENDER MIX");
+    const int titleW = c.text_width(title);
     c.text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + CONTENT_PAD + TEXT_PADDING, t.textTitle);
 
     const auto label = [&](RenderRow row, const char* text) {
-        c.text(text, LABEL_X, row_y(static_cast<int>(row)) + TEXT_PADDING,
-               s.is_on(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, text, LABEL_X, row_y(static_cast<int>(row)) + TEXT_PADDING, s.is_on(row), t);
     };
     const auto value = [&](RenderRow row, const std::string& text) {
         draw_cursor_cell(c, text, VALUE_X, row_y(static_cast<int>(row)) + TEXT_PADDING, s.is_on(row),
@@ -70,7 +69,7 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     value(RenderRow::SONG_START, hex2(s.startRow));
 
     label(RenderRow::SONG_END, "SONG END");
-    value(RenderRow::SONG_END, s.endRow >= 0 ? hex2(s.endRow) : "AUTO");
+    value(RenderRow::SONG_END, s.endRow >= 0 ? hex2(s.endRow) : c.cased("AUTO"));
 
     // ⚠️ AUTO shows the row it resolves to, beside itself and dimmed.
     if (s.endRow < 0) {
@@ -79,10 +78,10 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     }
 
     label(RenderRow::REPEAT, "REPEAT");
-    value(RenderRow::REPEAT, s.repeat > 1 ? ("x" + std::to_string(s.repeat)) : std::string("OFF"));
+    value(RenderRow::REPEAT, s.repeat > 1 ? ("x" + std::to_string(s.repeat)) : c.cased("OFF"));
 
     // The RENDER button carries the percentage — the panel covers PROJECT's readout.
-    value(RenderRow::RENDER, "RENDER");
+    value(RenderRow::RENDER, c.cased("RENDER"));
     if (isRendering) {
         const int pct = static_cast<int>(progress * 100.0f + 0.5f);
         c.text(std::to_string(pct < 0 ? 0 : (pct > 100 ? 100 : pct)) + "%", PROGRESS_X,

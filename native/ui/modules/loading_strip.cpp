@@ -10,7 +10,6 @@ namespace {
 constexpr int TEXT_Y   = TEXT_PADDING;                    // row 1
 constexpr int ROW2_Y   = ROW_HEIGHT;                      // row 2
 
-constexpr int INSET = 10;   // the left/right margin every bar in the app uses
 constexpr int GAP   = CHAR_W;
 
 // The bar sits inside row 2's text band.
@@ -32,13 +31,14 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
 
     // ── Row 1: what is being opened, and the way out ─────────────────────────────────────────────
     // "B=STOP" is measured first: it must never be clipped.
-    const int cancelW = Canvas::text_width(CANCEL);
-    c.text(CANCEL, DESIGN_W - INSET - cancelW, TEXT_Y, t.textParam);
+    const std::string cancel  = c.cased(CANCEL);
+    const int         cancelW = c.text_width(cancel);
+    c.text(cancel, DESIGN_W - INSET - cancelW, TEXT_Y, t.textParam);
 
-    // The name's budget is what the rest of the row leaves.
-    const int nameCols = (DESIGN_W - INSET * 2 - cancelW - GAP -
-                          Canvas::text_width(PREFIX)) / CHAR_W;
-    const std::string line = PREFIX + Canvas::clip_text(s.detail, nameCols > 0 ? nameCols : 0);
+    // The name's budget is what the rest of the row leaves. The name is drawn as it is.
+    const std::string prefix   = c.cased(PREFIX);
+    const int         nameCols = (DESIGN_W - INSET * 2 - cancelW - GAP - c.text_width(prefix)) / CHAR_W;
+    const std::string line     = prefix + Canvas::clip_text(s.detail, nameCols > 0 ? nameCols : 0);
     c.text(line, INSET, TEXT_Y, t.textValue);
 
     // ── Row 2: the bar, and the percentage where there is one ────────────────────────────────────
@@ -48,7 +48,7 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
     if (s.progress >= 0.0f) {
         const float       p   = s.progress > 1.0f ? 1.0f : s.progress;
         const std::string pct = std::to_string(static_cast<int>(p * 100.0f + 0.5f)) + "%";
-        const int         w   = Canvas::text_width(pct);
+        const int         w   = c.text_width(pct);
         c.text(pct, DESIGN_W - INSET - w, ROW2_Y + TEXT_PADDING, t.textValue);
         barW -= w + GAP;
     }

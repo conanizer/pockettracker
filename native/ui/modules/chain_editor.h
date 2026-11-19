@@ -50,8 +50,7 @@ public:
                                   const InputAction& action) const;
 
 private:
-    void draw_row(Canvas& c, int x, int y, int index, const ChainEditorState& s, int stepX, int phX,
-                  int tspX) const;
+    void draw_row(Canvas& c, int x, int y, int index, const ChainEditorState& s) const;
 };
 
 }  // namespace pt::ui

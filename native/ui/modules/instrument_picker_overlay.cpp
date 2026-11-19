@@ -9,7 +9,7 @@ namespace pt::ui {
 
 namespace {
 
-// As wide as the hint. A longer name is cut.
+// As wide as the hint. A longer name scrolls under the cursor.
 constexpr int TEXT_COLS  = 18;
 constexpr int TEXT_INSET = 14;
 constexpr int BAR_INSET  = 8;   // the cursor bar
@@ -22,6 +22,12 @@ static_assert(BOX_W + 2 * (MODAL_BORDER - 1) <= DESIGN_W, "the instrument list i
 // The title, air, the rows, air, the hint.
 constexpr int BOX_H = 2 * BAR_INSET + ROW_HEIGHT + GAP + INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP + ROW_HEIGHT;
 static_assert(BOX_H + 2 * (MODAL_BORDER - 1) <= DESIGN_H, "the instrument list is taller than the screen");
+
+// The preset list: "128 " and a SoundFont name of up to 20 letters.
+constexpr int SF_TEXT_COLS = 24;
+constexpr int SF_BOX_W     = 2 * TEXT_INSET + SF_TEXT_COLS * CHAR_W - CHAR_SPACING;
+constexpr int SF_BOX_X     = (DESIGN_W - SF_BOX_W) / 2;
+static_assert(SF_BOX_W + 2 * (MODAL_BORDER - 1) <= DESIGN_W, "the preset list is wider than the screen");
 
 }  // namespace
 
@@ -44,16 +50,48 @@ void draw_instrument_picker(Canvas& c, const InstrumentPickerState& s,
         const songcore::Instrument& ins      = instruments[static_cast<size_t>(i)];
         const int                   ry       = y + (i - s.top) * ROW_HEIGHT;
         const bool                  isCursor = i == s.cursor;
-        const std::string           name     = instrument_label(ins);
-        const bool                  dim      = name == "EMPTY";
+        const std::string           name     = instrument_label(c, ins);
+        const bool                  dim      = name == c.cased("EMPTY");
         if (isCursor) c.fill_rect(BOX_X + BAR_INSET, ry, BOX_W - 2 * BAR_INSET, ROW_HEIGHT, t.rowCursor);
         const Argb ink = isCursor ? cursor_cell_ink(t) : dim ? t.textEmpty : t.textValue;
         c.text(hex2(i), x, ry + TEXT_PADDING, isCursor ? ink : t.textParam);
-        c.text(Canvas::clip_text(name, TEXT_COLS - 3), x + NAME_X, ry + TEXT_PADDING, ink);
+        c.text(c.fit_text(name, TEXT_COLS - 3, isCursor), x + NAME_X, ry + TEXT_PADDING, ink);
     }
     y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
 
-    c.label(c.cased("A=CHOOSE B=CANCEL"), x, y + TEXT_PADDING, t.textParam);
+    c.label(c.cased("A=CHOOSE  B=CANCEL"), x, y + TEXT_PADDING, t.textParam);
+}
+
+void draw_sf_preset_picker(Canvas& c, const SfPresetPickerState& s, const Theme& t) {
+    if (!s.isOpen) return;
+    c.reset_clip();
+
+    const int BOX_Y = (DESIGN_H - BOX_H) / 2;
+    draw_modal_backdrop(c);
+    draw_modal_box(c, SF_BOX_X, BOX_Y, SF_BOX_W, BOX_H, t);
+
+    const int x = SF_BOX_X + TEXT_INSET;
+    int       y = BOX_Y + BAR_INSET;
+    c.label(c.cased("PATCH"), x, y + TEXT_PADDING, t.textTitle);
+    y += ROW_HEIGHT + GAP;
+
+    // Numbered from 1, as the PATCH row counts them, right-aligned to the longest number.
+    const int digits = static_cast<int>(std::to_string(s.count).size());
+    const int nameX  = (digits + 1) * CHAR_W;
+    for (int i = s.top; i < s.count && i < s.top + INSTRUMENT_PICKER_ROWS; ++i) {
+        const int  ry       = y + (i - s.top) * ROW_HEIGHT;
+        const bool isCursor = i == s.cursor;
+        if (isCursor) c.fill_rect(SF_BOX_X + BAR_INSET, ry, SF_BOX_W - 2 * BAR_INSET, ROW_HEIGHT, t.rowCursor);
+        const Argb  ink = isCursor ? cursor_cell_ink(t) : t.textValue;
+        std::string num = std::to_string(i + 1);
+        num.insert(0, static_cast<size_t>(digits) - num.size(), ' ');
+        c.text(num, x, ry + TEXT_PADDING, isCursor ? ink : t.textParam);
+        c.text(c.fit_text(s.names[static_cast<size_t>(i)], SF_TEXT_COLS - digits - 1, isCursor), x + nameX,
+               ry + TEXT_PADDING, ink);
+    }
+    y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
+
+    c.label(c.cased("A=CHOOSE  B=CANCEL"), x, y + TEXT_PADDING, t.textParam);
 }
 
 }  // namespace pt::ui

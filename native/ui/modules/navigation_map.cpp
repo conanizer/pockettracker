@@ -38,8 +38,8 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
             const bool isCurrent = onPoolInstrument ? (row == 0 && gcol == 4)
                                                     : (screen == s.currentScreen);
 
-            const std::string label  = screen_short_label(screen);
-            const int         labelW = Canvas::text_width(label);
+            const std::string label  = c.cased(screen_short_label(screen));
+            const int         labelW = c.text_width(label);
 
             const int labelX = cellX + (CELL_WIDTH - labelW) / 2;
             if (isCurrent && s.rHeld)

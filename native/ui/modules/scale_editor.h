@@ -15,6 +15,7 @@
 #include "songcore/scale_bank.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/preset_row.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -54,6 +55,7 @@ struct ScaleState {
     // sequencer runs ahead. Pitch classes, not degrees, so it can land on an OFF row.
     unsigned soundingMask = 0;
 
+    PresetRowView preset{};   // the NAME row: the Scales folder
     Theme theme     = theme_classic();
 };
 
@@ -61,6 +63,8 @@ struct ScaleInputResult {
     bool modified = false;
     // The KEY row edits the project, so the key travels out separately.
     int  newKey   = -1;
+    // The NAME row asks for a file of the folder; the dispatcher loads it (or asks first).
+    int  presetIndex = -1;
 };
 
 class ScaleModule {

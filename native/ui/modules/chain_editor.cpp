@@ -4,42 +4,42 @@
 
 namespace pt::ui {
 
+namespace {
+
+// The cursor's columns: the row number (and the playhead's slot beside it), PH, TSP.
+constexpr GridCol     COLS[]    = {{1, 6 + CHAR_W}, {2, 16}, {2, 0}};
+constexpr auto        LEFT      = column_lefts(COLS);
+constexpr HeaderLabel HEADERS[] = {{"PH", 1, 1}, {"TSP", 2, 2}};
+
+}  // namespace
+
 void ChainEditorModule::draw(Canvas& c, int x, int y, const ChainEditorState& s) const {
     const Theme& t = s.theme;
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    int       colX  = x + 10;
-    const int stepX = colX; colX += 30 + 10;
-    const int phX   = colX; colX += 30 + 20;
-    const int tspX  = colX;
-
-    int rowY = y + TEXT_PADDING;
-    c.text("CHAIN " + hex2(s.chain.id), x + 10, rowY, t.textTitle);
+    const int titleY = y + TEXT_PADDING;
+    c.text(c.cased("CHAIN ") + hex2(s.chain.id), x + INSET, titleY, t.textTitle);
     // The song cell in the title's dim colour: context, not a second title.
     if (s.songRow >= 0 && s.songTrack >= 0) {
-        c.text("S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1), x + 170, rowY, t.textParam);
+        c.text("S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1), x + 170, titleY,
+               t.textParam);
     }
 
     // The header lights for the cursor's column; the row number lights for its row.
-    rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    c.label("PH", phX, rowY, header_color(s.cursorColumn, 1, 1, t));
-    c.label("TSP", tspX, rowY, header_color(s.cursorColumn, 2, 2, t));
+    draw_header(c, x + INSET, y, LEFT, HEADERS, s.cursorColumn, t);
 
-    for (int index = 0; index < 16; ++index) draw_row(c, x, y, index, s, stepX, phX, tspX);
+    for (int index = 0; index < 16; ++index) draw_row(c, x, y, index, s);
 }
 
-void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const ChainEditorState& s,
-                                 int stepX, int phX, int tspX) const {
+void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const ChainEditorState& s) const {
     const Theme& t = s.theme;
 
-    const int  dataRowY  = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
     const int  phraseRef = s.chain.phraseRefs[static_cast<size_t>(index)];
     const bool isEmpty   = (phraseRef == -1);
 
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
-
-    const int textY = dataRowY + TEXT_PADDING;
+    const int  textY = draw_grid_row(c, x, y, WIDTH, index, index, t);
+    const auto at    = [&](int col) { return x + INSET + LEFT[static_cast<size_t>(col)]; };
 
     // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
@@ -48,20 +48,18 @@ void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const Chain
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // The cursor row's number lights whatever the column. Column 0 is a real cursor position.
-    const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
-                           : (index % 4 == 0)     ? t.textParam
-                                                  : t.textEmpty;
-    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
+    cells.cell(hex1(index), at(0), cur(0), /*is_selected=*/false, /*is_empty=*/false,
+               row_number_ink(index, s.cursorRow, /*beats=*/true, t));
 
     // The marker sits beside the one-character row number. Two tracks on one row share the glyph.
     for (const TrackPlayhead& ph : s.playheads)
-        if (ph.chainId == s.chain.id && ph.chainRow == index) draw_playhead(c, stepX + CHAR_W, textY, t);
+        if (ph.chainId == s.chain.id && ph.chainRow == index) draw_playhead(c, at(0) + CHAR_W, textY, t);
 
-    cells.cell(isEmpty ? "--" : hex2(phraseRef), phX, cur(1), sel(1), isEmpty, t.textValue);
+    cells.cell(isEmpty ? "--" : hex2(phraseRef), at(1), cur(1), sel(1), isEmpty, t.textValue);
 
     // An empty slot has no transpose to show.
     const int transposeValue = s.chain.transposeValues[static_cast<size_t>(index)];
-    cells.cell(isEmpty ? "--" : hex2(transposeValue), tspX, cur(2), sel(2), isEmpty, t.textParam);
+    cells.cell(isEmpty ? "--" : hex2(transposeValue), at(2), cur(2), sel(2), isEmpty, t.textParam);
 }
 
 CursorContext ChainEditorModule::cursor_context(const ChainEditorState& s) const {

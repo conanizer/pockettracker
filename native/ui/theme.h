@@ -309,11 +309,19 @@ inline Theme theme_bubblegum() {
     return t;
 }
 
-// The built-ins, in cycle order. `visualizerType` is the user's, not the theme's: a swap keeps it.
+// The built-ins, written into the Themes folder once (`seed_theme_bank`). `visualizerType` is the
+// user's, not the theme's: a swap keeps it.
 // ⚠️ A name is what `settings.json` stores, so a renamed built-in reads back as CLASSIC.
 inline std::vector<Theme> theme_builtins() {
     return {theme_classic(), theme_amber(), theme_blue(), theme_mono(),
             theme_bubblegum(), theme_blue_oled(), theme_amber_oled()};
+}
+
+// A built-in's name is the app's word (shown in the set letter case); a saved theme's is the user's.
+inline bool theme_name_is_builtin(const std::string& name) {
+    for (const Theme& t : theme_builtins())
+        if (t.name == name) return true;
+    return false;
 }
 
 // A first launch's look: BLUE with the OCTA bars. (`Theme{}` is CLASSIC.)

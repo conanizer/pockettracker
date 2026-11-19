@@ -21,6 +21,7 @@
 #include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
 #include "ui/song_pointer.h"
+#include "ui/ui_fonts.h"
 
 namespace pt::ui {
 
@@ -320,7 +321,9 @@ inline void settings_step(AppState& s, int dr, int dc) {
     if (dr) c = {settings_next_visible_row(c.row, dr, s.caps), 1};
     if (dc < 0) c.column = 1;
     if (dc > 0 && settings_row_has_second_column(static_cast<SettingsRow>(c.row), s.caps,
-                                                 s.settings.skinCount > 0, s.settings.oneHanded))
+                                                 s.settings.skinCount > 0,
+                                                 ui_font_has_lowercase(s.settings.fontName),
+                                                 s.settings.oneHanded))
         c.column = std::max(c.column, 2);
 }
 

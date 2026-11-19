@@ -302,7 +302,7 @@ void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, con
     auto on          = [&](int col) { return is_cur_row && cur_col == col; };
     auto label_color = [&](int col) { return on(col) ? cursor_mark_ink(t) : t.textParam; };
 
-    c.label(l1, x + 10, ty, label_color(c1));
+    c.label(l1, x + 10,  ty, label_color(c1));
     draw_cursor_cell(c, v1, x + 110, ty, on(c1), t.textValue, t);
     c.label(l2, x + 180, ty, label_color(c2));
     draw_cursor_cell(c, v2, x + 335, ty, on(c2), t.textValue, t);
@@ -317,7 +317,7 @@ void draw_ops_row(Canvas& c, int x, int y, const SampleOpCell (&ops)[SAMPLE_OPS_
     const int colW = SampleEditorModule::WIDTH / SAMPLE_OPS_PER_ROW;   // ~106px
     for (int i = 0; i < SAMPLE_OPS_PER_ROW; ++i) {
         const int lx = x + i * colW + 15;
-        draw_cursor_cell(c, ops[i].label, lx, ty, is_cur && cur_col == i, t.textValue, t);
+        draw_cursor_cell(c, c.cased(ops[i].label), lx, ty, is_cur && cur_col == i, t.textValue, t);
     }
 }
 
@@ -344,8 +344,8 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const std::string source = s.hasStereoData ? at(source_values(), s.sourceMode) : "MONO";
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
                         "ZOOM",   std::to_string(1 << s.zoomLevel) + "X",  0,
-                        "SOURCE", source,                                  1,
-                        "RATE",   at(rate_values(), s.rateMode),           2);
+                        "SOURCE", c.cased(source),                         1,
+                        "RATE",   c.cased(at(rate_values(), s.rateMode)),  2);
     }
 
     {   // EDIT — PITCH / DURATION / BIT
@@ -354,7 +354,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const std::string pitch = (s.pitchSemitones >= 0 ? "+" : "") + std::to_string(s.pitchSemitones);
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
                         "PITCH",    pitch,                                  0,
-                        "DURATION", at(duration_values(), s.durationIndex), 1,
+                        "DURATION", c.cased(at(duration_values(), s.durationIndex)), 1,
                         "BIT",      std::to_string(s.bitDepth),             2);
     }
 
@@ -364,7 +364,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::SELECTION);
         const bool cur = (s.cursorRow == SampleRow::SELECTION);
         const int ty = ry + TEXT_PADDING;
-        c.label("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "SELECTION", x + 10, ty, cur, t);
         draw_cursor_cell(c, hex_padded(s.selectionStart, 8), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
         draw_cursor_cell(c, hex_padded(s.selectionEnd, 8), x + 335, ty, cur && s.cursorCol == 1,
@@ -375,15 +375,15 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::SLICE);
         const bool cur = (s.cursorRow == SampleRow::SLICE);
         const int ty = ry + TEXT_PADDING;
-        c.label("SLICE", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
-        draw_cursor_cell(c, at(slice_methods(), s.sliceMethod), x + 175, ty,
+        draw_cell_label(c, "SLICE", x + 10, ty, cur, t);
+        draw_cursor_cell(c, c.cased(at(slice_methods(), s.sliceMethod)), x + 175, ty,
                          cur && s.cursorCol == 0, t.textValue, t);
         if (slice_has_parameter(s.sliceMethod)) {
             const bool        onVal = (cur && s.cursorCol == 1);
             const std::string lbl   = (s.sliceMethod == SLICE_TRANSIENT) ? "SENS" : "BY";
             const std::string val   = hex2(s.sliceMethod == SLICE_TRANSIENT ? s.sliceSensitivity
                                                                             : s.sliceDivisions);
-            c.text(lbl, x + 335, ty, onVal ? cursor_mark_ink(t) : t.textParam);
+            draw_cell_label(c, lbl, x + 335, ty, onVal, t);
             draw_cursor_cell(c, val, x + 410, ty, onVal, t.textValue, t);
         }
     }
@@ -413,8 +413,8 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + row_y(SampleRow::FX);
         const bool cur = (s.cursorRow == SampleRow::FX);
         const int ty = ry + TEXT_PADDING;
-        c.label("EFFECT", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
-        draw_cursor_cell(c, at(fx_types(), s.fxType), x + 180, ty, cur && s.cursorCol == 0,
+        draw_cell_label(c, "EFFECT", x + 10, ty, cur, t);
+        draw_cursor_cell(c, c.cased(at(fx_types(), s.fxType)), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
 
         const bool onVal = (cur && s.cursorCol == 1);
@@ -422,18 +422,18 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
             // An EQ slot, drawn as every other EQ cell is: the number plus the ">" for its editor.
             draw_eq_cell(c, x + 290, ty, s.fxEqSlot, onVal, t);
         } else {
-            const std::string val = (s.fxType == FX_SYNC) ? at(sync_types(), s.syncType)
+            const std::string val = (s.fxType == FX_SYNC) ? c.cased(at(sync_types(), s.syncType))
                                                           : hex2(s.fxValue);
             draw_cursor_cell(c, val, x + 290, ty, onVal, t.textValue, t);
         }
-        draw_cursor_cell(c, "APPLY", x + 440, ty, cur && s.cursorCol == 2, t.textValue, t);
+        draw_cursor_cell(c, c.cased("APPLY"), x + 440, ty, cur && s.cursorCol == 2, t.textValue, t);
     }
 
     {   // NAME. One cell, and no column: the row and the cell are the same thing.
         const int  ry  = y + row_y(SampleRow::NAME);
         const bool cur = (s.cursorRow == SampleRow::NAME);
         const int ty = ry + TEXT_PADDING;
-        c.label("NAME", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, "NAME", x + 10, ty, cur, t);
         draw_cursor_cell(c, s.sampleName, x + 120, ty, cur, t.textValue, t);
     }
 
@@ -442,7 +442,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const bool cur = (s.cursorRow == SampleRow::FILE);
         const int ty = ry + TEXT_PADDING;
         auto btn = [&](const char* text, int bx, int i) {
-            draw_cursor_cell(c, text, bx, ty, cur && s.cursorCol == i, t.textValue, t);
+            draw_cursor_cell(c, c.cased(text), bx, ty, cur && s.cursorCol == i, t.textValue, t);
         };
         btn("LOAD",      x + 120, 0);
         btn("SAVE",      x + 230, 1);
@@ -794,9 +794,11 @@ std::string pad3(int v) {
 /** PITCH as row 2 shows it: "+0", "+7", "-12". */
 std::string signed_semitones(int v) { return (v >= 0 ? "+" : "") + std::to_string(v); }
 
-std::string stretch_value(const SampleEditorState& s, StretchCell cell, int song_tempo) {
+// The words in `c`'s case.
+std::string stretch_value(const Canvas& c, const SampleEditorState& s, StretchCell cell, int song_tempo) {
     switch (cell) {
-        case StretchCell::DURATION: return at(SampleEditorModule::duration_values(), s.durationIndex);
+        case StretchCell::DURATION:
+            return c.cased(at(SampleEditorModule::duration_values(), s.durationIndex));
         case StretchCell::BPM:      return pad3(s.stretch_bpm(song_tempo));
         case StretchCell::PITCH:    return signed_semitones(s.pitchSemitones);
         case StretchCell::GRAIN:    return hex2(s.stretchGrainMs);
@@ -858,10 +860,10 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
     draw_modal_backdrop(c);
     draw_modal_box(c, STRETCH_BOX_X, STRETCH_BOX_Y, STRETCH_BOX_W, STRETCH_BOX_H, t);
 
-    const std::string title = "TIMESTRETCH";
+    const std::string title = c.cased("TIMESTRETCH");
     int ty = STRETCH_BOX_Y + STRETCH_PAD + TEXT_PADDING;
-    c.text(title, STRETCH_BOX_X + (STRETCH_BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, ty,
-           t.textTitle);
+    c.text(title, STRETCH_BOX_X + (STRETCH_BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2,
+           ty, t.textTitle);
     ty += ROW_HEIGHT + STRETCH_GAP;
 
     auto on = [&](StretchCell cell) { return s.stretchCursor == cell; };
@@ -871,9 +873,9 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
             const bool        isCell = (line.cell >= 0);
             const StretchCell cell   = static_cast<StretchCell>(std::max(line.cell, 0));
             const bool        cur    = isCell && on(cell);
-            c.text(line.label, STRETCH_LABEL_X, ty, cur ? cursor_mark_ink(t) : t.textParam);
+            draw_cell_label(c, line.label, STRETCH_LABEL_X, ty, cur, t);
             if (isCell) {
-                draw_cursor_cell(c, stretch_value(s, cell, song_tempo), STRETCH_VALUE_X, ty, cur,
+                draw_cursor_cell(c, stretch_value(c, s, cell, song_tempo), STRETCH_VALUE_X, ty, cur,
                                  t.textValue, t);
             } else {
                 // The header's reading: the sample's tempo at this DURATION, the PITCH below counted in.
@@ -884,8 +886,8 @@ void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, 
         ty += ROW_HEIGHT;
     }
 
-    draw_cursor_cell(c, "PREVIEW", STRETCH_LABEL_X, ty, on(StretchCell::PREVIEW), t.textValue, t);
-    draw_cursor_cell(c, "APPLY",   STRETCH_VALUE_X, ty, on(StretchCell::APPLY),   t.textValue, t);
+    draw_cursor_cell(c, c.cased("PREVIEW"), STRETCH_LABEL_X, ty, on(StretchCell::PREVIEW), t.textValue, t);
+    draw_cursor_cell(c, c.cased("APPLY"),   STRETCH_VALUE_X, ty, on(StretchCell::APPLY),   t.textValue, t);
 }
 
 }  // namespace pt::ui

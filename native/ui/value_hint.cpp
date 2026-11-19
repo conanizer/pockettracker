@@ -10,6 +10,7 @@
 #include "songcore/scales.h"
 #include "songcore/timing.h"
 #include "ui/app_state.h"
+#include "ui/canvas.h"
 
 namespace pt::ui {
 
@@ -42,12 +43,12 @@ std::string format_ms(double ms) {
     return buf;
 }
 
-std::string instrument_label(const songcore::Instrument& ins) {
+std::string instrument_label(const Canvas& c, const songcore::Instrument& ins) {
     using songcore::InstrumentType;
     if ((ins.instrumentType == InstrumentType::SAMPLER && !ins.sampleFilePath) ||
         (ins.instrumentType == InstrumentType::SOUNDFONT && !ins.soundfontPath))
-        return "EMPTY";
-    if (songcore::instrument_has_default_name(ins)) return songcore::instrument_type_name(ins.instrumentType);
+        return c.cased("EMPTY");
+    if (songcore::instrument_has_default_name(ins)) return c.cased(songcore::instrument_type_name(ins.instrumentType));
     return ins.name;
 }
 
@@ -66,19 +67,19 @@ ValueUnit fx_value_unit(int effect_code) {
 namespace {
 
 // "16 TICKS AT 120 BPM": what a tic-counted value is measured against.
-std::string tics_at_tempo(int tics, int tempo) {
-    return std::string(std::to_string(tics) + (tics == 1 ? " TICK AT " : " TICKS AT ") +
+std::string tics_at_tempo(const Canvas& c, int tics, int tempo) {
+    return c.cased(std::to_string(tics) + (tics == 1 ? " TICK AT " : " TICKS AT ") +
                    std::to_string(tempo) + " BPM");
 }
 
-ValueHint tics_hint(int tics, int tempo, int tics_per_step = songcore::TICS_PER_STEP) {
-    return {format_ms(songcore::tics_ms(tics, tempo, tics_per_step)), tics_at_tempo(tics, tempo)};
+ValueHint tics_hint(const Canvas& c, int tics, int tempo, int tics_per_step = songcore::TICS_PER_STEP) {
+    return {format_ms(songcore::tics_ms(tics, tempo, tics_per_step)), tics_at_tempo(c, tics, tempo)};
 }
 
 // The chord's name and its notes. In a PHRASE, made of this row's note in the track's scale as far as
 // this phrase shows it; in a TABLE, on C-4 moved by the row's transpose, as the table plays it —
 // unsnapped, and named as the note it lands on.
-ValueHint chord_hint(int value, const AppState& s) {
+ValueHint chord_hint(const Canvas& c, int value, const AppState& s) {
     const songcore::Project& p = *s.project;
     int root = 60;
     const songcore::Scale* scale = nullptr;
@@ -88,7 +89,7 @@ ValueHint chord_hint(int value, const AppState& s) {
         const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
         const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.phraseCursor.row)];
         if (!songcore::note_is_pitch(step.note)) {
-            where = std::string("NEEDS A NOTE ON THIS ROW");
+            where = c.cased("NEEDS A NOTE ON THIS ROW");
         } else {
             const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.phraseCursor.row, step.instrument);
             root  = ns.snap(songcore::note_to_midi(step.note));
@@ -106,7 +107,7 @@ ValueHint chord_hint(int value, const AppState& s) {
     }
 
     // The chord's words in the set case; the root note, put in front below, as it is.
-    std::string head  = std::string(std::string(songcore::chord_name(value)) + "  " +
+    std::string head  = c.cased(std::string(songcore::chord_name(value)) + "  " +
                                 songcore::chord_layout_name(value));
     std::string notes = where;
     if (where.empty()) {
@@ -114,7 +115,7 @@ ValueHint chord_hint(int value, const AppState& s) {
             const char* name = songcore::NOTE_NAMES[songcore::scale_mod12(root)];
             head = std::string(name, name[1] == '-' ? 1 : 2) + " " + head;
         } else {
-            notes = std::string("ON ") + songcore::note_name(songcore::note_from_midi(root)) + ":";
+            notes = c.cased("ON ") + songcore::note_name(songcore::note_from_midi(root)) + ":";
         }
         int semis[songcore::CHORD_MAX_NOTES];
         const int n = songcore::chord_notes(value, root, scale, key, semis);
@@ -126,19 +127,19 @@ ValueHint chord_hint(int value, const AppState& s) {
     return {head, notes};
 }
 
-ValueHint instrument_hint(int value, const AppState& s) {
+ValueHint instrument_hint(const Canvas& c, int value, const AppState& s) {
     const auto& list = s.project->instruments;
     if (value < 0 || value >= static_cast<int>(list.size())) return {};
     const songcore::Instrument& ins  = list[static_cast<size_t>(value)];
-    const std::string           type = songcore::instrument_type_name(ins.instrumentType);
-    const std::string           name = instrument_label(ins);
+    const std::string           type = c.cased(songcore::instrument_type_name(ins.instrumentType));
+    const std::string           name = instrument_label(c, ins);
     if (name != type) return {name, type};
     return {type + " " + songcore::hex2(value), ""};
 }
 
 }  // namespace
 
-ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactMs) {
+ValueHint value_hint(const Canvas& c, ValueUnit unit, int value, const AppState& s, double exactMs) {
     if (!s.project) return {};
     const songcore::Project& p     = *s.project;
     const int                tempo = p.tempo;
@@ -153,16 +154,16 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactM
 
         case ValueUnit::LFO_HZ: {
             const float hz = songcore::lfo_hz(value);
-            return {format_hz(hz), std::string("ONE CYCLE ") + format_ms(1000.0 / hz)};
+            return {format_hz(hz), c.cased("ONE CYCLE ") + format_ms(1000.0 / hz)};
         }
 
         case ValueUnit::REVERB_PRE:
             return {format_ms(reverb_pre_delay_seconds(value) * 1000.0), ""};
 
         case ValueUnit::REVERB_DECAY:
-            if (dflt && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {std::string("ENDLESS"), ""};
+            if (dflt && reverb_decay_feedback(value, p.reverb.size) >= 1.0f) return {c.cased("ENDLESS"), ""};
             return {format_ms((dflt ? reverb_decay_seconds(value) : reverb_df_decay_seconds(value)) * 1000.0),
-                    std::string("TILL THE TAIL FADES")};
+                    c.cased("TILL THE TAIL FADES")};
 
         case ValueUnit::REVERB_DAMP:
             return {format_hz(dflt ? reverb_damp_freq(value) : static_cast<float>(reverb_df_damp_hz(value))), ""};
@@ -173,40 +174,40 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactM
             char steps[48];
             std::snprintf(steps, sizeof(steps), "%.1f STEPS AT %d BPM",
                           ms / songcore::tics_ms(songcore::TICS_PER_STEP, tempo), tempo);
-            return {format_ms(ms), std::string(steps)};
+            return {format_ms(ms), c.cased(steps)};
         }
 
         case ValueUnit::DELAY_TONE:
-            if (!delay_tone_filters(value)) return {std::string("NO FILTER"), ""};
+            if (!delay_tone_filters(value)) return {c.cased("NO FILTER"), ""};
             return {format_hz(delay_tone_hz(value)), ""};
 
         case ValueUnit::TICS:
-            return tics_hint(value, tempo);
+            return tics_hint(c, value, tempo);
 
         case ValueUnit::TABLE_TICS:
             // The four modes, as the table player reads them.
-            if (value == 0x00) return {std::string("ONE ROW PER NOTE"), ""};
-            if (value == 0xFC) return {std::string("ROW BY THE NOTE'S OCTAVE"), ""};
-            if (value == 0xFE) return {std::string("ROW BY THE NOTE"), ""};
-            if (value == 0xFF) return {format_ms(1000.0 / 200.0) + std::string(" A ROW"), std::string("200 ROWS A SECOND, ANY TEMPO")};
+            if (value == 0x00) return {c.cased("ONE ROW PER NOTE"), ""};
+            if (value == 0xFC) return {c.cased("ROW BY THE NOTE'S OCTAVE"), ""};
+            if (value == 0xFE) return {c.cased("ROW BY THE NOTE"), ""};
+            if (value == 0xFF) return {format_ms(1000.0 / 200.0) + c.cased(" A ROW"), c.cased("200 ROWS A SECOND, ANY TEMPO")};
             {
-                ValueHint h = tics_hint(value, tempo);
-                h.head += std::string(" A ROW");
+                ValueHint h = tics_hint(c, value, tempo);
+                h.head += c.cased(" A ROW");
                 return h;
             }
 
         case ValueUnit::GROOVE_TICS: {
-            if (value == 0) return {std::string("STEP SKIPPED"), ""};
+            if (value == 0) return {c.cased("STEP SKIPPED"), ""};
             const songcore::Groove& g = p.grooves[static_cast<size_t>(s.currentGroove)];
-            return tics_hint(value, tempo, songcore::groove_ticks_per_step(g));
+            return tics_hint(c, value, tempo, songcore::groove_ticks_per_step(g));
         }
 
         case ValueUnit::MIDI_LENGTH:
-            if (value == 0) return {std::string("UNTIL THE NEXT NOTE"), ""};
-            return tics_hint(value, tempo);
+            if (value == 0) return {c.cased("UNTIL THE NEXT NOTE"), ""};
+            return tics_hint(c, value, tempo);
 
         case ValueUnit::CHORD:
-            return chord_hint(value, s);
+            return chord_hint(c, value, s);
 
         case ValueUnit::ENV_TIME:
         case ValueUnit::ENV_TIME_LINEAR:
@@ -216,23 +217,23 @@ ValueHint value_hint(ValueUnit unit, int value, const AppState& s, double exactM
             const int scale = unit == ValueUnit::ENV_TIME ? songcore::ENV_SCALE_LOG
                             : static_cast<int>(unit) - static_cast<int>(ValueUnit::ENV_TIME_LINEAR);   // CURVE_*
             const double ms = exactMs >= 0.0 ? exactMs : songcore::env_ms(value, scale);
-            if (ms <= 0.0) return {"INSTANT", ""};
+            if (ms <= 0.0) return {c.cased("INSTANT"), ""};
             char tics[48];
             std::snprintf(tics, sizeof(tics), "%.1f TICKS AT %d BPM", ms / songcore::tics_ms(1, tempo), tempo);
-            return {format_ms(ms), tics};
+            return {format_ms(ms), c.cased(tics)};
         }
 
         case ValueUnit::INSTRUMENT:
-            return instrument_hint(value, s);
+            return instrument_hint(c, value, s);
     }
     return {};
 }
 
-ValueHint held_value_hint(const AppState& s) {
+ValueHint held_value_hint(const Canvas& c, const AppState& s) {
     if (!s.aHeld || s.selection.active || !s.cellUnderCursor) return {};
     const CursorContext k = s.cellUnderCursor();
     if (k.unit == ValueUnit::NONE || k.capabilities.isEmpty) return {};
-    return value_hint(k.unit, k.currentValue, s, k.exactMs);
+    return value_hint(c, k.unit, k.currentValue, s, k.exactMs);
 }
 
 }  // namespace pt::ui

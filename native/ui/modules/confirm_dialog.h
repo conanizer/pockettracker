@@ -1,8 +1,8 @@
 #pragma once
 
 // The confirm dialog: a question and "A=YES  B=NO" on a dimmed screen. No cursor — the buttons are
-// the answer — except where it offers answers to pick with LEFT/RIGHT (`confirm_choices`). ⚠️ One
-// state, not a flag per question: every handler tests `is_open()`.
+// the answer — except a question with `confirm_choices`, picked with LEFT/RIGHT. ⚠️ One state, not a
+// flag per question: every handler tests `is_open()`.
 
 #include <string>
 #include <vector>
@@ -26,6 +26,8 @@ struct ConfirmDialogState {
         RECOVER,
 
         COLLECT_EXISTS,   // PROJECT → COLLECT, when Songs/<name> is already there
+        // A preset row stepped while its values are in no file; the step waits in `AppState::presetStep`.
+        PRESET_UNSAVED,
 
         // Once per install, at boot: should the top panel show the guide? B is NO.
         TOP_PANEL,
@@ -35,6 +37,11 @@ struct ConfirmDialogState {
     static constexpr int COLLECT_REPLACE  = 0;
     static constexpr int COLLECT_NEW_COPY = 1;
     static constexpr int COLLECT_CANCEL   = 2;
+
+    // PRESET_UNSAVED's answers, left to right; `arg` is the one under the cursor.
+    static constexpr int PRESET_SAVE    = 0;
+    static constexpr int PRESET_DISCARD = 1;
+    static constexpr int PRESET_CANCEL  = 2;
 
     // CHANGE_TYPE's answers, left to right. Both changes free the old type's source.
     static constexpr int TYPE_DISCARD = 0;   // the sound starts afresh
@@ -62,7 +69,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind);
 // Lines under the question, before the answers; empty for most.
 std::vector<const char*> confirm_dialog_note(ConfirmDialogState::Kind kind);
 
-// The answers a question offers in place of "A=YES  B=NO", left to right; empty for a yes/no one.
+// A question's answers as cells, left to right; empty for a plain A=YES B=NO.
 std::vector<const char*> confirm_choices(ConfirmDialogState::Kind kind);
 
 // The box itself, asking `title`; the sample editor uses it alone. ⚠️ It does not dim the screen —

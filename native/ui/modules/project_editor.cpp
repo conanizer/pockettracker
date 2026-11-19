@@ -35,7 +35,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     c.label("PROJECT", labelX, y + TEXT_PADDING, t.textTitle);
 
     // The first row sits below the title and its 14px of air, level with the side panel's rows.
-    const int firstRowY = y + ROW_HEIGHT + 14;
+    const int firstRowY = y + HEADER_Y;
     const auto rowY = [&](ProjectRow row) {
         return firstRowY + project_row_offset_y(row, s.caps, ROW_HEIGHT);
     };
@@ -51,7 +51,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     };
 
     const auto label = [&](ProjectRow row, const char* text) {
-        c.text(text, labelX, rowY(row) + TEXT_PADDING, on_row(row) ? cursor_mark_ink(t) : t.textParam);
+        draw_cell_label(c, text, labelX, rowY(row) + TEXT_PADDING, on_row(row), t);
     };
 
     // ── A single-value row: TEMPO, TRANSPOSE, SYSTEM, EXIT ───────────────────────────────────────
@@ -63,7 +63,8 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // ── A DOOR row: COLLECT, MIDI, EXIT — the button alone, no label ─────────────────────────────
     // The button names where it goes; it sits in the value column, where the cursor lands.
     const auto door_row = [&](ProjectRow row, const char* button) {
-        draw_cursor_cell(c, button, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
+        draw_cursor_cell(c, c.cased(button), valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1),
+                         t.textValue, t);
     };
 
     // ── A button row: PROJECT, EXPORT, COMPACT ───────────────────────────────────────────────────
@@ -73,7 +74,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         int optionX = valueX;
         int index   = 1;
         for (const char* option : options) {
-            draw_cursor_cell(c, option, optionX, rowY(row) + TEXT_PADDING, on_cell(row, index),
+            draw_cursor_cell(c, c.cased(option), optionX, rowY(row) + TEXT_PADDING, on_cell(row, index),
                              t.textValue, t);
             optionX += OPTION_W;
             ++index;
@@ -85,7 +86,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // ── TAP — the TEMPO row's second cell; A taps the tempo (the dispatcher's arithmetic) ────────
     // ⚠️ A cell, not a gesture on the value: A is also A+DPAD's modifier and fires first, so a tap
     // read off the value counted every A+UP nudge.
-    draw_cursor_cell(c, "TAP", valueX + 80, rowY(ProjectRow::TEMPO) + TEXT_PADDING,
+    draw_cursor_cell(c, c.cased("TAP"), valueX + 80, rowY(ProjectRow::TEMPO) + TEXT_PADDING,
                      on_cell(ProjectRow::TEMPO, 2), t.textValue, t);
 
     param_row(ProjectRow::TRANSPOSE, "TRANSPOSE", hex2(p.transpose));
@@ -93,7 +94,8 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // ── NAME — one cell; A opens the keyboard ────────────────────────────────────────────────────
     param_row(ProjectRow::NAME, "NAME",
               p.name.empty() ? "______"
-                             : Canvas::clip_text(p.name, ProjectModule::NAME_VISIBLE_CHARS));
+                             : c.fit_text(p.name, ProjectModule::NAME_VISIBLE_CHARS,
+                                          on_cell(ProjectRow::NAME, 1)));
 
     // SAVE, LOAD, NEW are cursor columns 1, 2, 3.
     button_row(ProjectRow::PROJECT, "PROJECT", {"SAVE", "LOAD", "NEW"});
@@ -114,7 +116,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     button_row(ProjectRow::COMPACT, "COMPACT", {"SEQ", "INST"});
 
-    param_row(ProjectRow::SYSTEM, "SYSTEM", "SETTINGS >");
+    param_row(ProjectRow::SYSTEM, "SYSTEM", c.cased("SETTINGS >"));
 
     // ── MIDI — the door to the MIDI screen ───────────────────────────────────────────────────────
     // Gated on the build, not the device: this row is the only way to the MIDI screen.
@@ -131,13 +133,15 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
                          project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
                          ROW_HEIGHT * 2;
         c.label("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam);
-        c.text(megabytes_str(s.sampleRamBytes), valueX, ramY + TEXT_PADDING, t.textValue);
+        c.text(megabytes_str(s.sampleRamBytes),
+               valueX, ramY + TEXT_PADDING, t.textValue);
 
         // Skipped when the platform cannot answer: "0.0 MB" would say the opposite of unknown.
         if (s.freeRamBytes > 0) {
             const int freeY = ramY + ROW_HEIGHT;
             c.label("FREE RAM", labelX, freeY + TEXT_PADDING, t.textParam);
-            c.text(megabytes_str(s.freeRamBytes), valueX, freeY + TEXT_PADDING, t.textValue);
+            c.text(megabytes_str(s.freeRamBytes),
+                   valueX, freeY + TEXT_PADDING, t.textValue);
         }
     }
 

@@ -247,8 +247,10 @@ void InputDispatcher::browser_confirm_delete() {
     end_selection(b);
     if (done > 0) refresh_browser();
 
-    if (paths.size() == 1)
-        set_status(b, done ? "DELETED: " + name : "DELETE FAILED", failed == 0);
+    if (paths.size() == 1 && done)
+        set_status(b, "DELETED: ", name, true);
+    else if (paths.size() == 1)
+        set_status(b, "DELETE FAILED", false);
     else
         set_status(b, "DELETED " + file_count(static_cast<size_t>(done)) +
                           (failed ? ", FAILED " + std::to_string(failed) : ""), failed == 0);
@@ -274,7 +276,7 @@ void InputDispatcher::browser_confirm_root() {
     host_.set_app_root(root);
 
     refresh_browser();
-    set_status(b, (home ? "HOME FOLDER: " : "FORGOT: ") + name, true);
+    set_status(b, home ? "HOME FOLDER: " : "FORGOT: ", name, true);
 }
 
 namespace {
@@ -283,52 +285,18 @@ namespace {
 // out of the folder).
 struct PresetFile {
     AppState::BrowserPurpose purpose;
+    PresetRow                row;
     const char*              extension;
     const char*              loaded;    // the message
 };
 constexpr PresetFile PRESET_FILES[] = {
-    { AppState::BrowserPurpose::LOAD_SCALE,  SCALE_FILE_EXT,  "SCALE LOADED"  },
-    { AppState::BrowserPurpose::LOAD_GROOVE, GROOVE_FILE_EXT, "GROOVE LOADED" },
-    { AppState::BrowserPurpose::LOAD_REVERB, REVERB_FILE_EXT, "REVERB LOADED" },
-    { AppState::BrowserPurpose::LOAD_DELAY,  DELAY_FILE_EXT,  "DELAY LOADED"  },
+    { AppState::BrowserPurpose::LOAD_SCALE,  PresetRow::SCALE,  SCALE_FILE_EXT,  "SCALE LOADED"  },
+    { AppState::BrowserPurpose::LOAD_GROOVE, PresetRow::GROOVE, GROOVE_FILE_EXT, "GROOVE LOADED" },
+    { AppState::BrowserPurpose::LOAD_REVERB, PresetRow::REVERB, REVERB_FILE_EXT, "REVERB LOADED" },
+    { AppState::BrowserPurpose::LOAD_DELAY,  PresetRow::DELAY,  DELAY_FILE_EXT,  "DELAY LOADED"  },
 };
 
 }  // namespace
-
-// Each read into a copy of what it replaces (a scale and a groove keep their slot's id, which `SCA`
-// and `GRV` name), committed only once the file parses.
-bool InputDispatcher::load_browser_preset(AppState::BrowserPurpose purpose, const std::string& path) {
-    Project& p = host_.edit_project();
-    switch (purpose) {
-        case AppState::BrowserPurpose::LOAD_SCALE: {
-            songcore::Scale& slot   = p.scales[static_cast<size_t>(s_.currentScale)];
-            songcore::Scale  loaded = slot;
-            if (!load_scale_file(fs_, path, loaded)) return false;
-            slot = loaded;
-            return true;
-        }
-        case AppState::BrowserPurpose::LOAD_GROOVE: {
-            songcore::Groove& slot   = p.grooves[static_cast<size_t>(s_.currentGroove)];
-            songcore::Groove  loaded = slot;
-            if (!load_groove_file(fs_, path, loaded)) return false;
-            slot = loaded;
-            return true;
-        }
-        case AppState::BrowserPurpose::LOAD_REVERB: {
-            NamedReverb cells = reverb_cells_of(p);
-            if (!load_reverb_file(fs_, path, cells)) return false;
-            apply_reverb_cells(p, cells);
-            return true;
-        }
-        case AppState::BrowserPurpose::LOAD_DELAY: {
-            NamedDelay cells = delay_cells_of(p);
-            if (!load_delay_file(fs_, path, cells)) return false;
-            apply_delay_cells(p, cells);
-            return true;
-        }
-        default: return false;
-    }
-}
 
 void InputDispatcher::browser_load(const BrowserItem& item) {
     FileBrowserState& b    = s_.fileBrowser;
@@ -349,7 +317,7 @@ void InputDispatcher::browser_load(const BrowserItem& item) {
 
     for (const PresetFile& pf : PRESET_FILES) {
         if (pf.purpose != s_.browserPurpose) continue;
-        if (ext != pf.extension || !load_browser_preset(pf.purpose, path)) {
+        if (ext != pf.extension || !load_preset_file(pf.row, path)) {
             set_status(b, "LOAD FAILED", false);
             return;
         }
@@ -403,7 +371,7 @@ void InputDispatcher::browser_load(const BrowserItem& item) {
         case AppState::BrowserPurpose::LOAD_THEME:
             // ⚠️ Pixels only, returning early. The extension is re-checked (the D-pad leaves the folder),
             // and a failed parse must not blank the palette.
-            if (ext != "ptt" || !load_theme_file(fs_, path, s_.theme)) {
+            if (ext != "ptt" || !load_preset_file(PresetRow::THEME, path)) {
                 set_status(b, "LOAD FAILED", false);
                 return;
             }
