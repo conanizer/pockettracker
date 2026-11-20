@@ -1,4 +1,6 @@
 #pragma once
+#include <cmath>
+
 #include "../glide.h"
 #include "../primitives/daisysp/decimator.h"
 
@@ -48,8 +50,16 @@ struct BitcrushModule {
         downsample = downsampleParam;
         decL[cur].SetBitsToCrush(static_cast<uint8_t>(crush));
         decR[cur].SetBitsToCrush(static_cast<uint8_t>(crush));
-        decL[cur].SetDownsampleFactor(static_cast<float>(downsample) / 15.0f);
-        decR[cur].SetDownsampleFactor(static_cast<float>(downsample) / 15.0f);
+        decL[cur].SetDownsampleFactor(holdFactor(downsample));
+        decR[cur].SetDownsampleFactor(holdFactor(downsample));
+    }
+
+    // The Decimator holds (factor²·96) + 1 samples, which leaves 1 at a hold of one sample (nothing):
+    // 1 and 2 are set to hold 2 and 3 (24 and 16 kHz); 3-F keep the curve.
+    static float holdFactor(int ds) {
+        if (ds == 1) return sqrtf(1.5f / 96.0f);
+        if (ds == 2) return sqrtf(2.5f / 96.0f);
+        return static_cast<float>(ds) / 15.0f;
     }
 
     inline float processMono(float in) {
