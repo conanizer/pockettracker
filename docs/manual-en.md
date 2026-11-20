@@ -745,7 +745,7 @@ Braids (see `CREDITS.md`).
 
 | Parameter | Range | Description |
 |---|---|---|
-| MODEL | `CSAW` – `QPSK` | The model, by its four-letter name, with what it is beside it. A + LEFT/RIGHT steps one model, A + UP/DOWN eight. A change is heard from the next note. A + B goes back to `CSAW`. |
+| MODEL | `CSAW` – `QPSK` | The model, by its four-letter name, with what it is beside it. A + LEFT/RIGHT steps one model, A + UP/DOWN eight. A change is heard from the next note. A + B goes back to `CSAW`. A tap of **A** opens a list of every model with its note: **UP/DOWN** move, **LEFT/RIGHT** page, **A** chooses, **B** cancels. |
 | TIMBRE | 00–FF | The model's first control (see the table below). `80` by default. A change moves a note already sounding, and so do `TMB`, a ramp and a TIMB modulation slot. |
 | COLOR | 00–FF | The model's second control. `80` by default. `CLR` and COLR move it the same way. |
 
@@ -754,7 +754,7 @@ on a WAV instrument. Playing the ROOT note sounds C-4, as on a SoundFont. What o
 nothing on a MACRO instrument: `OFF`, `SLI`, `BCK`, `LPO` and the STA modulation destination.
 
 A MACRO note **holds until something ends it**: the next note, an OFF, a `KIL` or stop — a drum or a
-plucked string too. An **AHD** or **DRUM** on VOL gives it a definite length, and lets a hit ring on
+plucked string too. An **AHD** on VOL gives it a definite length, and lets a hit ring on
 after a MIDI key is let go. See [How a note ends](#how-a-note-ends).
 
 | Model | What it is | TIMBRE | COLOR |
@@ -868,10 +868,10 @@ instrument:
 | What happens | A sample played once | A looping sample, or MACRO | SoundFont | EXTERNAL |
 |---|---|---|---|---|
 | The next note on the track | A short fade | A short fade | A short fade | A note-off |
-| An **OFF** in the note column | An ADSR or TRIG on VOL plays its release; otherwise a short fade | The same | The SoundFont's own release | A note-off |
+| An **OFF** in the note column | An ADSR on VOL plays its release; otherwise a short fade | The same | The SoundFont's own release | A note-off |
 | `KIL` | A short fade, whatever envelope | The same | A short fade | A note-off |
-| Letting go of a MIDI key | Plays out | An ADSR or TRIG on VOL plays its release. MACRO under an AHD or DRUM on VOL plays out. Otherwise a short fade | The SoundFont's own release | A note-off |
-| Nothing at all | Ends at the sample's END | Ends when every AHD, DRUM, ADSR or TRIG on VOL has finished (an ADSR or TRIG only after its release). With none, never | Ends when the SoundFont's sound does | Ends after LEN ticks; LEN `00` never |
+| Letting go of a MIDI key | Plays out | An ADSR on VOL plays its release. MACRO under an AHD on VOL plays out. Otherwise a short fade | The SoundFont's own release | A note-off |
+| Nothing at all | Ends at the sample's END | Ends when every AHD or ADSR on VOL has finished (an ADSR only after its release). With none, never | Ends when the SoundFont's sound does | Ends after LEN ticks; LEN `00` never |
 | Stopping playback | A short fade | A short fade | A short fade | A note-off |
 
 A short fade takes a few milliseconds, just enough not to click.
@@ -1378,8 +1378,7 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | TRK | Follows the note: higher notes give more, lower ones less, C-4 none. On CUT at AMT `FF` the cutoff moves an octave for every octave of the note, so high notes stay as bright as low ones; on any other destination `FF` moves a quarter of the full swing per octave — on VOL high notes louder, low ones quieter |
 | VEL | Follows how hard the note is played: velocity `FF` gives the whole AMT, `00` none of it. Set for the note as it starts. On CUT, harder notes are brighter; on →M*n* AMT, harder notes get more of another mod |
 
-On VOL, an AHD or DRUM gives a note a definite length, and an ADSR or TRIG holds it until it is let
-go. See [How a note ends](#how-a-note-ends).
+On VOL, an AHD gives a note a definite length, and an ADSR holds it until it is let go. See [How a note ends](#how-a-note-ends).
 
 ### Modulation destinations
 
@@ -1883,8 +1882,8 @@ from its first sound; the next note starts from the instrument again.
 
 Keys are played, not recorded: nothing is written into the phrase.
 
-Letting go of a key releases its note: an ADSR or TRIG on VOL plays its release, while a sample that
-plays once rings on, and so does a MACRO note under an AHD or DRUM on VOL.
+Letting go of a key releases its note: an ADSR on VOL plays its release, while a sample that
+plays once rings on, and so does a MACRO note under an AHD on VOL.
 See [How a note ends](#how-a-note-ends).
 
 ### Following another device
