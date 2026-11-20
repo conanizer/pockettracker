@@ -317,7 +317,8 @@ class Sequencer {
     // Every trace golden relies on `trackId` defaulting to 0.
     void playPhrase(int phraseId, int trackId = 0);
 
-    void playChain(int chainId, int trackId = 0);
+    // From `startRow` (the next phrase at or after it, wrapping); the loop restarts at the chain's top.
+    void playChain(int chainId, int trackId = 0, int startRow = 0);
 
     // `offsetSteps` into the row: each track that far into its own column (a song position).
     void playSong(int startRow = 0, int offsetSteps = 0, bool live = false);

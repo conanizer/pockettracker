@@ -37,12 +37,13 @@ void InputDispatcher::on_start() {
         // SONG plays from the cursor row.
         case ScreenType::SONG:  host_.play_song(s_.songCursor.row); break;
 
-        // CHAIN plays on its own track (fader, mute, FX), not channel 1; the remembered song cell breaks a
-        // tie.
+        // CHAIN plays from the cursor row, on its own track (fader, mute, FX), not channel 1; the
+        // remembered song cell breaks a tie.
         case ScreenType::CHAIN:
             host_.play_chain(s_.currentChain,
                              songcore::track_of_chain(*s_.project, s_.currentChain,
-                                                      pointer_track(s_)));
+                                                      pointer_track(s_)),
+                             s_.chainCursor.row);
             break;
 
         // No song cursor: the song from the top. MIDI too — its OFFSET and the mapping list's VAL are
@@ -66,8 +67,26 @@ void InputDispatcher::on_start() {
 // LIVE mode's chords: SONG's handler answers them. L+START is reserved everywhere else.
 void InputDispatcher::on_l_start() { route(Gesture::L_START); }
 
+// How far into the song row you came through the CHAIN or PHRASE on screen sits: whole phrases before
+// its chain row. 0 when the screen was not reached through that song cell.
+static int steps_into_song_row(const AppState& s) {
+    if (s.currentScreen != ScreenType::CHAIN && s.currentScreen != ScreenType::PHRASE) return 0;
+    const songcore::Project& p = *s.project;
+    if (s.currentChain < 0 ||
+        songcore::chain_at(p, pointer_track(s), s.songCursor.row) != s.currentChain) return 0;
+    const int row = std::clamp(s.chainCursor.row, 0, songcore::CHAIN_ROWS - 1);
+    if (s.currentScreen == ScreenType::PHRASE &&
+        songcore::phrase_at(p, s.currentChain, row) != s.currentPhrase) return 0;
+    const songcore::Chain& chain = p.chains[static_cast<size_t>(s.currentChain)];
+    int phrases = 0;
+    for (int r = 0; r < row; ++r)
+        if (!songcore::chain_is_empty(chain, r)) ++phrases;
+    return phrases * 16;
+}
+
 // Below SONG, where START plays one chain or phrase, R+START plays every track from the song row you
-// came through. ⚠️ A list, not a default: the chord reaches the browser and the sample editor too.
+// came through — on CHAIN and PHRASE from that chain row's phrase, the other tracks as far in.
+// ⚠️ A list, not a default: the chord reaches the browser and the sample editor too.
 void InputDispatcher::on_r_start() {
     if (route(Gesture::R_START)) return;
     switch (s_.currentScreen) {
@@ -83,9 +102,10 @@ void InputDispatcher::on_r_start() {
                 host_.stop();
             } else if (host_.live_mode()) {
                 // LIVE has no "all eight": the row launches as a scene, an empty cell silent.
-                host_.play_song_live(s_.songCursor.row, live_row_mask(s_.songCursor.row));
+                host_.play_song_live(s_.songCursor.row, live_row_mask(s_.songCursor.row),
+                                     steps_into_song_row(s_));
             } else {
-                host_.play_song(s_.songCursor.row);
+                host_.play_song(s_.songCursor.row, steps_into_song_row(s_));
             }
             break;
         default:

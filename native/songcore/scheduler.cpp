@@ -119,7 +119,7 @@ void Sequencer::playPhrase(int phraseId, int trackId) {
     updatePlaybackBuffer();
 }
 
-void Sequencer::playChain(int chainId, int trackId) {
+void Sequencer::playChain(int chainId, int trackId, int startRow) {
     stop();
     currentProject_ = project_;
     currentChainId_ = chainId;
@@ -130,12 +130,14 @@ void Sequencer::playChain(int chainId, int trackId) {
     playbackMode_ = PlaybackMode::CHAIN;
     isPlaying_ = true;
     int tempo = tempo_in_force(*project_);
-    router_.t_play("CHAIN", "id=" + hex2(chainId), playbackStartFrame_, tempo, sampleRate_);
+    std::string detail = "id=" + hex2(chainId);
+    if (startRow > 0) detail += " row=" + hex2(startRow);
+    router_.t_play("CHAIN", detail, playbackStartFrame_, tempo, sampleRate_);
     nextFrameToSchedule_ = playbackStartFrame_;
     nextChainRowToSchedule_ = 0;
     chainRowStartFrames_.clear();
     phraseStepStartFrames_.clear();
-    int firstRow = findNextNonEmptyChainRow(0, chain);
+    int firstRow = findNextNonEmptyChainRow(startRow, chain);
     if (firstRow >= 0) {
         int phraseId = chain_phrase_ref(chain, firstRow);
         int transposeSemitones = chain_transpose_semitones(chain, firstRow);

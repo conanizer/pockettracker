@@ -115,10 +115,14 @@ class SongcoreHost {
 
     // ── transport: each returns the frame it latched (the trace's session base) ──
     // CHAIN and PHRASE take the mixer track they play on.
-    int64_t play_song(int startRow)   { before_play(); seq_.playSong(startRow);     return after_play(); }
+    // `offsetSteps`: each track that many steps into its own column.
+    int64_t play_song(int startRow, int offsetSteps = 0) {
+        before_play(); seq_.playSong(startRow, offsetSteps); return after_play();
+    }
     // LIVE from stopped: `mask` bit N launches track N at `songRow`, the rest begin silent.
-    int64_t play_song_live(int songRow, int mask);
-    int64_t play_chain(int chainId, int trackId = 0);
+    int64_t play_song_live(int songRow, int mask, int offsetSteps = 0);
+    // From `startRow` (the next phrase at or after it); the loop goes back to the chain's top.
+    int64_t play_chain(int chainId, int trackId = 0, int startRow = 0);
     int64_t play_phrase(int phraseId, int trackId = 0);
 
     // Stop the scheduler AND the engine — notes already queued would otherwise keep playing.

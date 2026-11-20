@@ -438,9 +438,9 @@ tracks go on feeding it. Soloing a track leaves the returns as they are.
 |---|---|
 | START | Play / Stop (context-aware) |
 | START on SONG | Play full song from top |
-| START on CHAIN | Play current chain |
+| START on CHAIN | Play current chain from the cursor row |
 | START on PHRASE, INSTRUMENT, MODULATION, TABLE | Play current phrase (loops) |
-| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song from the song row you came through |
+| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song from the song row you came through — on CHAIN and PHRASE from that chain row |
 | A + START on INSTRUMENT, MODULATION, TABLE | Preview current instrument |
 | START on SAMPLE EDITOR | Preview edited sample |
 | START on SONG in LIVE mode | Queue the chain under the cursor ([LIVE Mode](#live-mode)) |
@@ -559,7 +559,7 @@ When played, the chain loops from slot 00 after the last filled slot.
 | A + UP/DOWN | ±16 (PH) or ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT/RIGHT | Switch to previous / next chain |
-| START | Play current chain |
+| START | Play current chain from the cursor row |
 
 > [!TIP]
 > Use **TSP** to play the same phrase at multiple pitches without copying it. One phrase can become a verse, chorus, and bridge by giving it different TSP values across chain slots — `07` = +7 semitones (a perfect fifth up), `0C` = +12 (one octave up).
@@ -3259,9 +3259,9 @@ exports and sample-editor saves keep their own folders.
 |---|---|
 | START | Play / Stop |
 | START on SONG | Play from current row |
-| START on CHAIN | Play current chain |
+| START on CHAIN | Play current chain from the cursor row |
 | START on PHRASE, INSTRUMENT, MODULATION, TABLE | Play current phrase (loops) |
-| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song |
+| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song from where you came through |
 | A + START on INSTRUMENT, MODULATION, TABLE | Preview instrument |
 | START on SAMPLE EDITOR | Preview sample |
 | START in file browser | Preview highlighted WAV |
