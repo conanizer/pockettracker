@@ -293,6 +293,12 @@ int SongcoreHost::sf_preset_index(int id) const {
                                   mediaRoots_);
 }
 
+int SongcoreHost::sample_root_rate(int id) const {
+    if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS || engine_->getSampleLength(id) <= 0) return 0;
+    const float ratio = routing_.sampleRateRatio[id];   // deviceRate / the rate the frames are at
+    return ratio > 0.0f ? static_cast<int>(static_cast<float>(engine_->getSampleRate()) / ratio + 0.5f) : 0;
+}
+
 std::string SongcoreHost::sf_preset_name(int id) const {
     if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return "---";
     return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)],

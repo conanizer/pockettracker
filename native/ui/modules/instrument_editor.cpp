@@ -70,8 +70,8 @@ constexpr FieldCell byte_cell(Cell c, const char* label, int Instrument::* f, in
     return {c, label, FieldKind::BYTE, f, nullptr, def, knob, unit};
 }
 constexpr FieldCell nibble_cell(Cell c, const char* label, int Instrument::* f,
-                                songcore::MapDestId knob) {
-    return {c, label, FieldKind::NIBBLE, f, nullptr, 0, knob, ValueUnit::NONE};
+                                songcore::MapDestId knob, ValueUnit unit = ValueUnit::NONE) {
+    return {c, label, FieldKind::NIBBLE, f, nullptr, 0, knob, unit};
 }
 constexpr FieldCell flag_cell(Cell c, const char* label, bool Instrument::* f) {
     return {c, label, FieldKind::FLAG, nullptr, f, 0, songcore::MapDestId::NONE, ValueUnit::NONE};
@@ -86,9 +86,9 @@ constexpr FieldCell FIELD_CELLS[] = {
     byte_cell(Cell::PAN,         "PAN",      &Instrument::pan,          0x80, D::INS_PAN),
     flag_cell(Cell::TSP,         "TSP",      &Instrument::transposeEnabled),
     byte_cell(Cell::DRIVE,       "DRIVE",    &Instrument::drive,        0x00, D::INS_DRIVE),
-    nibble_cell(Cell::CRUSH,     "CRUSH",    &Instrument::crush,              D::INS_CRUSH),
+    nibble_cell(Cell::CRUSH,     "CRUSH",    &Instrument::crush,              D::INS_CRUSH, ValueUnit::CRUSH_BITS),
     byte_cell(Cell::FREQ,        "FREQ",     &Instrument::filterCut,    0x00, D::INS_CUT, ValueUnit::CUTOFF_HZ),
-    nibble_cell(Cell::DOWNSAMPLE, "DWNSMPL", &Instrument::downsample,         D::INS_DWN),
+    nibble_cell(Cell::DOWNSAMPLE, "DWNSMPL", &Instrument::downsample,         D::INS_DWN, ValueUnit::DOWNSAMPLE),
     byte_cell(Cell::RES,         "RES",      &Instrument::filterRes,    0x00, D::INS_RES),
     byte_cell(Cell::REV,         "REV",      &Instrument::reverbSend,   0x00, D::INS_REV),
     byte_cell(Cell::DEL,         "DEL",      &Instrument::delaySend,    0x00, D::INS_DLY),
@@ -342,7 +342,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     if (const FieldCell* f = field_cell(cell)) {
         switch (f->kind) {
             case FieldKind::BYTE:   return cc::plain_byte(ins.*f->number, f->def).as(f->unit);
-            case FieldKind::NIBBLE: return cc::hex_nibble(ins.*f->number, f->def);
+            case FieldKind::NIBBLE: return cc::hex_nibble(ins.*f->number, f->def).as(f->unit);
             case FieldKind::FLAG:   return cc::toggle_binary(ins.*f->flag);
         }
     }

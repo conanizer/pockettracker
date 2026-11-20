@@ -64,6 +64,8 @@ enum class ValueUnit {
     ENV_TIME,      // an envelope's ATK, HOLD, DEC, REL on the ENV type's log scale
     INSTRUMENT,    // a phrase step's instrument: its name, or EMPTY
     ENV_TIME_LINEAR, ENV_TIME_FAST, ENV_TIME_ANALOG,   // the same on an AHD/ADSR slot's CRV scale, in CURVE_* order
+    CRUSH_BITS,    // CRUSH: the bits left
+    DOWNSAMPLE,    // DWNSMPL: the rate, on the current instrument's type
 };
 
 // Which button combinations do anything here.

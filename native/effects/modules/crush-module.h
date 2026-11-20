@@ -62,6 +62,12 @@ struct BitcrushModule {
         return static_cast<float>(ds) / 15.0f;
     }
 
+    // How many output samples one held value lasts: the Decimator's own threshold, plus the one taken.
+    static int holdSamples(int ds) {
+        const float f = holdFactor(ds);
+        return static_cast<int>(static_cast<uint32_t>((f * f) * 96.0f)) + 1;
+    }
+
     inline float processMono(float in) {
         fresh = false;
         if (!enabled() && !oldShare.moving()) return in;

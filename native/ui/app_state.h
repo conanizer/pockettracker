@@ -347,6 +347,9 @@ struct AppState {
     // is up. Set by the dispatcher, asked at draw time so it is never a frame behind. Empty = no hints.
     std::function<CursorContext()> cellUnderCursor;
 
+    // A slot's sample: frames a second on its ROOT note, RATE included; 0 = none. Asked only when shown.
+    std::function<int(int)> sampleRootRate;
+
     // ONE HAND: a bit per Button — locked, and held alone long enough that letting go will lock it.
     uint16_t buttonsLocked  = 0;
     uint16_t buttonsLocking = 0;

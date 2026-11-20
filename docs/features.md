@@ -185,7 +185,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Help on SELECT: a tap opens a page about the cell under the cursor and every control it has
 - Hints (SETTINGS → TOP PANEL → HINTS): the top panel names the cell under the cursor and its controls, and while L, R or B is held, what that button does on this screen
-- Hold A on a frequency or a time — a filter, an LFO, an envelope, the reverb and delay, TIC, a groove step — to read it in Hz or ms in the top panel
+- Hold A on a frequency or a time — a filter, an LFO, an envelope, the reverb and delay, TIC, a groove step — to read it in Hz or ms in the top panel; on CRUSH, the bits left, and on DWNSMPL, the rate
 - One-handed play (SETTINGS → ONE HAND): a button held alone stays down until pressed again, so every combination can be played one button at a time
 - Instrument picker: tap A on a phrase step's instrument to choose from a list of every instrument by name
 - Effect picker: hold A on an FX type to browse the commands grouped by what they act on, reading what each one does before you let go

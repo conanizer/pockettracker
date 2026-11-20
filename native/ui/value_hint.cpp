@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "effects/cell-curves.h"
+#include "effects/modules/crush-module.h"
 #include "effects/modules/reverb-presets.h"
 #include "songcore/chords.h"
 #include "songcore/program.h"
@@ -137,6 +138,22 @@ ValueHint instrument_hint(const Canvas& c, int value, const AppState& s) {
     return {type + " " + songcore::hex2(value), ""};
 }
 
+// A sampler reads every 2^n-th frame of its file, so its rate is the file's over 2^n on ROOT and moves
+// with the note; every other type is held at a fixed rate after the engine's.
+ValueHint downsample_hint(const Canvas& c, int value, const AppState& s) {
+    if (value == 0) return {c.cased("OFF"), ""};
+    const auto& list = s.project->instruments;
+    if (s.currentInstrument < 0 || s.currentInstrument >= static_cast<int>(list.size())) return {};
+    if (list[static_cast<size_t>(s.currentInstrument)].instrumentType == songcore::InstrumentType::SAMPLER) {
+        const int rate = s.sampleRootRate ? s.sampleRootRate(s.currentInstrument) : 0;
+        if (rate <= 0) return {};
+        return {format_hz(static_cast<float>(rate) / static_cast<float>(1 << value)),
+                c.cased("ON ROOT, MOVES WITH THE NOTE")};
+    }
+    constexpr float ENGINE_HZ = 48000.0f;   // AudioEngine::SAMPLE_RATE, the same on every backend
+    return {format_hz(ENGINE_HZ / static_cast<float>(BitcrushModule::holdSamples(value))), ""};
+}
+
 }  // namespace
 
 ValueHint value_hint(const Canvas& c, ValueUnit unit, int value, const AppState& s, double exactMs) {
@@ -225,6 +242,16 @@ ValueHint value_hint(const Canvas& c, ValueUnit unit, int value, const AppState&
 
         case ValueUnit::INSTRUMENT:
             return instrument_hint(c, value, s);
+
+        case ValueUnit::CRUSH_BITS: {
+            if (value == 0) return {c.cased("OFF"), ""};
+            char bits[16];
+            std::snprintf(bits, sizeof(bits), "%d BIT", 16 - value);
+            return {c.cased(bits), ""};
+        }
+
+        case ValueUnit::DOWNSAMPLE:
+            return downsample_hint(c, value, s);
     }
     return {};
 }

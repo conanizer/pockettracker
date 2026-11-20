@@ -63,6 +63,7 @@ class InputDispatcher {
         : s_(state), host_(host), fs_(fs) {
         s_.clipboard = &clip_;   // the layout's clipboard readout
         s_.cellUnderCursor = [this] { return top_overlay(s_) ? cc::none() : cursor_context(); };
+        s_.sampleRootRate  = [this](int id) { return host_.sample_root_rate(id); };
         // The project the shell pushed before this existed needs its song pointer clamped.
         clamp_song_pointer(s_);
     }

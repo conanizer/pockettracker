@@ -286,6 +286,7 @@ The two control lines change with what you hold:
 | L | What the clipboard holds, and what L does on this screen |
 | B | The B combinations of this screen |
 | A, on a frequency or a time | The value in Hz or ms |
+| A, on CRUSH or DWNSMPL | The bits left, or the rate. On a sampler the rate is the file's own on the ROOT note, and moves with the note |
 | *(a selection is up)* | The size of the selection, and the buttons that work on it |
 
 On SONG in LIVE mode the lines say what START does there. A status message takes the first line while it
