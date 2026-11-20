@@ -22,6 +22,7 @@ GestureResult InputDispatcher::layer_handle(Overlay o, Gesture g) {
         case Overlay::MAP_PICKER:    return map_picker_layer(g);
         case Overlay::INSTRUMENT_PICKER: return instrument_picker_layer(g);
         case Overlay::SF_PRESET_PICKER:  return sf_preset_picker_layer(g);
+        case Overlay::MACRO_MODEL_PICKER: return macro_model_picker_layer(g);
     }
     return GestureResult::PASS;
 }

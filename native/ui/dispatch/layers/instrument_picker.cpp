@@ -1,6 +1,7 @@
-// The instrument list over a phrase step's instrument cell (ui/instrument_picker.h), and the preset list
-// over a SoundFont's PATCH row (ui/sf_preset_picker.h). ⚠️ Both open on A's release, which the mapper
-// sends straight after: the layers must ignore that A_RELEASE.
+// The instrument list over a phrase step's instrument cell (ui/instrument_picker.h), the preset list
+// over a SoundFont's PATCH row (ui/sf_preset_picker.h) and the model list over MACRO's MODEL row.
+// ⚠️ All open on A's release, which the mapper sends straight after: the layers must ignore that
+// A_RELEASE.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -76,6 +77,38 @@ GestureResult InputDispatcher::sf_preset_picker_layer(Gesture g) {
             break;
         }
         case Gesture::B: ps = SfPresetPickerState{}; break;
+        case Gesture::STOP_PREVIEW: return GestureResult::PASS;
+        default: break;
+    }
+    return GestureResult::TAKEN;
+}
+
+void InputDispatcher::open_macro_model_picker() {
+    const int at = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)].macroModel;
+    InstrumentPickerState ps;
+    ps.isOpen = true;
+    ps.count  = songcore::MACRO_MODEL_COUNT;
+    ps.top    = std::max(0, std::min(at - INSTRUMENT_PICKER_ROWS / 3, ps.count - INSTRUMENT_PICKER_ROWS));
+    instrument_picker_move(ps, at, /*page=*/true);
+    s_.macroModelPicker = ps;
+}
+
+GestureResult InputDispatcher::macro_model_picker_layer(Gesture g) {
+    InstrumentPickerState& ps = s_.macroModelPicker;
+    switch (g) {
+        case Gesture::DPAD_UP:    instrument_picker_move(ps, -1, /*page=*/false); break;
+        case Gesture::DPAD_DOWN:  instrument_picker_move(ps, +1, /*page=*/false); break;
+        case Gesture::DPAD_LEFT:  instrument_picker_move(ps, -INSTRUMENT_PICKER_ROWS, /*page=*/true); break;
+        case Gesture::DPAD_RIGHT: instrument_picker_move(ps, +INSTRUMENT_PICKER_ROWS, /*page=*/true); break;
+        case Gesture::A:
+        case Gesture::A_A: {
+            const int chosen = ps.cursor;
+            ps.isOpen = false;
+            // Through the row's own edit, so the name follows the model as it does on a step.
+            if (instrument_edit(InputAction::set_value(chosen))) mark_modified();
+            break;
+        }
+        case Gesture::B: ps.isOpen = false; break;
         case Gesture::STOP_PREVIEW: return GestureResult::PASS;
         default: break;
     }

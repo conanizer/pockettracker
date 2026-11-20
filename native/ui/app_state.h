@@ -195,6 +195,7 @@ struct AppState {
     MapPickerState mapPicker{};   // ui/map_picker.h
     InstrumentPickerState instrumentPicker{};   // ui/instrument_picker.h
     SfPresetPickerState   sfPresetPicker{};     // ui/sf_preset_picker.h
+    InstrumentPickerState macroModelPicker{};   // MACRO's models, over its MODEL cell
 
     FileBrowserState fileBrowser{};
 

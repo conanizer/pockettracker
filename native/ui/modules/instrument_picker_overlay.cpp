@@ -3,6 +3,7 @@
 #include <string>
 
 #include "ui/helpers.h"
+#include "ui/macro_model_text.h"
 #include "ui/value_hint.h"
 
 namespace pt::ui {
@@ -28,6 +29,23 @@ constexpr int SF_TEXT_COLS = 24;
 constexpr int SF_BOX_W     = 2 * TEXT_INSET + SF_TEXT_COLS * CHAR_W - CHAR_SPACING;
 constexpr int SF_BOX_X     = (DESIGN_W - SF_BOX_W) / 2;
 static_assert(SF_BOX_W + 2 * (MODAL_BORDER - 1) <= DESIGN_W, "the preset list is wider than the screen");
+
+// The model list: a model's four letters, a space, and its note, as wide as the longest note.
+constexpr int macro_longest_about() {
+    int most = 0;
+    for (const MacroModelText& m : MACRO_MODEL_TEXT) {
+        int n = 0;
+        while (m.about[n] != '\0') ++n;
+        most = n > most ? n : most;
+    }
+    return most;
+}
+constexpr int MACRO_ABOUT_COL  = 5;
+constexpr int MACRO_TEXT_COLS  = MACRO_ABOUT_COL + macro_longest_about();
+constexpr int MACRO_BOX_W      = 2 * TEXT_INSET + MACRO_TEXT_COLS * CHAR_W - CHAR_SPACING;
+constexpr int MACRO_BOX_X      = (DESIGN_W - MACRO_BOX_W) / 2;
+static_assert(MACRO_TEXT_COLS >= 18, "the model list is narrower than its hint");
+static_assert(MACRO_BOX_W + 2 * (MODAL_BORDER - 1) <= DESIGN_W, "the model list is wider than the screen");
 
 }  // namespace
 
@@ -88,6 +106,34 @@ void draw_sf_preset_picker(Canvas& c, const SfPresetPickerState& s, const Theme&
         c.text(num, x, ry + TEXT_PADDING, isCursor ? ink : t.textParam);
         c.text(c.fit_text(s.names[static_cast<size_t>(i)], SF_TEXT_COLS - digits - 1, isCursor), x + nameX,
                ry + TEXT_PADDING, ink);
+    }
+    y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
+
+    c.label(c.cased("A=CHOOSE  B=CANCEL"), x, y + TEXT_PADDING, t.textParam);
+}
+
+// Each model as the MODEL row shows it: the name in the values' ink, the note in the labels'.
+void draw_macro_model_picker(Canvas& c, const InstrumentPickerState& s, const Theme& t) {
+    if (!s.isOpen) return;
+    c.reset_clip();
+
+    const int BOX_Y = (DESIGN_H - BOX_H) / 2;
+    draw_modal_backdrop(c);
+    draw_modal_box(c, MACRO_BOX_X, BOX_Y, MACRO_BOX_W, BOX_H, t);
+
+    const int x = MACRO_BOX_X + TEXT_INSET;
+    int       y = BOX_Y + BAR_INSET;
+    c.label(c.cased("MODEL"), x, y + TEXT_PADDING, t.textTitle);
+    y += ROW_HEIGHT + GAP;
+
+    for (int i = s.top; i < s.count && i < s.top + INSTRUMENT_PICKER_ROWS; ++i) {
+        const int  ry       = y + (i - s.top) * ROW_HEIGHT;
+        const bool isCursor = i == s.cursor;
+        if (isCursor) c.fill_rect(MACRO_BOX_X + BAR_INSET, ry, MACRO_BOX_W - 2 * BAR_INSET, ROW_HEIGHT, t.rowCursor);
+        const Argb ink = isCursor ? cursor_cell_ink(t) : t.textValue;
+        c.text(songcore::macro_model_name(i), x, ry + TEXT_PADDING, ink);
+        c.text(MACRO_MODEL_TEXT[i].about, x + MACRO_ABOUT_COL * CHAR_W, ry + TEXT_PADDING,
+               isCursor ? ink : t.textParam);
     }
     y += INSTRUMENT_PICKER_ROWS * ROW_HEIGHT + GAP;
 

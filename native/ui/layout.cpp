@@ -382,6 +382,7 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
             case Overlay::SF_PRESET_PICKER:
                 draw_sf_preset_picker(c, s.sfPresetPicker, t);
                 break;
+            case Overlay::MACRO_MODEL_PICKER: draw_macro_model_picker(c, s.macroModelPicker, t); break;
             case Overlay::FX_HELPER:  draw_fx_helper(c, s.fxHelper, t); break;
             case Overlay::SEND:
                 draw_send_editor(c, s.sendEditor, effects_state(s));

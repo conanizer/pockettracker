@@ -129,12 +129,18 @@ bool InputDispatcher::instrument_open_at_cursor(bool peek) {
         instrument_cell_at(ins.instrumentType, s_.instrumentCursor.row, s_.instrumentCursor.column);
     // A file with one preset has nothing to choose from.
     const bool patchList = cell == InstrumentCell::PATCH && isSF && s_.sfPresetCount > 1;
+    const bool modelList = cell == InstrumentCell::MACRO_MODEL;
     if (peek) {
         return cell == InstrumentCell::SOURCE_LOAD || cell == InstrumentCell::SOURCE_EDIT ||
-               cell == InstrumentCell::PRESET_SAVE || cell == InstrumentCell::PRESET_LOAD || patchList;
+               cell == InstrumentCell::PRESET_SAVE || cell == InstrumentCell::PRESET_LOAD || patchList ||
+               modelList;
     }
     if (patchList) {
         open_sf_preset_picker();
+        return true;
+    }
+    if (modelList) {
+        open_macro_model_picker();
         return true;
     }
     switch (cell) {

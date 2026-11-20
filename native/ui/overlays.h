@@ -13,7 +13,7 @@ namespace pt::ui {
 
 enum class Overlay {
     LOADING, CONFIRM, SAMPLE_CLOSE, RENDER_DIALOG, HELP_FULL, QWERTY, THEME, EQ, SEND, STRETCH, FX_HELPER,
-    MAP_PICKER, INSTRUMENT_PICKER, SF_PRESET_PICKER,
+    MAP_PICKER, INSTRUMENT_PICKER, SF_PRESET_PICKER, MACRO_MODEL_PICKER,
 };
 
 struct OverlayRow {
@@ -47,6 +47,7 @@ inline constexpr OverlayRow OVERLAYS[] = {
     {Overlay::MAP_PICKER,    [](const AppState& s) { return s.mapPicker.isOpen; },         true,  false, false},
     {Overlay::INSTRUMENT_PICKER, [](const AppState& s) { return s.instrumentPicker.isOpen; }, true, false, false},
     {Overlay::SF_PRESET_PICKER,  [](const AppState& s) { return s.sfPresetPicker.isOpen; },   true, false, false},
+    {Overlay::MACRO_MODEL_PICKER, [](const AppState& s) { return s.macroModelPicker.isOpen; }, true, false, false},
 };
 
 // The one on top, or null.

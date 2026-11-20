@@ -552,6 +552,9 @@ class InputDispatcher {
     // The same list for a SoundFont's PATCH row: the presets in its file.
     GestureResult sf_preset_picker_layer(Gesture g);
     void open_sf_preset_picker();
+    // And for MACRO's MODEL row: every model with its note.
+    GestureResult macro_model_picker_layer(Gesture g);
+    void open_macro_model_picker();
 
     // ── The layer stack ──────────────────────────────────────────────────────────────────────────
     // A gesture a layer does not answer is swallowed, so a new layer is one row in `OVERLAYS` plus its
