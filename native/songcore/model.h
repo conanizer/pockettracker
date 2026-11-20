@@ -550,6 +550,11 @@ inline int resolve_cc_param(const Instrument& ins, uint8_t param) {
     return ins.midiCC[static_cast<size_t>(slot)].cc;
 }
 
+// The .ptp / .pti format a writer stamps. What is in memory is always this format; older files are
+// migrated on load (project_io.h).
+inline constexpr int PROJECT_FORMAT_VERSION = 2;
+inline constexpr int PRESET_FORMAT_VERSION  = 2;
+
 struct Project {
     int version = 0;
     std::string name = "UNTITLED";
@@ -612,7 +617,7 @@ inline bool* mix_channel_mute(Project& p, int ch) {
 }
 
 struct InstrumentPreset {
-    int version = 1;
+    int version = PRESET_FORMAT_VERSION;
     Instrument instrument;
     std::optional<std::vector<TableRow>> tableRows;
 };

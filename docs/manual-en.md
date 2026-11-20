@@ -682,7 +682,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and EXTERNAL and MACRO instruments have neither button. Changing the type of an instrument with a sound file or settings of its own asks first: **DISCARD** starts the new type afresh, **KEEP** takes the settings along, **CANCEL** leaves it. Both keep the level, pan, sends, EQ and table. |
 | NAME | — | Instrument name. Press A to edit it on the keyboard overlay. |
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
-| DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
+| DETUNE | 00–FF | Fine tuning, up to a semitone either way: `80` = in tune, `00` a semitone flat, `FF` almost a semitone sharp. For whole semitones use ROOT. |
 | VOL | 00–FF | Base volume. `FF` = full. |
 | TSP | ON / OFF | Right of PAN. `OFF` takes this instrument out of **every** note transposition — the scale on its track, the chain transpose column and the project TRANSPOSE setting. Turn it off for a drum kit whose slots you have pitched by hand. |
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |

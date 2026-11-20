@@ -431,10 +431,20 @@ inline Project parse_project(const json& j) {
     return p;
 }
 
+// Before format 2, DETUNE was (d>>4) + (d&0xF)/16 − 8 semitones; it is now one semitone either way.
+// The whole semitones move into ROOT (a higher ROOT plays lower), the rest stays: the same pitch.
+inline void migrate_detune_v2(Instrument& ins) {
+    const int sixteenths = ins.detune - 0x80;
+    const int semis = sixteenths >= 0 ? (sixteenths + 7) / 16 : -((-sixteenths + 7) / 16);  // ties to 0
+    ins.detune = 0x80 + (sixteenths - semis * 16) * 8;
+    if (semis != 0 && note_is_pitch(ins.root))
+        ins.root = note_from_midi(std::clamp(note_to_midi(ins.root) - semis, 0, 127));
+}
+
 // `tempo`: the song it goes into — an older preset's envelope tics are read as heard there.
 inline InstrumentPreset parse_instrument_preset(const json& j, int tempo = Project{}.tempo) {
     InstrumentPreset ip;
-    ip.version = detail::get_int(j, "version", ip.version);
+    ip.version = detail::get_int(j, "version", 1);   // no field = format 1
     auto it = j.find("instrument");
     if (it != j.end() && it->is_object()) ip.instrument = detail::parse_instrument(*it, ip.instrument.id, tempo);
     auto tr = j.find("tableRows");
@@ -443,6 +453,8 @@ inline InstrumentPreset parse_instrument_preset(const json& j, int tempo = Proje
         for (const auto& e : *tr) rows.push_back(detail::parse_table_row(e));
         ip.tableRows = std::move(rows);
     }
+    if (ip.version < 2) migrate_detune_v2(ip.instrument);
+    ip.version = PRESET_FORMAT_VERSION;
     return ip;
 }
 
@@ -473,12 +485,17 @@ inline bool normalize_project(Project& p) {
 }
 
 // Version 0 → 1: a table row volume of 0xFF meant "full"; it now means "no change", spelled -1.
+// 1 → 2: DETUNE's new scale.
 inline void migrate_project(Project& p) {
     if (p.version < 1) {
         for (auto& t : p.tables)
             for (auto& r : t.rows)
                 if (r.volume == 0xFF) r.volume = -1;
         p.version = 1;
+    }
+    if (p.version < 2) {
+        for (auto& ins : p.instruments) migrate_detune_v2(ins);
+        p.version = 2;
     }
 }
 
@@ -872,7 +889,7 @@ inline std::string serialize_project(const Project& p) {
     using namespace detail;
     JsonWriter w{JsonLayout::Minified};
     w.begin_object();
-    if (p.version != 0)         w.field_int("version", p.version);
+    w.field_int("version", PROJECT_FORMAT_VERSION);   // memory is always the current format
     if (p.name != "UNTITLED")   w.field_string("name", p.name);
     if (p.tempo != 128)         w.field_int("tempo", p.tempo);
     if (p.transpose != 0)       w.field_int("transpose", p.transpose);
@@ -952,7 +969,7 @@ inline std::string serialize_instrument_preset(const InstrumentPreset& ip, int t
     using namespace detail;
     JsonWriter w{JsonLayout::Minified};
     w.begin_object();
-    if (ip.version != 1) w.field_int("version", ip.version);
+    w.field_int("version", PRESET_FORMAT_VERSION);
     w.key("instrument");
     emit_instrument(w, ip.instrument, tempo);
     if (ip.tableRows) {

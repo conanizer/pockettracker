@@ -159,9 +159,9 @@ struct SoundfontNoteArgs {
 
 // ⚠️ Keep each operation order: a 1-ULP drift in the pitch math changes every rendered byte.
 
-// (d>>4) + (d&0xF)/16 − 8.
+// (d − 0x80) / 128: one semitone either way.
 inline float detune_semitones(int detune) {
-    return static_cast<float>(detune >> 4) + ((detune & 0x0F) / 16.0f) - 8.0f;
+    return static_cast<float>(detune - 0x80) / 128.0f;
 }
 
 inline float frames_per_tic_f(int tempo, int sampleRate) {

@@ -137,11 +137,11 @@ inline void delay_apply_bank(Project& p, int index) {
     p.delayPreset = kDelayPresets[index].name;
 }
 
-// NEW: a fresh document. ⚠️ `version = 1`, not the struct's 0 — a 0 would load as a legacy file.
+// NEW: a fresh document. ⚠️ The current version, not the struct's 0 — a 0 would load as a legacy file.
 // It opens on the first built-in reverb and delay; the struct defaults stay what older files play with.
 inline void new_project(Project& project) {
     project         = make_default_project();
-    project.version = 1;
+    project.version = PROJECT_FORMAT_VERSION;
     reverb_apply_bank(project, 0);
     delay_apply_bank(project, 0);
 }
