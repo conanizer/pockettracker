@@ -71,6 +71,7 @@ tarball and the PortMaster zip.
 ## Contributors
 
 - [@skoomabwoy](https://github.com/skoomabwoy) — authored the [skoomaDust](https://github.com/skoomabwoy/skoomaDust) lo-fi effect chain integrated into PocketTracker; ongoing technical advice throughout the project.
+- [@six-school](https://github.com/six-school) — added the MACRO instrument, built on Émilie Gillet's Braids.
 
 ---
 

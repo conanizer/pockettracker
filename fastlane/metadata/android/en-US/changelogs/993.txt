@@ -1,0 +1,10 @@
+What's new:
+
+• MACRO: a synth instrument with 47 models, based on Braids
+• Envelopes in milliseconds, with curves; more ways to modulate
+• Three new filters: LD, K35 and a notch
+• Three fonts, and capitals, small letters or Title case
+• Hints in the top panel: what the cursor is on and what the buttons do
+• Pick an instrument, a model or a SoundFont sound from a list
+• Start playing from the cursor on CHAIN and SONG
+• Some older songs may sound different: see the release notes
