@@ -75,7 +75,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const int  markerX     = cellX - CHAR_W;
         const bool playingHere = s.playheads[trackId].songRow == absolute_row;
         const LiveQueue& q     = s.liveQueue[trackId];
-        const bool queueLit    = s.liveMode && q.pending() && blink_on(s.blinkPhaseMs, q.immediate);
+        const bool queueLit    = q.pending() && blink_on(s.blinkPhaseMs, q.immediate);
 
         if (queueLit && q.stop && playingHere)
             c.text("_", markerX, textY, t.textPlayhead);

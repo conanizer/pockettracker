@@ -59,6 +59,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "the first one and plays the",
       "group again."},
      {"START play from this row",
+      "L+START jump here next",
       "R+→ open chain",
       "B+↑/↓ jump 16 rows",
       "B+←/→ SONG or LIVE mode",
@@ -2085,7 +2086,7 @@ struct GuideScreenLines {
     GuidePair line;
 };
 inline constexpr GuideScreenLines GUIDE_L[] = {
-    {HelpTopic::SCREEN_SONG,   true,  {"L+B select, L+A paste", "L+B then A clone chain"}},
+    {HelpTopic::SCREEN_SONG,   true,  {"L+B select, L+A paste", "L+B then A clone, L+START jump"}},
     {HelpTopic::SCREEN_CHAIN,  true,  {"L+B select, L+A paste", "L+B then A clone phrase"}},
     {HelpTopic::SCREEN_PHRASE, true,  {"L+B select, L+A paste", "L+D-PAD fill, L+B then A clone"}},
     {HelpTopic::SCREEN_TABLE,  true,  {"L+B select, L+A paste", ""}},

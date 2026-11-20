@@ -351,6 +351,8 @@ class Sequencer {
     RollbackPlan queue_live_stop(int trackId, bool immediate, int64_t currentFrame);
 
     // Queue a whole row as one scene. ⚠️ An empty cell queues a STOP — a blank sounds as it looks.
+    // Also outside LIVE while SONG plays: each channel jumps at its chain end (or phrase end, `immediate`)
+    // and then goes on down the song.
     RollbackPlan queue_live_row(int songRow, bool immediate, int64_t currentFrame);
 
     // ── the polling scheduler (live modes) ──
@@ -407,6 +409,12 @@ class Sequencer {
     void join_silent_launches(int leadTrack, int64_t frame, bool lapStart);   // at each lead bar
     void join_scheduled_boundary(int trackId, int64_t currentFrame);          // at the press
     void join_live_at(int trackId, int64_t frame);
+
+    // SONG outside LIVE with a row queued: true when this unit is spent waiting (a silent bar) or the
+    // track is done; false to go on and play its row.
+    bool song_queue_unit(const Project& project, int trackId, int64_t framesPerPhrase,
+                         bool takeCheckpoint);
+    bool any_queue_armed() const;
 
     struct ScheduleStepResult {
         bool noteScheduled = false;

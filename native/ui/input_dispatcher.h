@@ -885,6 +885,7 @@ class InputDispatcher {
     // press promotes the launch from the chain's end to the next phrase boundary.
     void live_launch_cell();
     void live_launch_row();
+    void song_launch_row();   // L+START outside LIVE
     void live_stop_track();
 
     // ── GROOVE and SCALE (ui/dispatch/screens/scale_groove.cpp) ──────────────────────────────────

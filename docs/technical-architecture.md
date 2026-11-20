@@ -439,6 +439,9 @@ arm for it, and a project that never enters LIVE schedules identically. A launch
 walk is undone**: it rewinds one track to its earliest unplayed phrase boundary (a per-track checkpoint
 ring, SONG mode only) and hands the host a frame to drop queued notes from, which is why a launch
 pressed in the last moments before a boundary still lands on it rather than a bar or a lap late.
+The same queue serves a row queued outside LIVE: the launch lands on the same boundaries, and only
+what follows differs — the cursor moves on down the column. A column that runs out while a row is
+queued walks silent bars instead of finishing, or it could never join the launch.
 
 **Scale quantization happens once, where a note is emitted.** By that point the chain and project
 transposes are folded into the note and the PIT and ARP offsets sit beside it, so quantizing that sum

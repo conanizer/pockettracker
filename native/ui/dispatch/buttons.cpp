@@ -64,7 +64,7 @@ void InputDispatcher::on_start() {
     }
 }
 
-// LIVE mode's chords: SONG's handler answers them. L+START is reserved everywhere else.
+// SONG answers L+START (queue the row, in LIVE or not) and LIVE's R+START; reserved everywhere else.
 void InputDispatcher::on_l_start() { route(Gesture::L_START); }
 
 // How far into the song row you came through the CHAIN or PHRASE on screen sits: whole phrases before

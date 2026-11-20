@@ -312,7 +312,7 @@ RollbackPlan Sequencer::queue_live_stop(int trackId, bool immediate, int64_t cur
 
 RollbackPlan Sequencer::queue_live_row(int songRow, bool immediate, int64_t currentFrame) {
     RollbackPlan plan;
-    if (!liveMode_ || project_ == nullptr) return plan;
+    if (project_ == nullptr) return plan;
     for (int t = 0; t < 8; ++t) {
         const std::vector<int>& refs = project_->tracks[static_cast<size_t>(t)].chainRefs;
         const int chainId = (songRow >= 0 && songRow < static_cast<int>(refs.size()))
@@ -530,9 +530,22 @@ RollbackPlan Sequencer::rewind_all_song_tracks(int64_t currentFrame) {
 
 RollbackPlan Sequencer::arm_live_slot(int trackId, LiveSlot slot, int64_t currentFrame) {
     RollbackPlan plan;
-    if (!liveMode_) return plan;
+    const bool songQueue = !liveMode_ && isPlaying_ && playbackMode_ == PlaybackMode::SONG;
+    if (!liveMode_ && !songQueue) return plan;
     const int64_t f = rewind_song_track(trackId, currentFrame);
     if (f >= 0) plan.frames[trackId] = f;
+    if (songQueue && trackDone_[trackId]) {
+        // A column that ran out walks silent bars again, on the grid of the track furthest behind.
+        int64_t inStep = -1;
+        for (int t = 0; t < 8; ++t)
+            if (!trackDone_[t]) inStep = (inStep < 0) ? trackNextFrame_[t]
+                                                     : std::min(inStep, trackNextFrame_[t]);
+        trackNextFrame_[trackId] = inStep < 0 ? currentFrame : inStep;
+        trackChainRow_[trackId]  = 0;
+        trackDone_[trackId]      = false;
+        liveSilent_[trackId]     = true;
+        liveLoopFrame_[trackId]  = trackNextFrame_[trackId];
+    }
     // ⚠️ After the rewind, which un-stamps a launch it rolled back over.
     liveQueue_[trackId] = slot;
     liveJoinAt_[trackId] = -1;
@@ -725,6 +738,9 @@ void Sequencer::schedule_track_unit(const Project& project, int trackId, int64_t
         trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
         return;
     }
+    if (lastSongRow < 0 && (liveSilent_[trackId] || any_queue_armed()) &&
+        song_queue_unit(project, trackId, framesPerPhrase, takeCheckpoint))
+        return;
     const int songRow = trackSongRow_[trackId];
 
     // ⚠️ A cell the walk cannot enter SILENCES the track until STOP; it never searches for a block.
@@ -764,6 +780,39 @@ void Sequencer::schedule_track_unit(const Project& project, int trackId, int64_t
     begin_phrase(chain_phrase_ref(chain, chainRow), trackNextFrame_[trackId], trackId, transposeSemitones,
                  effectiveStartRow, &chain, chainRow);
     trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
+}
+
+bool Sequencer::any_queue_armed() const {
+    for (const LiveSlot& q : liveQueue_)
+        if (q.armed()) return true;
+    return false;
+}
+
+bool Sequencer::song_queue_unit(const Project& project, int trackId, int64_t framesPerPhrase,
+                                bool takeCheckpoint) {
+    // The launch is LIVE's, on the same boundaries; only what follows it differs — the song goes on down.
+    const bool lapStart = trackChainRow_[trackId] == 0;
+    if (live_lead_track() == trackId) join_silent_launches(trackId, trackNextFrame_[trackId], lapStart);
+    const bool launched = consume_live_queue(trackId, lapStart);
+    if (launched && liveSilent_[trackId]) {
+        // A blank in the queued row: the channel falls silent there, as it looks.
+        router_.note_off(trackNextFrame_[trackId], trackId, NOTE_OFF_RELEASE);
+        trackStates_[trackId].clearPitchMod();
+        put_song_position(trackId, -1, -1, trackNextFrame_[trackId]);
+    }
+    if (!liveSilent_[trackId] && song_cell_plays(project, trackId, trackSongRow_[trackId])) return false;
+
+    if (!liveQueue_[trackId].armed()) {
+        liveSilent_[trackId] = false;
+        trackDone_[trackId]  = true;
+        return true;
+    }
+    // ⚠️ A column that runs out while a row is queued waits in silent bars, or it could never join.
+    if (!liveSilent_[trackId]) liveLoopFrame_[trackId] = trackNextFrame_[trackId];
+    liveSilent_[trackId] = true;
+    checkpoint_track(trackId, trackSongRow_[trackId], trackChainRow_[trackId], takeCheckpoint);
+    trackNextFrame_[trackId] += framesPerPhrase;
+    return true;
 }
 
 void Sequencer::schedule_live_unit(const Project& project, int trackId, int64_t framesPerStep,

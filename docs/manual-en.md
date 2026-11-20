@@ -507,6 +507,7 @@ A `>` also marks the playing row on the CHAIN and PHRASE screens. It is only dra
 | B + UP/DOWN | Page up / down (jump 16 rows) |
 | B + LEFT/RIGHT | Switch between SONG and LIVE mode |
 | START | Play song from current row |
+| L + START | While the song plays: jump to the cursor row once each track's current chain ends, then carry on down the song. Press again to jump at the end of the current phrase instead. Stopped: play from the cursor row |
 
 > [!TIP]
 > You can start playback from any row — not just the beginning. Move the cursor to the row where you want playback to start, then press **START**. Useful for jumping to a specific section while mixing.

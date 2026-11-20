@@ -350,6 +350,7 @@ class SongcoreHost {
     PlaybackPosition playheads(int trackId);
 
     bool is_playing() const { return seq_.is_playing(); }
+    bool playing_song() const { return seq_.is_playing() && seq_.playback_mode() == PlaybackMode::SONG; }
 
     int sample_rate() const { return sampleRate_; }
 

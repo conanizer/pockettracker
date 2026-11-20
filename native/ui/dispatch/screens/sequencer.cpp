@@ -119,13 +119,15 @@ GestureResult InputDispatcher::song_screen(Gesture g) {
             s_.selection.exit();
             return GestureResult::TAKEN;
 
-        // LIVE mode's three launches. Outside LIVE, START is the transport and the two chords do nothing.
+        // LIVE mode's three launches. Outside LIVE, START is the transport, L+START queues the row and the
+        // song goes on down from it, and R+START does nothing.
         case Gesture::START:
             if (!live_song_gesture()) return GestureResult::PASS;
             live_launch_cell();
             return GestureResult::TAKEN;
         case Gesture::L_START:
             if (live_song_gesture()) live_launch_row();
+            else if (!top_overlay(s_)) song_launch_row();
             return GestureResult::TAKEN;
         case Gesture::R_START:
             if (live_song_gesture()) live_stop_track();
@@ -712,6 +714,15 @@ void InputDispatcher::live_launch_row() {
     if (!host_.is_playing()) {
         // From a standing start the row launches together on one downbeat; an empty cell starts silent.
         host_.play_song_live(s_.songCursor.row, live_row_mask(s_.songCursor.row));
+        return;
+    }
+    host_.queue_live_row(s_.songCursor.row, live_row_armed(s_.songCursor.row));
+}
+
+void InputDispatcher::song_launch_row() {
+    if (!host_.playing_song()) {
+        if (host_.is_playing()) host_.stop();   // a chain or phrase on its own
+        host_.play_song(s_.songCursor.row);
         return;
     }
     host_.queue_live_row(s_.songCursor.row, live_row_armed(s_.songCursor.row));

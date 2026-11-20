@@ -365,7 +365,8 @@ R + LEFT                Up one directory (file browser)
 R + LEFT/RIGHT          Scroll the text cursor (QWERTY overlay)
 R + B                   Mute the track under the cursor  (SONG, MIXER)
 R + A                   Solo it                          (SONG, MIXER)
-R + START               Play the whole song from the song row you came through
+R + START               Play the whole song from the song row you came through, on CHAIN
+                        and PHRASE from that chain row
                         (CHAIN, PHRASE, TABLE, GROOVE, SCALE and the instrument screens)
 ```
 
@@ -386,8 +387,8 @@ underneath it. They are listed so they aren't mistaken for broken controls:
 L + R + A, L + R + B, L + R + SELECT
 ```
 
-`L + START` is consumed the same way everywhere except the SONG screen in LIVE mode, where it queues
-a row. It never toggles playback and never silences a preview.
+`L + START` is consumed the same way everywhere except the SONG screen, where it queues a row (or,
+stopped, plays from it). It never stops playback and never silences a preview.
 
 ---
 
