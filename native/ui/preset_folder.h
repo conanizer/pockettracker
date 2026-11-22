@@ -170,9 +170,6 @@ inline NamedDelay delay_preset_cells(const DelayPreset& d) {
     return {d.name, d.cells};
 }
 
-// Written ONCE per install, then never again: these folders may already hold the user's own files,
-// so "only into an empty folder" would leave the factory ones out. ⚠️ The note that it was done sits
-// beside settings.json, never in a folder the browser lists.
 // Does the folder already hold this preset, by file or by name, in any case? The user's copy wins.
 template <typename T>
 bool folder_has_preset(const std::vector<FolderPreset<T>>& list, const std::string& name) {
@@ -182,16 +179,23 @@ bool folder_has_preset(const std::vector<FolderPreset<T>>& list, const std::stri
     });
 }
 
+// Written ONCE per install: these folders may already hold the user's own files, so "only into an
+// empty folder" would leave the factory ones out. A folder holding none of them is filled whatever
+// the note says, as the scales are. The note sits beside settings.json, never in a listed folder.
+// ⚠️ The note is written only once the folder really holds them: on Android with no folder granted
+// yet, `dir` is the roots listing, every write is refused, and a note written then kept the folder
+// empty for good.
 template <typename Write>
-int seed_factory_once(FileSystem& fs, const std::string& dir, const char* what, Write write) {
+int seed_factory_once(FileSystem& fs, const std::string& dir, const char* what, const char* ext,
+                      Write write) {
     const std::string settings = fs.settings_path();
     const size_t      slash    = settings.find_last_of("/\\");
     if (slash == std::string::npos || dir.empty()) return 0;
     const std::string note = settings.substr(0, slash) + "/seeded-" + what;
-    if (fs.file_exists(note)) return 0;
+    if (fs.file_exists(note) && folder_has_extension(fs, dir, ext)) return 0;
 
     const int written = write(dir);
-    fs.write_file(note, "1");
+    if (folder_has_extension(fs, dir, ext)) fs.write_file(note, "1");
     return written;
 }
 
@@ -236,15 +240,15 @@ inline int write_theme_bank(FileSystem& fs, const std::string& dir) {
 }
 
 inline int seed_reverb_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.reverbs_directory(), "reverbs",
+    return seed_factory_once(fs, fs.reverbs_directory(), "reverbs", REVERB_FILE_EXT,
                              [&fs](const std::string& dir) { return write_reverb_bank(fs, dir); });
 }
 inline int seed_delay_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.delays_directory(), "delays",
+    return seed_factory_once(fs, fs.delays_directory(), "delays", DELAY_FILE_EXT,
                              [&fs](const std::string& dir) { return write_delay_bank(fs, dir); });
 }
 inline int seed_theme_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.themes_directory(), "themes",
+    return seed_factory_once(fs, fs.themes_directory(), "themes", "ptt",
                              [&fs](const std::string& dir) { return write_theme_bank(fs, dir); });
 }
 

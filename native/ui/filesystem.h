@@ -118,6 +118,10 @@ class FileSystem {
     // ⚠️ The directory accessors answer differently afterwards: re-ask any derived path.
     virtual bool set_home_directory(const std::string& path) { (void)path; return false; }
 
+    // True once after the folder the app's directories live in has changed under a running app (on
+    // Android, the first folder granted). The first call only takes note of where it is.
+    virtual bool take_home_changed() { return false; }
+
     // Give up an `isRoot` row's grant. Deletes nothing.
     // ⚠️ Giving up the home must not leave a stored home naming a vanished grant.
     virtual bool revoke_access(const std::string& path) { (void)path; return false; }
