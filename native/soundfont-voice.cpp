@@ -18,6 +18,7 @@ extern "C" {
 #include "common/platform_memory.h"
 #include "common/load_progress.h"
 #include "soundfont-slots.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
+#include "effects/glide.h"      // DECLICK_SAMPLES, which TSF_END_FADE below is
 
 #include <cstdlib>
 #include <mutex>
@@ -126,6 +127,7 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 #define TSF_PROGRESS(i, n)     sf_load_progress((i), (n))
 
 #define TSF_IMPLEMENTATION
+#define TSF_END_FADE ((double)DECLICK_SAMPLES)   // a one-shot ends as the sampler's do
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"   // vendored, not ours to fix

@@ -283,6 +283,12 @@ TSFDEF float tsf_channel_get_tuning(tsf* f, int channel);
 #define TSF_RENDER_EFFECTSAMPLEBLOCK 64
 #endif
 
+/* PocketTracker (seventh): a one-shot's end fade, in output frames. The includer sets it to the
+   sampler's own length. */
+#ifndef TSF_END_FADE
+#define TSF_END_FADE 64.0
+#endif
+
 // When using tsf_render_short, to do the conversion a buffer of a fixed size is
 // allocated on the stack. On low memory platforms this could be made smaller.
 // Increasing this above 512 should not have a significant impact on performance.
@@ -1326,6 +1332,10 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	unsigned int tmpLoopStart = v->loopStart, tmpLoopEnd = v->loopEnd;
 	double tmpSampleEndDbl = (double)region->end, tmpLoopEndDbl = (double)tmpLoopEnd + 1.0;
 	double tmpSourceSamplePosition = v->sourceSamplePosition;
+	/* PocketTracker local addition — SEVENTH local change, re-apply on any tsf update.
+	   A sample that is not looping fades over its last TSF_END_FADE output frames, as the sampler's
+	   one-shots do: one cut off while still loud would end on a click. Set per block: the pitch moves. */
+	double tmpEndFadeFrom = tmpSampleEndDbl, tmpEndFadeScale = 0.0;
 	struct tsf_voice_lowpass tmpLowpass = v->lowpass;
 
 	TSF_BOOL dynamicLowpass = (region->modLfoToFilterFc || region->modEnvToFilterFc);
@@ -1367,6 +1377,9 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 		if (dynamicGain)
 			noteGain = tsf_decibelsToGain(v->noteGainDB + (v->modlfo.level * tmpModLfoToVolume));
 
+		if (!isLooping && pitchRatio > 0.0)   /* PocketTracker (seventh) */
+			tmpEndFadeFrom = tmpSampleEndDbl - TSF_END_FADE * pitchRatio, tmpEndFadeScale = 1.0 / (TSF_END_FADE * pitchRatio);
+
 		/* PocketTracker local addition (fifth) — where a 16-bit sample becomes a float again.
 		   ⚠️ **THE SCALE IS FOLDED INTO THE GAIN, NOT APPLIED TO THE SAMPLE**, so the 16-bit store
 		   costs nothing per output sample: one multiply per BLOCK instead of two per sample. It is
@@ -1396,6 +1409,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
+					if (tmpSourceSamplePosition > tmpEndFadeFrom) val *= (float)((tmpSampleEndDbl - tmpSourceSamplePosition) * tmpEndFadeScale);
 
 					*outL++ += val * gainLeft;
 					*outL++ += val * gainRight;
@@ -1417,6 +1431,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
+					if (tmpSourceSamplePosition > tmpEndFadeFrom) val *= (float)((tmpSampleEndDbl - tmpSourceSamplePosition) * tmpEndFadeScale);
 
 					*outL++ += val * gainLeft;
 					*outR++ += val * gainRight;
@@ -1437,6 +1452,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
+					if (tmpSourceSamplePosition > tmpEndFadeFrom) val *= (float)((tmpSampleEndDbl - tmpSourceSamplePosition) * tmpEndFadeScale);
 
 					*outL++ += val * gainMono;
 
