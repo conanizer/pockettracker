@@ -76,7 +76,7 @@ All packages are on the [Releases](https://github.com/conanizer/pockettracker/re
 
 **Obtainium:** install [Obtainium](https://github.com/ImranR98/Obtainium), then tap the badge below on your device. PocketTracker is added straight from GitHub Releases and Obtainium keeps it up to date automatically — new versions appear here on release day, a few days before F-Droid builds them.
 
-[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.page/redirect?r=obtainium://add/https://github.com/conanizer/pockettracker)
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/conanizer/pockettracker)
 
 If the badge doesn't open Obtainium, add this URL as an app source inside Obtainium instead:
 
