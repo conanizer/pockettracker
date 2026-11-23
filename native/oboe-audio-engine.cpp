@@ -132,10 +132,12 @@ bool OboeAudioEngine::openStream() {
 
     // ⚠️ Each clears once a reopen answered it, or the loop reopens every tick. Only a stream that
     // could have the direct path reopens after a recording.
-    const bool direct = oboe::OboeExtensions::isMMapUsed(stream.get());
+    // ⚠️ AAudio only: Oboe's isMMapUsed() hands an OpenSL ES stream's null handle to AAudio, which
+    // crashes.
+    const bool aaudio = stream->getAudioApi() == oboe::AudioApi::AAudio;
+    const bool direct = aaudio && oboe::OboeExtensions::isMMapUsed(stream.get());
     reopenOnRecording_    = direct && !captured;
-    reopenAfterRecording_ = captured && !direct &&
-                            stream->getAudioApi() == oboe::AudioApi::AAudio &&
+    reopenAfterRecording_ = captured && !direct && aaudio &&
                             oboe::OboeExtensions::isMMapSupported();
 
     LOGD("Stream opened: %d Hz, burst=%d, bufSz=%d, api=%s, perf=%s, sharing=%s, direct=%d, "
