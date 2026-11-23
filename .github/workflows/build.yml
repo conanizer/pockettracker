@@ -264,7 +264,7 @@ jobs:
           # members with no keep rule must all be renamed. ⚠️ Each must still exist in MainActivity.kt.
           KT=app/src/main/java/com/conanizer/pockettracker/MainActivity.kt
           survived=0
-          for n in hideSystemBars askForNotificationsOnce watchScreenRecording onScreenRecording visualizerIndex; do
+          for n in hideSystemBars askForNotificationsOnce watchScreenRecording onRecordingChanged visualizerIndex; do
             if ! grep -q -E "private fun $n\b" "$KT"; then
               echo "FAIL  (control) $n is no longer a private fun of MainActivity.kt - pick another"; FAIL=1
             elif cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
