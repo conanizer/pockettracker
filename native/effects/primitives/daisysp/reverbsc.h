@@ -120,6 +120,10 @@ class ReverbSc
         caller derives the feedback from the decay time AND the room it asked for. */
     void SetRoom(float room, float rate);
 
+    /** ⚠️ PT: the caller vouches the lines hold only silence, so the next room change re-places the
+        heads as before the first `Process` instead of gliding in under the next note. */
+    void SetEmpty() { processed_ = false; }
+
   private:
     void       NextRandomLineseg(ReverbScDl *lp, int n);
     int        InitDelayLine(ReverbScDl *lp, int n);

@@ -102,6 +102,7 @@ struct ReverbModule {
     // Stereo send in, 100 % wet out. Sleeps after a second of silence in and out.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         if (sleep.skip(inL, inR, numFrames)) {
+            reverb.SetEmpty();   // quiet: a SIZE changed now (a load, say) lands without a glide
             std::memset(outL, 0, sizeof(float) * static_cast<size_t>(numFrames));
             std::memset(outR, 0, sizeof(float) * static_cast<size_t>(numFrames));
             return;
