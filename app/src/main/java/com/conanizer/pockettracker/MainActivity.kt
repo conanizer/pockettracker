@@ -5,6 +5,9 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -201,31 +204,56 @@ class MainActivity : SDLActivity() {
 
     // ── A screen recording hears the app ─────────────────────────────────────────────────────────
     //
-    // The fast audio path does not reach a recording, so native leaves it while one shows the app.
-    // ⚠️ Android 15+ only: earlier versions tell the app nothing.
+    // The fast audio path does not reach a recording, so native leaves it while one may be running.
+    // Two signals, either enough: Android 15+ says a recording shows the app; any version lists a
+    // remote-submix output while something captures the device's sound — a screen recording with
+    // sound, or mirroring the screen to another display.
     // ⚠️ Watched only while resumed: leaving the screen also reads as "not recorded", and a song
     // playing on in the background must not have its sound reopened for that.
-    private val recordingCallback = Consumer<Int> { state -> onScreenRecording(state) }
+    private var screenRecorded = false
+    private var soundCaptured  = false
+
+    private val recordingCallback = Consumer<Int> { state ->
+        screenRecorded = state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE
+        onRecordingChanged()
+    }
+    private val captureCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = recheckCapture()
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = recheckCapture()
+    }
     private val recordingEnded = Runnable { setPlaybackCaptured(false) }
 
+    private fun recheckCapture() {
+        val outputs = getSystemService(AudioManager::class.java)?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        soundCaptured = outputs?.any { it.type == AudioDeviceInfo.TYPE_REMOTE_SUBMIX } == true
+        onRecordingChanged()
+    }
+
     private fun watchScreenRecording() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
-        try {
-            onScreenRecording(windowManager.addScreenRecordingCallback(mainExecutor, recordingCallback))
-        } catch (e: Exception) {
-            Log.w(TAG, "screen recording state unavailable: $e")
+        // Its first call lists the devices there now, which settles the state on its own.
+        getSystemService(AudioManager::class.java)?.registerAudioDeviceCallback(captureCallback, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            try {
+                screenRecorded = windowManager.addScreenRecordingCallback(mainExecutor, recordingCallback) ==
+                    WindowManager.SCREEN_RECORDING_STATE_VISIBLE
+            } catch (e: Exception) {
+                Log.w(TAG, "screen recording state unavailable: $e")
+            }
         }
+        recheckCapture()
     }
 
     private fun unwatchScreenRecording() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
-        try { windowManager.removeScreenRecordingCallback(recordingCallback) } catch (_: Exception) {}
+        getSystemService(AudioManager::class.java)?.unregisterAudioDeviceCallback(captureCallback)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            try { windowManager.removeScreenRecordingCallback(recordingCallback) } catch (_: Exception) {}
+        }
         window.decorView.removeCallbacks(recordingEnded)
     }
 
-    private fun onScreenRecording(state: Int) {
+    private fun onRecordingChanged() {
         window.decorView.removeCallbacks(recordingEnded)
-        if (state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE) {
+        if (screenRecorded || soundCaptured) {
             setPlaybackCaptured(true)
         } else {
             // ⚠️ Late on purpose: a stream reopened while the recorder still holds the sound is

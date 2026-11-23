@@ -373,7 +373,10 @@ Java_com_conanizer_pockettracker_PlaybackService_nativeRequestStop(JNIEnv*, jcla
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_MainActivity_nativeSetPlaybackCaptured(JNIEnv*, jobject, jboolean captured) {
-    g_playbackCaptured.store(captured == JNI_TRUE);
+    const bool now = captured == JNI_TRUE;
+    if (g_playbackCaptured.exchange(now) != now)
+        std::printf("audio:   %s\n", now ? "a recording is running - sound off the fast path"
+                                          : "no recording - sound may take the fast path");
 }
 
 int main(int argc, char** argv) {
