@@ -69,10 +69,23 @@ bool OboeAudioEngine::openStream() {
 
     // ⚠️ The modern API first (the only way to the low-latency direct path), behind a marker file:
     // one ROM stalls startup for up to 35 s opening it. The marker holds the app version that wrote it
-    // and is removed only after a quick open AND start; while it names this version the device goes
+    // and is removed by any attempt that answers quickly; while it names this version the device goes
     // straight to OpenSL ES. A new version tries the modern API once more.
     const bool legacyOnly = !slowOpenMarker_.empty() && marker_names(slowOpenMarker_, appVersion_);
     const auto t0 = std::chrono::steady_clock::now();
+    // Called on every way out: a quick FAILURE clears the marker too (a disconnected device on a
+    // recreated activity is not a slow ROM), or one bad start pins the version to OpenSL ES.
+    const auto settle_marker = [&] {
+        if (legacyOnly || slowOpenMarker_.empty()) return;
+        constexpr long long kSlowOpenMs = 3000;
+        const long long openMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count();
+        if (openMs < kSlowOpenMs) {
+            std::remove(slowOpenMarker_.c_str());
+        } else {
+            LOGE("openStream: took %lld ms - OpenSL ES only until the next app version", openMs);
+        }
+    };
     oboe::Result result = oboe::Result::ErrorInternal;
     if (!legacyOnly) {
         if (!slowOpenMarker_.empty()) {
@@ -119,6 +132,7 @@ bool OboeAudioEngine::openStream() {
 
     if (result != oboe::Result::OK) {
         LOGE("openStream: all attempts failed: %s", oboe::convertToText(result));
+        settle_marker();
         return false;
     }
 
@@ -161,20 +175,10 @@ bool OboeAudioEngine::openStream() {
     result = stream->requestStart();
     if (result != oboe::Result::OK) {
         LOGE("Failed to start: %s", oboe::convertToText(result));
+        settle_marker();
         return false;
     }
-
-    // Timed across open AND start.
-    constexpr long long kSlowOpenMs = 3000;
-    const long long openMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - t0).count();
-    if (!legacyOnly && !slowOpenMarker_.empty()) {
-        if (openMs < kSlowOpenMs) {
-            std::remove(slowOpenMarker_.c_str());
-        } else {
-            LOGE("openStream: took %lld ms - OpenSL ES only until the next app version", openMs);
-        }
-    }
+    settle_marker();  // timed across open AND start
 
     // After the start: before any frame is presented there is no timestamp.
     const OutputLatency lat = outputLatency();
