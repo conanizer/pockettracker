@@ -21,6 +21,10 @@ public:
     // nothing is left of the note or the model the voice had before.
     void start(int voice, int model);
 
+    // A fresh note on `voice` that carries on the wave `from` is playing: its oscillators become
+    // copies of those, struck again. `from` may be `voice` itself.
+    void carry(int voice, int from);
+
     // The next `frames` samples of one of the voice's notes into `out`, within about ±1.
     // `midiNote` is the pitch, 60 = C-4, fractions and all; TIMBRE and COLOR are 0-255, and a change
     // to either glides. The oscillator takes a pitch from note 0 to just under 128, so it is held there.

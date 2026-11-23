@@ -267,6 +267,7 @@ struct Voice : public IAudioVoice {
     // A MACRO note: the samples come from the engine's oscillators, not from `sampleData`, which is
     // null. Set by the engine after trigger(), which clears it.
     bool  macro = false;
+    int   macroModel = -1;   // the model it plays, while `macro`
     // Its DC blocker's last input and output sample.
     float macroDcIn = 0.0f, macroDcOut = 0.0f;
 
@@ -306,6 +307,7 @@ struct Voice : public IAudioVoice {
         sampleDataRight = sampleRight;
         sampleLength = length;
         macro = false;
+        macroModel = -1;
         macroDcIn = macroDcOut = 0.0f;
         trackId = track;
         playbackRate = rate;

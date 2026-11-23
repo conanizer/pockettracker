@@ -95,6 +95,15 @@ void MacroBank::start(int voice, int model) {
     }
 }
 
+void MacroBank::carry(int voice, int from) {
+    if (voice < 0 || voice >= voices_ || from < 0 || from >= voices_) return;
+    for (int n = 0; n < NOTES; ++n) {
+        Osc& o = oscs_[(size_t)voice * NOTES + n];
+        if (from != voice) std::memcpy(static_cast<void*>(&o), &oscs_[(size_t)from * NOTES + n], sizeof(o));
+        o.osc.Strike();
+    }
+}
+
 void MacroBank::render(int voice, int note, float* out, int frames, float midiNote, float timbre,
                        float color, float sampleRate) {
     if (voice < 0 || voice >= voices_ || note < 0 || note >= NOTES) {

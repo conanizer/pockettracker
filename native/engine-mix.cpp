@@ -259,6 +259,17 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
     const bool isMacro    = inRange && note.macroModel >= 0;
     const bool haveSample = inRange && (isMacro || samples[note.sampleId]);
 
+    // A MACRO note on the model still sounding here carries its wave on (carryMacroVoice).
+    MacroCarry carry;
+    for (int v = 0; isMacro && v < MAX_VOICES; v++) {
+        const Voice& old = voices[v];
+        if (old.trackId == note.trackId && old.isActive && !old.isFadingOut && old.macro &&
+            old.macroModel == note.macroModel) {
+            carry = MacroCarry{v, old.macroDcIn, old.macroDcOut};
+            break;
+        }
+    }
+
     // Mono per track: whatever is playing here fades from the new note's own frame.
     for (int v = 0; haveSample && v < MAX_VOICES; v++) {
         if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
@@ -337,7 +348,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             // The mods' VELOCITY source: the V column, before its curve (`volume` is it squared).
             voices[v].modSourceValues[MOD_SRC_VELOCITY] = std::sqrt(std::max(note.volume, 0.0f));
             voices[v].setChord(chordSemis, chordCount, strumWait);
-            if (isMacro) startMacroVoice(v, note);
+            if (isMacro) startMacroVoice(v, note, /*fresh=*/carry.from != v);
             voices[v].instrId = note.sampleId;
             voices[v].sampleGen = gen;
             voices[v].faderHeld = false;
@@ -347,6 +358,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             startNotePitchFx(voices[v], note);
             initVoiceModSlots(voices[v], note.sampleId, currentFrame, sampleRate);
             applyTableCarry(voices[v], note.carry, sampleRate);
+            if (isMacro && carry.from >= 0) carryMacroVoice(v, carry, frame, rate, sampleRate);
 
             LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
@@ -363,11 +375,12 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
     }
 }
 
-// A MACRO note on voice `v`, after its trigger(): the oscillators start afresh on the note's model,
-// and nothing of a sample's playback stays on.
-void AudioEngine::startMacroVoice(int v, const ScheduledNote& note) {
+// A MACRO note on voice `v`, after its trigger(): the oscillators start afresh on the note's model
+// unless `fresh` is false (carryMacroVoice keeps them), and nothing of a sample's playback stays on.
+void AudioEngine::startMacroVoice(int v, const ScheduledNote& note, bool fresh) {
     Voice& voice = voices[v];
-    voice.macro    = true;
+    voice.macro      = true;
+    voice.macroModel = note.macroModel;
     // The instrument may still carry a loop or REVERSE from when it was a sampler.
     voice.loopMode = LOOP_MODE_OFF;
     voice.reverse  = false;
@@ -376,7 +389,22 @@ void AudioEngine::startMacroVoice(int v, const ScheduledNote& note) {
         voice.params.setBase(PARAM_MACRO_TIMBRE, (float)p.macroTimbre);
         voice.params.setBase(PARAM_MACRO_COLOR,  (float)p.macroColor);
     }
-    macroBank->start(v, note.macroModel);
+    if (fresh) macroBank->start(v, note.macroModel);   // else carryMacroVoice takes it from where it is
+}
+
+// A MACRO note replacing one on the same model that still sounds: started afresh, an oscillator
+// begins wherever its wave starts, mid-swing against the old one fading, and that thumps. So the new
+// note takes over the old one's oscillators and DC blocker, runs them on to its own first frame, and
+// fades in over exactly the old one's fade-out: the same wave throughout, at a steady level.
+// ⚠️ After the mods are set up: the run-on reads TIMBRE and COLOR through them.
+void AudioEngine::carryMacroVoice(int v, const MacroCarry& carry, int frame, float rate, float sampleRate) {
+    Voice& voice = voices[v];
+    macroBank->carry(v, carry.from);
+    voice.macroDcIn  = carry.dcIn;
+    voice.macroDcOut = carry.dcOut;
+    // The old voice has not mixed this block yet: its oscillators are where it starts, `frame` behind.
+    if (frame > 0) renderMacroNotes(voice, rate, 0, frame, nullptr, 1 + voice.chordExtra, sampleRate);
+    voice.fadeIn.start(0.0f, 1.0f, KILL_FADE_SAMPLES);   // = the stolen voice's stealFadeOut
 }
 
 // Frames [from, to) of a rendered stereo buffer through a chain, its filter ramping across them.

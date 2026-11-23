@@ -537,7 +537,9 @@ private:
     // ⚠️ Compiled twice: a single note must not pay for a chord's playheads in its loop.
     template <bool Chord, bool Macro>
     void mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to);
-    void startMacroVoice(int v, const ScheduledNote& note);
+    void startMacroVoice(int v, const ScheduledNote& note, bool fresh = true);
+    struct MacroCarry { int from = -1; float dcIn = 0.0f, dcOut = 0.0f; };
+    void carryMacroVoice(int v, const MacroCarry& carry, int frame, float rate, float sampleRate);
     void renderMacroNotes(Voice& voice, float rate, int from, int to, const int* wait, int notes,
                           float sampleRate);
     void mixSoundfontVoices(BlockMix& b);
