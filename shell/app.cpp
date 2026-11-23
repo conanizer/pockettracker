@@ -499,6 +499,7 @@ class FrameLoop {
     void play_on_in_background();
     void draw_frame(Uint64 now);
     void print_status(Uint64 now);
+    void log_failed_status();
     void pace_tick();
 
     // A physical pad? The platform's answer where it has one (see app.h), else SDL's count. Cached and
@@ -535,6 +536,9 @@ class FrameLoop {
     bool midiThru;
 
     Uint64 lastStatus = 0;
+
+    // The red status lines as last logged, so each failure is written once.
+    std::string loggedStatus, loggedBrowserStatus;
 
     // Dev only: POCKETTRACKER_AUTOPLAY_MS presses START once, POCKETTRACKER_QUIT_AFTER_MS pushes
     // SDL_QUIT, each n ms after the first frame. One button, no script format: a second input path
@@ -1191,7 +1195,19 @@ void FrameLoop::draw_frame(Uint64 now) {
     timedWorkEdge = timedWork;
     sawInput      = false;
 
+    log_failed_status();
     print_status(now);
+}
+
+// A failure the user sees on screen goes into the log too: a bug report then says what failed.
+void FrameLoop::log_failed_status() {
+    const auto log_once = [](const std::string& message, bool ok, std::string& logged) {
+        if (message == logged) return;
+        logged = message;
+        if (!ok && !message.empty()) std::printf("status:  %s\n", message.c_str());
+    };
+    log_once(state.statusMessage, state.statusSuccess, loggedStatus);
+    log_once(state.fileBrowser.statusMessage, state.fileBrowser.statusSuccess, loggedBrowserStatus);
 }
 
 void FrameLoop::print_status(Uint64 now) {

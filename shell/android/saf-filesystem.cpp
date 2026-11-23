@@ -6,11 +6,11 @@
 
 #include <SDL.h>
 
-#include <android/log.h>
 #include <jni.h>
 #include <unistd.h>        // close() — the writers own the descriptor `safOpenFd` detached
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -18,13 +18,21 @@
 namespace ptshell {
 namespace {
 
-constexpr const char* kLogTag   = "PocketTrackerSDL";
-constexpr const char* kScheme   = "pt://";
+constexpr const char* kScheme    = "pt://";
 constexpr size_t      kSchemeLen = 5;
 constexpr const char* kRootsPath = "pt://roots";
 
 // The ACTION row in the roots directory. Cannot collide: the roots' children are `pt://<id>`.
 constexpr const char* kAddRootPath = "pt://roots/add";
+
+// Through stdout, which reaches logcat AND the log file a user can send.
+__attribute__((format(printf, 1, 2))) void saf_log(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    std::vprintf(fmt, args);
+    va_end(args);
+    std::putchar('\n');
+}
 
 bool is_pt_path(const std::string& s) {
     return s.compare(0, kSchemeLen, kScheme) == 0;
@@ -84,9 +92,8 @@ extern "C" int saf_rename_hook_trampoline(const char* from, const char* to) {
 
 void SafFileSystem::install_file_hooks() {
     if (g_instance && g_instance != this) {
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                            "saf: a second SafFileSystem is taking the file hooks - the first one's "
-                            "URIs will stop resolving");
+        saf_log("saf: a second SafFileSystem is taking the file hooks - the first one's URIs will "
+                "stop resolving");
     }
     g_instance = this;
 
@@ -158,17 +165,15 @@ std::string SafFileSystem::home_root_path() {
     for (const Root& root : r) {
         if (!root.live) continue;
         if (!homeId_.empty())
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                                "saf: home root '%s' is gone or unreadable - falling back to '%s'",
-                                homeId_.c_str(), root.id.c_str());
+            saf_log("saf: home root '%s' is gone or unreadable - falling back to '%s'",
+                    homeId_.c_str(), root.id.c_str());
         return std::string(kScheme) + root.id;
     }
 
     // Granted, but none resolves (a card pulled, every folder deleted): the roots directory says what
     // is granted and offers ADD FOLDER….
-    __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                        "saf: %d granted folder(s) and NONE of them resolve - the documents are gone",
-                        static_cast<int>(r.size()));
+    saf_log("saf: %d granted folder(s) and NONE of them resolve - the documents are gone",
+            static_cast<int>(r.size()));
     return kRootsPath;
 }
 
@@ -531,8 +536,7 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
 
     // ⚠️ Append is refused out loud: nothing opens for append, and a bare -1 reads as "not found".
     if (append) {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "saf: open('%s','%s') - append is not implemented", path.c_str(), mode);
+        saf_log("saf: open('%s','%s') - append is not implemented", path.c_str(), mode);
         return -1;
     }
 
@@ -591,9 +595,7 @@ bool SafFileSystem::replace(const std::string& from, const std::string& fromUri,
     forget(from);
     if (renamed.empty()) {
         if (!asideUri.empty() && rename_doc(asideUri, name).empty()) {
-            __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                                "saf: could not put %s back - the old file is %s", to.c_str(),
-                                asidePath.c_str());
+            saf_log("saf: could not put %s back - the old file is %s", to.c_str(), asidePath.c_str());
         }
         forget(asidePath);
         return false;
@@ -602,8 +604,7 @@ bool SafFileSystem::replace(const std::string& from, const std::string& fromUri,
     invalidate(parent_path(to));
 
     if (!asideUri.empty() && !delete_uri(asideUri)) {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag, "saf: %s saved, but %s is left behind",
-                            to.c_str(), asidePath.c_str());
+        saf_log("saf: %s saved, but %s is left behind", to.c_str(), asidePath.c_str());
     }
     forget(asidePath);
     return true;

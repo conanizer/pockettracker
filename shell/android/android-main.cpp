@@ -371,6 +371,16 @@ Java_com_conanizer_pockettracker_PlaybackService_nativeRequestStop(JNIEnv*, jcla
     g_bgStopRequested.store(true);
 }
 
+// Kotlin's `Log` reaches logcat only; this is its way into the log file.
+extern "C" JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_SafStorage_nativeLogLine(JNIEnv* env, jclass, jstring line) {
+    if (!line) return;
+    const char* text = env->GetStringUTFChars(line, nullptr);
+    if (!text) return;
+    std::printf("%s\n", text);
+    env->ReleaseStringUTFChars(line, text);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_MainActivity_nativeSetPlaybackCaptured(JNIEnv*, jobject, jboolean captured) {
     const bool now = captured == JNI_TRUE;

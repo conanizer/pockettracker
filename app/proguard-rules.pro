@@ -42,6 +42,7 @@
 # The JNI natives: their class and method names ARE the C symbol names (android-main.cpp).
 -keepclasseswithmembernames class com.conanizer.pockettracker.MainActivity { native <methods>; }
 -keepclasseswithmembernames class com.conanizer.pockettracker.PlaybackService { native <methods>; }
+-keepclasseswithmembernames class com.conanizer.pockettracker.SafStorage { native <methods>; }
 
 # ─── SDL2's Java glue ─────────────────────────────────────────────────────────────────────────
 #

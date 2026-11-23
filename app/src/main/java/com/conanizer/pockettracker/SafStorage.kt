@@ -43,7 +43,7 @@ class SafStorage(private val context: Context) {
         // A collision (48 bits over at most 512 grants) is logged rather than resolved arbitrarily.
         for (i in 1 until out.size) {
             if (out[i].id == out[i - 1].id) {
-                Log.e(TAG, "saf: ROOT ID COLLISION ${out[i].id} - " +
+                report(Log.ERROR, "saf: ROOT ID COLLISION ${out[i].id} - " +
                         "'${out[i - 1].displayName}' and '${out[i].displayName}' are indistinguishable")
             }
         }
@@ -101,7 +101,7 @@ class SafStorage(private val context: Context) {
     fun setHomeRoot(id: String): Boolean {
         val root = roots().firstOrNull { it.id == id } ?: return false
         if (!root.live) {
-            Log.w(TAG, "saf: refusing pt://$id '${root.displayName}' as home - its folder is gone")
+            report(Log.WARN, "saf: refusing pt://$id '${root.displayName}' as home - its folder is gone")
             return false
         }
         prefs().edit().putString(HOME_TREE_KEY, root.treeUri).apply()
@@ -126,7 +126,7 @@ class SafStorage(private val context: Context) {
             true
         }.getOrElse {
             // No documents provider at all; the browser says so on its status line.
-            Log.e(TAG, "saf: no activity can handle ACTION_OPEN_DOCUMENT_TREE: $it")
+            report(Log.ERROR, "saf: no activity can handle ACTION_OPEN_DOCUMENT_TREE: $it")
             false
         }
     }
@@ -145,7 +145,7 @@ class SafStorage(private val context: Context) {
             Log.i(TAG, "saf: took grant $tree -> pt://${rootId(tree)} (${rootCount()} granted)")
             true
         }.getOrElse {
-            Log.e(TAG, "saf: takePersistableUriPermission failed on $tree: $it")
+            report(Log.ERROR, "saf: takePersistableUriPermission failed on $tree: $it")
             false
         }
     }
@@ -168,7 +168,7 @@ class SafStorage(private val context: Context) {
             Log.i(TAG, "saf: forgot pt://$id '${root.displayName}' (${rootCount()} left)")
             true
         }.getOrElse {
-            Log.w(TAG, "saf: releasePersistableUriPermission failed on ${root.treeUri}: $it")
+            report(Log.WARN, "saf: releasePersistableUriPermission failed on ${root.treeUri}: $it")
             false
         }
     }
@@ -211,7 +211,7 @@ class SafStorage(private val context: Context) {
                         .append(size).append('\t').append(modified).append('\n')
                 }
             }
-        }.onFailure { Log.w(TAG, "saf: listChildren failed on $dirDocUri: $it") }
+        }.onFailure { report(Log.WARN, "saf: listChildren failed on $dirDocUri: $it") }
         return sb.toString()
     }
 
@@ -224,7 +224,7 @@ class SafStorage(private val context: Context) {
     fun readFile(docUri: String): ByteArray? = runCatching {
         context.contentResolver.openInputStream(Uri.parse(docUri))?.use { it.readBytes() }
     }.getOrElse {
-        Log.w(TAG, "saf: readFile failed on $docUri: $it")
+        report(Log.WARN, "saf: readFile failed on $docUri: $it")
         null
     }
 
@@ -236,7 +236,7 @@ class SafStorage(private val context: Context) {
     fun openFd(docUri: String, mode: String): Int = runCatching {
         context.contentResolver.openFileDescriptor(Uri.parse(docUri), mode)?.detachFd() ?: -1
     }.getOrElse {
-        Log.w(TAG, "saf: openFd($mode) failed on $docUri: $it")
+        report(Log.WARN, "saf: openFd($mode) failed on $docUri: $it")
         -1
     }
 
@@ -259,7 +259,7 @@ class SafStorage(private val context: Context) {
             DocumentsContract.createDocument(context.contentResolver, Uri.parse(parentDocUri), mime, name)
                 ?.toString() ?: ""
         }.getOrElse {
-            Log.w(TAG, "saf: $what('$name') failed under $parentDocUri: $it")
+            report(Log.WARN, "saf: $what('$name') failed under $parentDocUri: $it")
             ""
         }
     }
@@ -268,7 +268,7 @@ class SafStorage(private val context: Context) {
     fun deleteDoc(docUri: String): Boolean = runCatching {
         DocumentsContract.deleteDocument(context.contentResolver, Uri.parse(docUri))
     }.getOrElse {
-        Log.w(TAG, "saf: deleteDoc failed on $docUri: $it")
+        report(Log.WARN, "saf: deleteDoc failed on $docUri: $it")
         false
     }
 
@@ -281,7 +281,7 @@ class SafStorage(private val context: Context) {
         DocumentsContract.renameDocument(context.contentResolver, Uri.parse(docUri), newName)
             ?.toString() ?: ""
     }.getOrElse {
-        Log.w(TAG, "saf: renameDoc('$newName') failed on $docUri: $it")
+        report(Log.WARN, "saf: renameDoc('$newName') failed on $docUri: $it")
         ""
     }
 
@@ -295,7 +295,7 @@ class SafStorage(private val context: Context) {
             Uri.parse(toParentDocUri)
         )?.toString() ?: ""
     }.getOrElse {
-        Log.w(TAG, "saf: moveDoc failed on $docUri: $it")
+        report(Log.WARN, "saf: moveDoc failed on $docUri: $it")
         ""
     }
 
@@ -318,9 +318,18 @@ class SafStorage(private val context: Context) {
         }
     }.getOrNull()
 
+    // A failure goes to logcat and to the app's own log file, which is what a user can send.
+    private fun report(priority: Int, message: String) {
+        Log.println(priority, TAG, message)
+        try { nativeLogLine(message) } catch (_: UnsatisfiedLinkError) {}
+    }
+
     private companion object {
         // ⚠️ The native side logs under `PocketTracker`.
         const val TAG = "PocketTrackerSDL"
+
+        /** Native: one line into the log file. */
+        @JvmStatic external fun nativeLogLine(line: String)
 
         /** `MainActivity`'s prefs file, shared. */
         const val PREFS = "pockettracker_ui"
