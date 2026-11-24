@@ -1,0 +1,8 @@
+Bug fixes:
+
+• No more crash at startup on phones using the older sound path
+• Screen recordings on Android 14 and older have sound again
+• Built-in themes, reverbs, delays, scales and grooves are always there
+• Scales and grooves step without lag
+• MACRO: no thump on repeated notes
+• SoundFont one-shots fade out instead of clicking
