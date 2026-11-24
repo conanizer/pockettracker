@@ -19,6 +19,20 @@ std::string path_at(const std::vector<FolderPreset<T>>& list, int index) {
                                                                : std::string();
 }
 
+// An entry's text: its file's, or a factory entry written out as its file would be — so either loads
+// through the one parse a file takes.
+template <typename T, typename Serialize>
+bool entry_text(FileSystem& fs, const std::vector<FolderPreset<T>>& list, const std::string& path,
+                Serialize serialize, std::string& text) {
+    if (!is_factory_preset(path)) return fs.read_file(path, text);
+    for (const FolderPreset<T>& e : list)
+        if (e.path == path) {
+            text = serialize(e.value);
+            return true;
+        }
+    return false;
+}
+
 // What a new project's reverb and delay open on, and so what A+B returns to.
 const NamedReverb& reverb_blank() {
     static const NamedReverb c = reverb_preset_cells(kReverbPresets[0]);
@@ -147,14 +161,16 @@ bool InputDispatcher::preset_carry_out(const AppState::PendingPresetStep& step) 
 }
 
 bool InputDispatcher::load_preset_file(PresetRow row, const std::string& path, bool* changed) {
-    bool moved = false;
-    bool ok    = false;
+    bool        moved = false;
+    bool        ok    = false;
+    std::string text;
     switch (row) {
         case PresetRow::SCALE: {
             // Into a copy that keeps the slot's id, committed only once it parses.
             songcore::Scale& slot   = host_.edit_project().scales[static_cast<size_t>(s_.currentScale)];
             songcore::Scale  loaded = slot;
-            ok = load_scale_file(fs_, path, loaded);
+            ok = entry_text(fs_, presetLists_.scale(false), path, serialize_scale, text) &&
+                 parse_scale_text(text, loaded);
             if (ok) {
                 moved = loaded.name != slot.name || loaded.enabled != slot.enabled;
                 slot  = loaded;
@@ -164,7 +180,8 @@ bool InputDispatcher::load_preset_file(PresetRow row, const std::string& path, b
         case PresetRow::GROOVE: {
             songcore::Groove& slot   = host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)];
             songcore::Groove  loaded = slot;
-            ok = load_groove_file(fs_, path, loaded);
+            ok = entry_text(fs_, presetLists_.groove(false), path, serialize_groove, text) &&
+                 parse_groove_text(text, loaded);
             if (ok) {
                 moved = loaded.name != slot.name || loaded.steps != slot.steps ||
                         loaded.ticksPerStep != slot.ticksPerStep;
@@ -175,7 +192,8 @@ bool InputDispatcher::load_preset_file(PresetRow row, const std::string& path, b
         case PresetRow::REVERB: {
             const NamedReverb now   = reverb_cells_of(host_.project());
             NamedReverb       cells = now;
-            ok = load_reverb_file(fs_, path, cells);
+            ok = entry_text(fs_, presetLists_.reverb(false), path, serialize_reverb_cells, text) &&
+                 parse_reverb_cells(text, fx_preset_file_stem(path), cells);
             if (ok) {
                 moved = cells.name != now.name || !same_reverb(cells, now);
                 apply_reverb_cells(host_.edit_project(), cells);
@@ -185,7 +203,8 @@ bool InputDispatcher::load_preset_file(PresetRow row, const std::string& path, b
         case PresetRow::DELAY: {
             const NamedDelay now   = delay_cells_of(host_.project());
             NamedDelay       cells = now;
-            ok = load_delay_file(fs_, path, cells);
+            ok = entry_text(fs_, presetLists_.delay(false), path, serialize_delay_cells, text) &&
+                 parse_delay_cells(text, fx_preset_file_stem(path), cells);
             if (ok) {
                 moved = cells.name != now.name || !same_delay(cells, now);
                 apply_delay_cells(host_.edit_project(), cells);
@@ -193,10 +212,12 @@ bool InputDispatcher::load_preset_file(PresetRow row, const std::string& path, b
             break;
         }
         case PresetRow::THEME: {
-            // ⚠️ A failed parse must not blank the palette.
-            Theme loaded = s_.theme;
-            ok = load_theme_file(fs_, path, loaded);
+            // ⚠️ A failed parse must not blank the palette. The visualizer is the user's, not the theme's.
+            Theme loaded{};
+            ok = entry_text(fs_, presetLists_.theme(false), path, serialize_theme, text) &&
+                 parse_theme(text, loaded);
             if (ok) {
+                loaded.visualizerType = s_.theme.visualizerType;
                 moved            = loaded.name != s_.theme.name || !same_theme(loaded, s_.theme);
                 s_.theme         = loaded;
                 s_.themeHandRows = 0;

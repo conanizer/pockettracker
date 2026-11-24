@@ -56,23 +56,4 @@ inline bool load_groove_file(FileSystem& fs, const std::string& path, songcore::
     return parse_groove_text(text, out);
 }
 
-// As `seed_scale_bank`.
-inline int seed_groove_bank(FileSystem& fs) {
-    const std::string dir = fs.grooves_directory();
-    if (folder_has_extension(fs, dir, GROOVE_FILE_EXT)) return 0;
-
-    const std::vector<songcore::GrooveBankEntry>& bank = songcore::groove_bank();
-    int written = 0;
-    for (int i = 0; i < static_cast<int>(bank.size()); ++i) {
-        const std::string safe = safe_name(bank[static_cast<size_t>(i)].name);
-        const std::string path = dir + "/" + (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
-        if (fs.file_exists(path)) continue;
-
-        songcore::Groove g;
-        songcore::groove_apply_bank(g, i);
-        if (save_groove_file(fs, path, g)) ++written;
-    }
-    return written;
-}
-
 }  // namespace pt::ui

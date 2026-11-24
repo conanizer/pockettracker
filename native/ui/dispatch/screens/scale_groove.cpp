@@ -2,8 +2,8 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "ui/groove_io.h"        // .ptg — save_groove_file / load_groove_file / the factory seed
-#include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file / the factory seed
+#include "ui/groove_io.h"        // .ptg — save_groove_file / load_groove_file
+#include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file
 
 #include <algorithm>
 #include <string>

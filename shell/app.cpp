@@ -18,9 +18,6 @@
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE
-#include "ui/scale_io.h"              // seed_scale_bank
-#include "ui/groove_io.h"             // seed_groove_bank
-#include "ui/preset_folder.h"         // seed_reverb_bank, seed_delay_bank, seed_theme_bank
 #include "ui/settings_store.h"
 
 #include "skin/device_skin.h"
@@ -200,29 +197,6 @@ void make_app_folders(const AppConfig& cfg, ui::FileSystem& filesystem) {
                 filesystem.list_files(projects).size());
 }
 
-// The factory scales, grooves, reverbs, delays and themes, as files in their folders. At boot, and
-// again when a folder is granted under the running app — on a fresh Android install that is after
-// boot, so boot alone left every preset row empty.
-void seed_factory_files(ui::FileSystem& filesystem) {
-    if (const int seeded = ui::seed_scale_bank(filesystem); seeded > 0)
-        std::printf("files:   seeded %d factory scales in %s\n", seeded,
-                    filesystem.scales_directory().c_str());
-
-    if (const int seeded = ui::seed_groove_bank(filesystem); seeded > 0)
-        std::printf("files:   seeded %d factory grooves in %s\n", seeded,
-                    filesystem.grooves_directory().c_str());
-
-    if (const int seeded = ui::seed_reverb_bank(filesystem); seeded > 0)
-        std::printf("files:   seeded %d factory reverbs in %s\n", seeded,
-                    filesystem.reverbs_directory().c_str());
-
-    if (const int seeded = ui::seed_delay_bank(filesystem); seeded > 0)
-        std::printf("files:   seeded %d factory delays in %s\n", seeded, filesystem.delays_directory().c_str());
-
-    if (const int seeded = ui::seed_theme_bank(filesystem); seeded > 0)
-        std::printf("files:   seeded %d factory themes in %s\n", seeded, filesystem.themes_directory().c_str());
-}
-
 // settings.json, then config.json and the factory banks.
 void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, SdlInput& input) {
     // ⚠️ False also means a file that would not parse — and the save at quit overwrites it, so say so.
@@ -247,8 +221,6 @@ void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, S
         ui::write_config_example(filesystem, SdlInput::default_keyboard_bindings(),
                                  SdlInput::default_gamepad_bindings()))
         std::printf("config:   wrote %s\n", ui::config_example_path(filesystem).c_str());
-
-    seed_factory_files(filesystem);
 
     if (ui::load_folder_config(filesystem, state.folderConfig))
         std::printf("config:   %s\n", filesystem.config_path().c_str());
@@ -632,7 +604,6 @@ void FrameLoop::tick() {
     if (frameDue) lay_out_frame(now);
 
     handle_input(now);
-    if (frameDue && bg.filesystem->take_home_changed()) seed_factory_files(*bg.filesystem);
     reopen_audio_if_lost(now);
     run_scripted_hooks(now);
     pump_midi_and_sequencer(now);

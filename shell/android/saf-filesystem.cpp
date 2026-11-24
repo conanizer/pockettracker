@@ -110,7 +110,6 @@ void SafFileSystem::install_file_hooks() {
 const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
     if (rootsLoaded_ && !refresh) return roots_;
     rootsLoaded_ = true;
-    ++rootsLoads_;
     roots_.clear();
     homeId_.clear();
 
@@ -371,19 +370,6 @@ bool SafFileSystem::set_home_directory(const std::string& path) {
 
     std::printf("saf:     home folder is now %s\n", path.c_str());
     return true;
-}
-
-// ⚠️ Never `home_root_path()` on every call: this is polled per frame, and it logs a warning each
-// time a stored home has gone.
-bool SafFileSystem::take_home_changed() {
-    const Lock lock(mu_);
-    if (homeSeenAtLoad_ == rootsLoads_) return false;
-    const bool        first = homeSeenAtLoad_ < 0;
-    const std::string home  = home_root_path();
-    homeSeenAtLoad_ = rootsLoads_;
-    if (home == homeSeen_) return false;
-    homeSeen_ = home;
-    return !first && home != kRootsPath;
 }
 
 bool SafFileSystem::revoke_access(const std::string& path) {

@@ -52,24 +52,4 @@ inline bool load_scale_file(FileSystem& fs, const std::string& path, songcore::S
     return parse_scale_text(text, out);
 }
 
-// Write the factory bank to the Scales folder — only when it holds no `.pts` at all (a user who deleted
-// them meant it). Never overwrites. Returns how many were written.
-inline int seed_scale_bank(FileSystem& fs) {
-    const std::string dir = fs.scales_directory();
-    if (folder_has_extension(fs, dir, SCALE_FILE_EXT)) return 0;
-
-    const std::vector<songcore::ScaleBankEntry>& bank = songcore::scale_bank();
-    int written = 0;
-    for (int i = 0; i < static_cast<int>(bank.size()); ++i) {
-        const std::string safe = safe_name(bank[static_cast<size_t>(i)].name);
-        const std::string path = dir + "/" + (safe.empty() ? std::string("SCALE") : safe) + ".pts";
-        if (fs.file_exists(path)) continue;
-
-        songcore::Scale s;
-        songcore::scale_apply_bank(s, i);
-        if (save_scale_file(fs, path, s)) ++written;
-    }
-    return written;
-}
-
 }  // namespace pt::ui

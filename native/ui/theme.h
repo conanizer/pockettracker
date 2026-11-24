@@ -309,7 +309,7 @@ inline Theme theme_bubblegum() {
     return t;
 }
 
-// The built-ins, written into the Themes folder once (`seed_theme_bank`). `visualizerType` is the
+// The built-ins, first in the THEME row's list (`theme_preset_list`). `visualizerType` is the
 // user's, not the theme's: a swap keeps it.
 // ⚠️ A name is what `settings.json` stores, so a renamed built-in reads back as CLASSIC.
 inline std::vector<Theme> theme_builtins() {

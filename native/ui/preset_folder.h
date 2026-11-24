@@ -1,16 +1,18 @@
 #pragma once
 
-// The preset rows that step through a folder: SCALE, GROOVE, the reverb, the delay and THEME. A row's
-// list is its folder's files by file name, factory ones among
-// them; the values on screen sit at one of them, or at none — and then a step would lose them.
+// The preset rows that step a list: SCALE, GROOVE, the reverb, the delay and THEME. A row's list is the
+// factory presets, which live in the app and are never written out, then the user's files in its folder;
+// the values on screen sit at one of them, or at none — and then a step would lose them.
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 
 #include "effects/modules/delay-presets.h"
 #include "effects/modules/reverb-presets.h"
 #include "songcore/groove_bank.h"
+#include "songcore/scale_bank.h"
 #include "songcore/scales.h"
 #include "ui/filesystem.h"
 #include "ui/fx_preset_io.h"
@@ -21,12 +23,17 @@
 
 namespace pt::ui {
 
-// One file of a row's folder; `value.name` is the name the row shows (the file's own, else its stem).
+// One entry of a row's list; `value.name` is the name the row shows (the file's own, else its stem).
+// A factory entry's `path` is `factory:<name>`, never a file.
 template <typename T>
 struct FolderPreset {
     std::string path;
     T           value;
 };
+
+inline constexpr const char* FACTORY_PRESET_PREFIX = "factory:";
+
+inline bool is_factory_preset(const std::string& path) { return path.rfind(FACTORY_PRESET_PREFIX, 0) == 0; }
 
 // A row's list as last read; `read` false means "read it on the next use".
 template <typename T>
@@ -65,13 +72,37 @@ std::vector<FolderPreset<T>> read_preset_folder(FileSystem& fs, const std::strin
     return out;
 }
 
-// The entry named `name`, else the first whose values equal `now`, else −1.
+// The factory presets in table order, then the files. A file holding a factory preset's values under its
+// name (any case) is left out: it is a copy an earlier version wrote. An edited one stays, as the user's.
+template <typename T, typename Same>
+std::vector<FolderPreset<T>> with_factory(std::vector<T> factory, std::vector<FolderPreset<T>> files,
+                                          Same same) {
+    std::vector<FolderPreset<T>> out;
+    for (T& v : factory) out.push_back({FACTORY_PRESET_PREFIX + v.name, std::move(v)});
+    const size_t factoryCount = out.size();
+    for (FolderPreset<T>& f : files) {
+        const std::string name = to_lower_ascii(f.value.name);
+        const bool copy = std::any_of(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(factoryCount),
+                                      [&](const FolderPreset<T>& e) {
+                                          return to_lower_ascii(e.value.name) == name && same(e.value, f.value);
+                                      });
+        if (!copy) out.push_back(std::move(f));
+    }
+    return out;
+}
+
+// The entry named `name` holding `now`, else the first named `name`, else the first holding `now`, else −1.
+// ⚠️ A factory preset and an edited file can share a name: found by name alone, the row standing on the
+// file would read back as the factory one and never step past it.
 template <typename T, typename Same>
 int preset_position(const std::vector<FolderPreset<T>>& list, const std::string& name, const T& now,
                     Same same) {
-    if (!name.empty())
+    if (!name.empty()) {
+        for (size_t i = 0; i < list.size(); ++i)
+            if (list[i].value.name == name && same(list[i].value, now)) return static_cast<int>(i);
         for (size_t i = 0; i < list.size(); ++i)
             if (list[i].value.name == name) return static_cast<int>(i);
+    }
     for (size_t i = 0; i < list.size(); ++i)
         if (same(list[i].value, now)) return static_cast<int>(i);
     return -1;
@@ -129,39 +160,6 @@ inline bool same_theme(Theme a, Theme b) {
 
 // ── The lists ────────────────────────────────────────────────────────────────────────────────────
 
-inline std::vector<FolderPreset<songcore::Scale>> scale_preset_list(FileSystem& fs) {
-    return read_preset_folder<songcore::Scale>(
-        fs, fs.scales_directory(), SCALE_FILE_EXT,
-        [](const std::string& text, const std::string&, songcore::Scale& out) {
-            return parse_scale_text(text, out);
-        });
-}
-
-inline std::vector<FolderPreset<songcore::Groove>> groove_preset_list(FileSystem& fs) {
-    return read_preset_folder<songcore::Groove>(
-        fs, fs.grooves_directory(), GROOVE_FILE_EXT,
-        [](const std::string& text, const std::string&, songcore::Groove& out) {
-            return parse_groove_text(text, out);
-        });
-}
-
-inline std::vector<FolderPreset<NamedReverb>> reverb_preset_list(FileSystem& fs) {
-    return read_preset_folder<NamedReverb>(fs, fs.reverbs_directory(), REVERB_FILE_EXT, parse_reverb_cells);
-}
-
-inline std::vector<FolderPreset<NamedDelay>> delay_preset_list(FileSystem& fs) {
-    return read_preset_folder<NamedDelay>(fs, fs.delays_directory(), DELAY_FILE_EXT, parse_delay_cells);
-}
-
-inline std::vector<FolderPreset<Theme>> theme_preset_list(FileSystem& fs) {
-    return read_preset_folder<Theme>(fs, fs.themes_directory(), "ptt",
-                                     [](const std::string& text, const std::string&, Theme& out) {
-                                         return parse_theme(text, out);
-                                     });
-}
-
-// ── The factory reverbs, delays and themes as files ──────────────────────────────────────────────
-
 inline NamedReverb reverb_preset_cells(const ReverbPreset& r) {
     return {r.name, r.cells};
 }
@@ -170,86 +168,55 @@ inline NamedDelay delay_preset_cells(const DelayPreset& d) {
     return {d.name, d.cells};
 }
 
-// Does the folder already hold this preset, by file or by name, in any case? The user's copy wins.
-template <typename T>
-bool folder_has_preset(const std::vector<FolderPreset<T>>& list, const std::string& name) {
-    const std::string want = to_lower_ascii(name), file = to_lower_ascii(safe_name(name));
-    return std::any_of(list.begin(), list.end(), [&](const FolderPreset<T>& e) {
-        return to_lower_ascii(e.value.name) == want || to_lower_ascii(path_stem(e.path)) == file;
-    });
+inline std::vector<FolderPreset<songcore::Scale>> scale_preset_list(FileSystem& fs) {
+    std::vector<songcore::Scale> factory(songcore::scale_bank().size());
+    for (size_t i = 0; i < factory.size(); ++i) songcore::scale_apply_bank(factory[i], static_cast<int>(i));
+    return with_factory(std::move(factory),
+                        read_preset_folder<songcore::Scale>(
+                            fs, fs.scales_directory(), SCALE_FILE_EXT,
+                            [](const std::string& text, const std::string&, songcore::Scale& out) {
+                                return parse_scale_text(text, out);
+                            }),
+                        same_scale);
 }
 
-// Written ONCE per install: these folders may already hold the user's own files, so "only into an
-// empty folder" would leave the factory ones out. A folder holding none of them is filled whatever
-// the note says, as the scales are. The note sits beside settings.json, never in a listed folder.
-// ⚠️ The note is written only once the folder really holds them: on Android with no folder granted
-// yet, `dir` is the roots listing, every write is refused, and a note written then kept the folder
-// empty for good.
-template <typename Write>
-int seed_factory_once(FileSystem& fs, const std::string& dir, const char* what, const char* ext,
-                      Write write) {
-    const std::string settings = fs.settings_path();
-    const size_t      slash    = settings.find_last_of("/\\");
-    if (slash == std::string::npos || dir.empty()) return 0;
-    const std::string note = settings.substr(0, slash) + "/seeded-" + what;
-    if (fs.file_exists(note) && folder_has_extension(fs, dir, ext)) return 0;
-
-    const int written = write(dir);
-    if (folder_has_extension(fs, dir, ext)) fs.write_file(note, "1");
-    return written;
+inline std::vector<FolderPreset<songcore::Groove>> groove_preset_list(FileSystem& fs) {
+    std::vector<songcore::Groove> factory(songcore::groove_bank().size());
+    for (size_t i = 0; i < factory.size(); ++i) songcore::groove_apply_bank(factory[i], static_cast<int>(i));
+    return with_factory(std::move(factory),
+                        read_preset_folder<songcore::Groove>(
+                            fs, fs.grooves_directory(), GROOVE_FILE_EXT,
+                            [](const std::string& text, const std::string&, songcore::Groove& out) {
+                                return parse_groove_text(text, out);
+                            }),
+                        same_groove);
 }
 
-// Each factory preset not in `dir` yet, by file or by name; how many were written.
-inline int write_reverb_bank(FileSystem& fs, const std::string& dir) {
-    if (dir.empty()) return 0;
-    const auto have    = reverb_preset_list(fs);
-    int        written = 0;
-    for (const ReverbPreset& r : kReverbPresets) {
-        if (folder_has_preset(have, r.name)) continue;
-        const std::string path = dir + "/" + safe_name(r.name) + "." + REVERB_FILE_EXT;
-        if (fs.file_exists(path)) continue;
-        if (save_reverb_file(fs, path, reverb_preset_cells(r))) ++written;
-    }
-    return written;
+inline std::vector<FolderPreset<NamedReverb>> reverb_preset_list(FileSystem& fs) {
+    std::vector<NamedReverb> factory;
+    for (const ReverbPreset& r : kReverbPresets) factory.push_back(reverb_preset_cells(r));
+    return with_factory(std::move(factory),
+                        read_preset_folder<NamedReverb>(fs, fs.reverbs_directory(), REVERB_FILE_EXT,
+                                                        parse_reverb_cells),
+                        same_reverb);
 }
 
-inline int write_delay_bank(FileSystem& fs, const std::string& dir) {
-    if (dir.empty()) return 0;
-    const auto have    = delay_preset_list(fs);
-    int        written = 0;
-    for (const DelayPreset& d : kDelayPresets) {
-        if (folder_has_preset(have, d.name)) continue;
-        const std::string path = dir + "/" + safe_name(d.name) + "." + DELAY_FILE_EXT;
-        if (fs.file_exists(path)) continue;
-        if (save_delay_file(fs, path, delay_preset_cells(d))) ++written;
-    }
-    return written;
+inline std::vector<FolderPreset<NamedDelay>> delay_preset_list(FileSystem& fs) {
+    std::vector<NamedDelay> factory;
+    for (const DelayPreset& d : kDelayPresets) factory.push_back(delay_preset_cells(d));
+    return with_factory(std::move(factory),
+                        read_preset_folder<NamedDelay>(fs, fs.delays_directory(), DELAY_FILE_EXT,
+                                                       parse_delay_cells),
+                        same_delay);
 }
 
-inline int write_theme_bank(FileSystem& fs, const std::string& dir) {
-    if (dir.empty()) return 0;
-    const auto have    = theme_preset_list(fs);
-    int        written = 0;
-    for (const Theme& t : theme_builtins()) {
-        if (folder_has_preset(have, t.name)) continue;
-        const std::string path = dir + "/" + safe_name(t.name) + ".ptt";
-        if (fs.file_exists(path)) continue;
-        if (save_theme_file(fs, path, t)) ++written;
-    }
-    return written;
-}
-
-inline int seed_reverb_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.reverbs_directory(), "reverbs", REVERB_FILE_EXT,
-                             [&fs](const std::string& dir) { return write_reverb_bank(fs, dir); });
-}
-inline int seed_delay_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.delays_directory(), "delays", DELAY_FILE_EXT,
-                             [&fs](const std::string& dir) { return write_delay_bank(fs, dir); });
-}
-inline int seed_theme_bank(FileSystem& fs) {
-    return seed_factory_once(fs, fs.themes_directory(), "themes", "ptt",
-                             [&fs](const std::string& dir) { return write_theme_bank(fs, dir); });
+inline std::vector<FolderPreset<Theme>> theme_preset_list(FileSystem& fs) {
+    return with_factory(theme_builtins(),
+                        read_preset_folder<Theme>(fs, fs.themes_directory(), "ptt",
+                                                  [](const std::string& text, const std::string&, Theme& out) {
+                                                      return parse_theme(text, out);
+                                                  }),
+                        same_theme);
 }
 
 }  // namespace pt::ui

@@ -1252,9 +1252,9 @@ Armed, both A axes do the same move of 1, because one tick is exactly one step o
 
 ### Built-in grooves, and groove files
 
-The name row steps through the `.ptg` files in `PocketTracker/Presets/Grooves`, in file-name order: the built-in ones — **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME** — and every groove you have saved. Landing on one replaces every tick in the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
+The name row steps through the built-in grooves — **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME** — then the `.ptg` files you have saved in `PocketTracker/Presets/Grooves`, in file-name order. Landing on one replaces every tick in the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
 
-**SAVE** names the slot and writes it to that folder; **LOAD** reads a groove from anywhere back into the slot you are looking at, with the PPQ it was written in. The built-ins are written into the folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and they leave the name row.
+**SAVE** names the slot and writes it to that folder; **LOAD** reads a groove from anywhere back into the slot you are looking at, with the PPQ it was written in. The built-ins live inside the app: they are always in the name row and are never written into the folder. To change one, land on it, edit the ticks and SAVE it under a name of your own.
 
 ### Assigning grooves
 
@@ -1325,11 +1325,11 @@ The `>` marker shows a note that is sounding right now. Play a chromatic run und
 
 ### The built-in scales, and scale files
 
-The name row steps through the `.pts` files in `PocketTracker/Presets/Scales`, in file-name order: 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and every scale you have saved. Landing on a name loads that scale's twelve notes into the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
+The name row steps through 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — then the `.pts` files you have saved in `PocketTracker/Presets/Scales`, in file-name order. Landing on a name loads that scale's twelve notes into the slot; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**.
 
 Switching a note on or off afterwards leaves the name alone and puts a `*` in front of it, so `*MAJOR` is a major scale you have changed.
 
-**SAVE** names the slot and writes it to that folder; **LOAD** reads a scale from anywhere back into the slot you are looking at. The 38 built-ins are written into the folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and they leave the name row.
+**SAVE** names the slot and writes it to that folder; **LOAD** reads a scale from anywhere back into the slot you are looking at. The 38 built-ins live inside the app: they are always in the name row and are never written into the folder. To change one, land on it, edit the notes and SAVE it under a name of your own.
 
 ### What a scale changes
 
@@ -1528,7 +1528,7 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name steps through the `.ptr` files in `PocketTracker/Presets/Reverbs`: the seven built-in ones, from **DEFAULT** through small rooms to long halls and plates, and every reverb you have saved. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
+| *preset name* | The first line of the section. **A + D-pad** on the name steps through the seven built-in reverbs, from **DEFAULT** through small rooms to long halls and plates, then the `.ptr` files you have saved in `PocketTracker/Presets/Reverbs`. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Presets/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
 | ALGO | Which reverb the cells below drive: **DEFAULT** (the app's own reverb), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
@@ -1545,7 +1545,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name steps through the `.ptd` files in `PocketTracker/Presets/Delays`: the seven built-in ones, from **DIGITAL** (a clean echo) to dub and endless repeats, and every delay you have saved. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to DIGITAL, the delay a new project starts with. |
+| *preset name* | The first line of the section. **A + D-pad** on the name steps through the seven built-in delays, from **DIGITAL** (a clean echo) to dub and endless repeats, then the `.ptd` files you have saved in `PocketTracker/Presets/Delays`. Landing on one sets every cell of the section except EQ; if what is in the slot is not saved in any file, it first offers **SAVE**, **DISCARD** or **CANCEL**. Turn a cell afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to DIGITAL, the delay a new project starts with. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Presets/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **A** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
@@ -1757,7 +1757,7 @@ The top row steps through the themes in `PocketTracker/Themes` and saves or load
 
 | Cursor position (channel) | Action |
 |---|---|
-| 0 — theme name | A+LEFT/RIGHT to step through the `.ptt` files in the folder, in file-name order: the built-in ones (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED, written there on the first start) and your own. If you have changed a colour by hand and not saved it, a step — or a ROLL of the colours — first offers **SAVE**, **DISCARD** or **CANCEL**; colours that only came from a ROLL are let go without asking |
+| 0 — theme name | A+LEFT/RIGHT to step through the built-in themes (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED), then your own `.ptt` files in the Themes folder, in file-name order. If you have changed a colour by hand and not saved it, a step — or a ROLL of the colours — first offers **SAVE**, **DISCARD** or **CANCEL**; colours that only came from a ROLL are let go without asking |
 | 1 — SAVE | Press A to save the current theme to a `.ptt` file |
 | 2 — LOAD | Press A to load a theme from a `.ptt` file |
 

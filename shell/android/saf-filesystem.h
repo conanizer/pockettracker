@@ -99,9 +99,6 @@ class SafFileSystem : public pt::ui::FileSystem {
     // granted tree, and a tree whose folder is gone.
     bool set_home_directory(const std::string& path) override;
 
-    // Answers from the cached grants: the browser re-reads them when the picker returns.
-    bool take_home_changed() override;
-
     // Releases the permission on `pt://<root-id>`. ⚠️ Deletes nothing. The only way to drop a
     // `(MISSING)` row: Android otherwise keeps a grant forever.
     bool revoke_access(const std::string& path) override;
@@ -189,11 +186,6 @@ class SafFileSystem : public pt::ui::FileSystem {
     std::vector<Root> roots_;
     std::string       homeId_;        // filled with roots_, from Java; "" = nothing granted
     bool              rootsLoaded_ = false;
-    int               rootsLoads_  = 0;   // bumped per load; `take_home_changed` looks only after one
-
-    // What `take_home_changed` last saw; unset until its first call.
-    int         homeSeenAtLoad_ = -1;
-    std::string homeSeen_;
 
     std::unordered_map<std::string, std::string>                 uriCache_;   // pt:// path → doc URI
     std::unordered_map<std::string, std::vector<pt::ui::FileInfo>> listCache_; // pt:// dir  → children
