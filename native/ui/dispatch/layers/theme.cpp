@@ -111,7 +111,7 @@ void InputDispatcher::theme_request_roll() {
         if (!s_.themeEditor.locks.locked(i)) lost |= 1u << i;
 
     if ((s_.themeHandRows & lost) != 0 &&
-        !preset_values_kept<Theme>(presetLists_.theme(true), s_.theme.name, s_.theme, same_theme)) {
+        !preset_values_kept<Theme>(presetLists_.theme(false), s_.theme.name, s_.theme, same_theme)) {
         s_.presetStep = {PresetRow::THEME, std::string()};
         s_.confirm.open(ConfirmDialogState::Kind::PRESET_UNSAVED);
         return;

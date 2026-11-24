@@ -103,21 +103,21 @@ bool InputDispatcher::preset_kept(PresetRow row) {
             // An untouched slot has nothing to lose.
             const songcore::Scale& now = p.scales[static_cast<size_t>(s_.currentScale)];
             return same_scale(now, songcore::Scale{}) ||
-                   preset_values_kept(presetLists_.scale(true), now.name, now, same_scale);
+                   preset_values_kept(presetLists_.scale(false), now.name, now, same_scale);
         }
         case PresetRow::GROOVE: {
             const songcore::Groove& now = p.grooves[static_cast<size_t>(s_.currentGroove)];
             return same_groove(now, songcore::Groove{}) ||
-                   preset_values_kept(presetLists_.groove(true), now.name, now, same_groove);
+                   preset_values_kept(presetLists_.groove(false), now.name, now, same_groove);
         }
         case PresetRow::REVERB:
-            return preset_values_kept(presetLists_.reverb(true), p.reverbPreset, reverb_cells_of(p), same_reverb);
+            return preset_values_kept(presetLists_.reverb(false), p.reverbPreset, reverb_cells_of(p), same_reverb);
         case PresetRow::DELAY:
-            return preset_values_kept(presetLists_.delay(true), p.delayPreset, delay_cells_of(p), same_delay);
+            return preset_values_kept(presetLists_.delay(false), p.delayPreset, delay_cells_of(p), same_delay);
         case PresetRow::THEME:
             // Colours only rolled are not the user's work.
             return s_.themeHandRows == 0 ||
-                   preset_values_kept<Theme>(presetLists_.theme(true), s_.theme.name, s_.theme, same_theme);
+                   preset_values_kept<Theme>(presetLists_.theme(false), s_.theme.name, s_.theme, same_theme);
         default:
             return true;
     }
@@ -126,14 +126,16 @@ bool InputDispatcher::preset_kept(PresetRow row) {
 // ─── The step ────────────────────────────────────────────────────────────────────────────────────
 
 bool InputDispatcher::preset_step(PresetRow row, int index) {
-    // The target by path, read afresh: a file may have come or gone since the row was drawn.
+    // The target by path, from the list as read on entering the screen or after a save.
+    // ⚠️ Never re-read per step: on Android each file is a document-provider read, and the Scales
+    // folder holds dozens — a step lagged visibly. A file gone since then fails to load and nothing moves.
     std::string path;
     switch (row) {
-        case PresetRow::SCALE:  path = path_at(presetLists_.scale(true), index);  break;
-        case PresetRow::GROOVE: path = path_at(presetLists_.groove(true), index); break;
-        case PresetRow::REVERB: path = path_at(presetLists_.reverb(true), index); break;
-        case PresetRow::DELAY:  path = path_at(presetLists_.delay(true), index);  break;
-        case PresetRow::THEME:  path = path_at(presetLists_.theme(true), index);  break;
+        case PresetRow::SCALE:  path = path_at(presetLists_.scale(false), index);  break;
+        case PresetRow::GROOVE: path = path_at(presetLists_.groove(false), index); break;
+        case PresetRow::REVERB: path = path_at(presetLists_.reverb(false), index); break;
+        case PresetRow::DELAY:  path = path_at(presetLists_.delay(false), index);  break;
+        case PresetRow::THEME:  path = path_at(presetLists_.theme(false), index);  break;
         default:                return false;
     }
     if (path.empty()) return false;
